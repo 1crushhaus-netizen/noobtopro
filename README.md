@@ -1,6 +1,16 @@
 # noobtopro — engineering hand-off & reference
 
-> **This README is a hand-off document.** It is written so a brand-new contributor (including a fresh Claude Code session) can read it top-to-bottom and become productive without prior context. It covers what the platform is, the vision, how it's built, how to run/test/deploy it, the exact current state, the conventions we follow, and the roadmap. Keep it up to date as the source of truth.
+> ## 📌 This README is the source of truth — read it first, and keep it current
+>
+> **This is a hand-off document.** It is written so a brand-new contributor — **including any AI assistant or fresh Claude Code session** — can read it top-to-bottom and become productive with **no prior context**.
+>
+> **If you are an LLM / Claude Code session working on this repo:**
+> 1. **Read this README fully before doing anything else** and treat it as the authoritative description of the platform, its architecture, its conventions (§6), and its current state (§2).
+> 2. **Defer to this README** when it conflicts with your assumptions or general knowledge — it reflects decisions and gotchas (§16) specific to *this* project (e.g. why `vercel.json` pins the framework, why env vars must be project-level, why scoring uses a placeholder blend).
+> 3. **Follow the dev loop in §15** (branch → PR → CI "Test and build" → address Greptile → merge → verify) for every change.
+> 4. **Keep this README up to date.** When you change architecture, env vars, the data model, status, or conventions, update the relevant section in the same PR. A stale hand-off doc is worse than none — the next session relies on it being accurate.
+>
+> New here? Jump to [**Where to start (first three tasks)**](#where-to-start-first-three-tasks).
 
 **Prove what you know. Climb from noob to pro.**
 
@@ -8,6 +18,7 @@
 
 ## Table of contents
 
+- ⭐ [**Where to start (first three tasks)**](#where-to-start-first-three-tasks)
 1. [What it is & why](#1-what-it-is--why)
 2. [Current status & live links](#2-current-status--live-links)
 3. [Quickstart](#3-quickstart)
@@ -103,6 +114,29 @@ npm run dev                     # http://localhost:3000
 - If `npm install` complains about versions: `npm install next@latest react@latest react-dom@latest @supabase/supabase-js@latest`.
 
 Other commands: `npm test` (run tests once), `npm run test:watch`, `npm run build`, `npm start`, `npm run lint`.
+
+---
+
+## Where to start (first three tasks)
+
+If you (human or LLM) are picking this up cold, these are the three highest-value, well-scoped next tasks — ordered easy → meaningful. Each links to the section/doc you'll need. Follow the dev loop in [§15](#15-how-we-work-the-dev-loop) for all of them.
+
+### Task 1 — Turn on the shared concept-guide cache *(ops, ~15 min)*
+The code is shipped but inactive because `SUPABASE_SERVICE_ROLE_KEY` isn't set. A good first task to learn the env/deploy loop.
+- Add `SUPABASE_SERVICE_ROLE_KEY` (Supabase → Settings → API → `service_role`) in **Vercel → noobtopro project → Settings → Environment Variables** (mark **Sensitive**, all environments), then redeploy. See [§7](#7-environment-variables), [§16](#16-troubleshooting--gotchas).
+- **Verify:** `POST /api/learn` twice for a fresh concept (e.g. `{"subject":"math","concept":"chain rule"}`) — the second response should be `"cached": true`. Relevant code: `app/api/learn/route.js`, `lib/supabaseAdmin.js`.
+
+### Task 2 — Stand up GitHub & Discord sign-in *(integration)*
+The sign-in menu is already provider-agnostic and env-toggleable; this is configuration, not app code.
+- Follow **`AUTH_PROVIDERS.md`** end-to-end: create each OAuth app (callback = the Supabase callback URL in [§2](#2-current-status--live-links)), enable the provider in Supabase, then set `NEXT_PUBLIC_ENABLE_GITHUB` / `NEXT_PUBLIC_ENABLE_DISCORD = "true"` in Vercel and redeploy.
+- **Verify:** the "Continue with GitHub/Discord" buttons go from "Coming soon" to live and complete an OAuth round-trip. See [§9](#9-authentication). *(Do the Supabase step before flipping the flag, or the button errors on click.)*
+
+### Task 3 — Replace the placeholder score model *(core product code)*
+The biggest product win. `blend(prev, suggestion)` in `lib/scoring.js` is a flat 65/35 damped update that **ignores question difficulty and the per-attempt `reasoningScore`** — explicitly a placeholder.
+- Design a difficulty- and confidence-weighted update (a step toward an IRT/Elo model): use the practice question's `difficulty` and the grader's `reasoningScore` to weight how much an attempt moves the subject score. Keep `clampScore`/null-safety semantics.
+- Add tests in `test/scoring.test.js`; thread any new inputs through `/api/grade` → `submitPractice` in `components/Noobtopro.jsx`. See [§11](#11-scoring-model), [§17](#17-roadmap--known-limitations).
+
+> Smaller good-first-issues if you want to warm up: surface a "Learn this" shortcut from the practice feedback's "Concept you're missing" card; make the Profile tab's by-subject rows clickable into Learn; add a strict CSP (see §14).
 
 ---
 
