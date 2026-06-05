@@ -1,214 +1,391 @@
-# noobtopro
+# noobtopro — engineering hand-off & reference
+
+> **This README is a hand-off document.** It is written so a brand-new contributor (including a fresh Claude Code session) can read it top-to-bottom and become productive without prior context. It covers what the platform is, the vision, how it's built, how to run/test/deploy it, the exact current state, the conventions we follow, and the roadmap. Keep it up to date as the source of truth.
 
 **Prove what you know. Climb from noob to pro.**
 
-An assessment-first learning platform for math, physics, and chemistry. Instead of lessons-then-tests, noobtopro hands you problems, grades *how you reason* (not just the final answer) on a 0–100 scale per subject, and — when you're stuck — never hands over the solution. It nudges with a Socratic question and teaches only the concept you're missing.
+---
 
-What's in this repo:
+## Table of contents
 
-- **Groq** powers question generation and reasoning-grading (server-side; the key never reaches the browser).
-- A **Progress dashboard** charts points gained/lost, total points, and overall "PhD-level intelligence" over time.
-- **Supabase** provides Google sign-in **and** durable, per-user storage. The app also runs as a guest (local storage) before Supabase is configured.
+1. [What it is & why](#1-what-it-is--why)
+2. [Current status & live links](#2-current-status--live-links)
+3. [Quickstart](#3-quickstart)
+4. [Architecture](#4-architecture)
+5. [Repo map](#5-repo-map)
+6. [Conventions](#6-conventions)
+7. [Environment variables](#7-environment-variables)
+8. [Database & persistence](#8-database--persistence)
+9. [Authentication](#9-authentication)
+10. [Server API reference](#10-server-api-reference)
+11. [Scoring model](#11-scoring-model)
+12. [Frontend (the state machine)](#12-frontend-the-state-machine)
+13. [Testing](#13-testing)
+14. [Build, CI & deploy](#14-build-ci--deploy)
+15. [How we work (the dev loop)](#15-how-we-work-the-dev-loop)
+16. [Troubleshooting & gotchas](#16-troubleshooting--gotchas)
+17. [Roadmap & known limitations](#17-roadmap--known-limitations)
+18. [Further reading](#18-further-reading)
 
 ---
 
-## Quickstart
+## 1. What it is & why
 
-**Prerequisites:** Node.js 18.18+ and a free Groq API key from <https://console.groq.com/keys>.
+**noobtopro is a reasoning-first assessment + learning platform for mathematics, physics, and chemistry.** The thesis: *real understanding is measured by **how you reason**, not whether you produced the right final answer.* A wrong answer with sound, well-explained reasoning scores **higher** than a correct answer with no reasoning.
+
+It inverts the usual "learn then test" flow:
+
+1. **Diagnose** — three open problems (one per subject). You solve them and explain every step.
+2. **Get placed** — your *reasoning* is graded on a 5-part rubric and mapped to a **0–100 score per subject**.
+3. **Climb** — pick a subject, get problems calibrated to your level, and improve. Sound reasoning moves your score even when the final answer is wrong.
+
+**The unbreakable product rule: never hand over the answer.** When you're stuck, the app responds with a **Socratic hint** (one nudging question), a **micro-lesson** (the underlying *concept*, taught in general terms, never the solution to your specific problem), and a **correctness note** (whether your conclusion holds, without revealing the answer). The **Learn** tab extends this: click a weak concept and get a Socratic concept guide that teaches the idea and method — never a worked answer.
+
+**The vision / where this is going.** A trustworthy, standardized "where do I actually stand, and how do I get better" engine for STEM reasoning — eventually monetized. Several current pieces are explicitly *stop-gaps until monetization* (e.g. the in-memory rate limiter) or *placeholders pending a real model* (the score-blend should become an IRT/Elo system). "Standardization across users" is an active goal — e.g. concept guides are generated once and **shared across all accounts**.
+
+The three subjects (defined in `lib/scoring.js`):
+
+| Subject | key | glyph | color |
+|---|---|---|---|
+| Mathematics | `math` | ∑ | `#F2B441` gold |
+| Physics | `physics` | ∂ | `#5BD6C4` teal |
+| Chemistry | `chemistry` | ⌬ | `#FF7E74` coral |
+
+Score bands (global scale): **0–20** Absolute beginner · **20–40** Foundational · **40–60** Intermediate · **60–80** Advanced · **80–100** PhD-level.
+
+---
+
+## 2. Current status & live links
+
+**Deployed and live in production.** Hosted on Vercel; database on Supabase; LLM via Groq.
+
+| Thing | Value |
+|---|---|
+| **Production URL** | <https://noobtopro-umber.vercel.app> (also `noobtopro-1crushhaus-netizens-projects.vercel.app`, `noobtopro-git-main-…vercel.app`) |
+| **GitHub repo** | `1crushhaus-netizen/noobtopro` (default branch `main`, protected) |
+| **Vercel project** | `noobtopro` (team `1crushhaus-netizens-projects`); framework auto-detect is overridden by `vercel.json`; Node 24.x; **Deployment Protection is OFF** (public). Speed Insights enabled. |
+| **Supabase project** | ref `vwvhgnlgubctrgksyohr`, region `us-east-1`, org `noobtopro` |
+| **Supabase OAuth callback** | `https://vwvhgnlgubctrgksyohr.supabase.co/auth/v1/callback` (stable; set once per provider) |
+
+**What works today:**
+- ✅ Diagnostic → per-subject scoring → calibrated practice loop (Groq-backed).
+- ✅ Photo-of-work grading (vision model, graceful text fallback).
+- ✅ **Google sign-in** (configured + working), durable per-user storage with RLS.
+- ✅ **Guest mode** (no login): full flow stored in `localStorage`. On first sign-in, guest progress **migrates** into the account.
+- ✅ **Profile** tab (identity + stats + reset), **Progress** tab (charts), **Practice** + **Learn** tabs.
+- ✅ "Save your progress" modal after the guest diagnostic.
+- ✅ Per-IP rate limiting; security headers; error boundary.
+
+**Built but not yet activated (config only):**
+- ⏳ **Shared concept-guide cache** — code shipped; **inactive until `SUPABASE_SERVICE_ROLE_KEY` is set in Vercel.** Without it `/api/learn` still works but regenerates each time.
+- ⏳ **GitHub / Discord sign-in** — code is env-toggleable and ready; needs the OAuth apps + Supabase provider config + `NEXT_PUBLIC_ENABLE_*` flags (see `AUTH_PROVIDERS.md`).
+
+**Env vars currently set in Vercel (project-level):** `GROQ_API_KEY` (Sensitive), `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`. **Not set:** `SUPABASE_SERVICE_ROLE_KEY`, `NEXT_PUBLIC_ENABLE_GITHUB`, `NEXT_PUBLIC_ENABLE_DISCORD`.
+
+> Dashboard access (Vercel, Supabase, Groq, Google Cloud) lives in the owner's accounts — ask the repo owner for access.
+
+---
+
+## 3. Quickstart
+
+**The app boots with zero configuration** — it runs in guest mode (localStorage) and only shows a friendly error on the LLM features until you add a Groq key.
 
 ```bash
+git clone https://github.com/1crushhaus-netizen/noobtopro.git
+cd noobtopro
 npm install
-cp .env.example .env.local      # paste your GROQ_API_KEY
+cp .env.example .env.local      # then paste your GROQ_API_KEY (see §7)
 npm run dev                     # http://localhost:3000
 ```
 
-This runs the full experience in **guest mode** (progress saved in your browser). To add Google sign-in and durable, cross-device storage, do the Supabase setup below and add the two `NEXT_PUBLIC_SUPABASE_*` values to `.env.local`.
+- **Minimum to use the LLM features:** set `GROQ_API_KEY` in `.env.local` (free key at <https://console.groq.com/keys>).
+- **To exercise auth + persistence locally:** also set `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` (the local `.env.local` is gitignored; a copy already points at the live project).
+- If `npm install` complains about versions: `npm install next@latest react@latest react-dom@latest @supabase/supabase-js@latest`.
 
-> If `npm install` reports an unavailable version, run `npm install next@latest react@latest react-dom@latest @supabase/supabase-js@latest`.
+Other commands: `npm test` (run tests once), `npm run test:watch`, `npm run build`, `npm start`, `npm run lint`.
 
 ---
 
-## Architecture
+## 4. Architecture
+
+Next.js 15 (App Router) + React 19, deployed as serverless on Vercel. **Two reasons there is a backend:**
+1. **The Groq key must stay server-side.** The browser never talks to Groq; it posts to `/api/*`, and only the server (reading `GROQ_API_KEY`) calls Groq.
+2. **Per-user data needs an owner.** Supabase handles auth + storage; the browser talks to Supabase directly using the public anon key — safe because **Row-Level Security** scopes every row to its owner.
 
 ```
-Browser (components/)                Next.js server (app/api/)        Groq
-  Noobtopro.jsx ───fetch──▶  /api/generate ──▶ lib/groq.js ──▶ api.groq.com
-  ProgressDashboard.jsx      /api/grade    ──▶ lib/groq.js ──▶ (key from env)
-  lib/store.js ──────────────┐
-                             └───▶ Supabase (Postgres + Auth), RLS-scoped per user
-                                   (falls back to localStorage for guests)
+Browser (components/)                    Next.js server (app/api/)            Groq
+  Noobtopro.jsx ───fetch────▶  /api/generate ──▶ lib/groq.js ──────▶ api.groq.com
+  (SignIn/Profile/Learn/        /api/grade    ──▶ lib/groq.js          (GROQ_API_KEY,
+   ProgressDashboard)           /api/learn    ──▶ lib/groq.js           server-only)
+        │                            │  (rate-limited; reads/writes the
+        │                            │   shared concept_guides cache via
+        │                            │   lib/supabaseAdmin.js = service role)
+        │
+        └──lib/store.js──▶ Supabase (Postgres + Auth), RLS-scoped per user
+                            (falls back to localStorage for guests)
 ```
 
-Two reasons the app has a backend:
-
-1. **The Groq key must stay server-side.** If the browser called Groq directly, anyone could read the key. So the client posts to `/api/generate` and `/api/grade`, and only the server (reading `GROQ_API_KEY`) talks to Groq.
-2. **User data needs an owner.** Supabase handles auth and storage. Reads/writes go straight from the browser to Supabase using the public anon key — which is safe because **row-level security** restricts every row to the signed-in user.
-
-Key files:
-
-| File | Purpose |
-| --- | --- |
-| `lib/groq.js` | Server-only Groq client + grading/generation prompts. |
-| `app/api/{generate,grade}/route.js` | Groq-backed question generation and grading. |
-| `lib/scoring.js` | Subjects, bands, score-blend, total points, PhD index. |
-| `lib/supabase.js` | Browser Supabase client + Google sign-in/out. |
-| `lib/store.js` | Data layer: Supabase when signed in, localStorage for guests. |
-| `components/Noobtopro.jsx` | Diagnostic → scores → practice flow, nav, auth. |
-| `components/ProgressDashboard.jsx` | Progress tab + charts. |
+- **Client → `/api/*`** for anything that needs the Groq key (question generation, grading, concept guides).
+- **Client → Supabase** (via `lib/store.js`) for reads/writes of the signed-in user's own `scores`/`attempts` (RLS-protected). Guests use `localStorage`.
+- **Server → Supabase (service role)** only inside `/api/learn`, to read/write the shared `concept_guides` cache (an internal table no end-user can touch).
 
 ---
 
-## Supabase setup (database + Google sign-in)
+## 5. Repo map
 
-About 15 minutes. Google sign-in needs **your** Google OAuth credentials (only you can create those), which you paste into Supabase — no extra auth library required.
-
-**1. Create a project** at <https://supabase.com> (free tier is fine).
-
-**2. Create the tables** — open the project's **SQL Editor** and run:
-
-```sql
-create table scores (
-  user_id uuid references auth.users on delete cascade,
-  subject text check (subject in ('math','physics','chemistry')),
-  score int not null default 0,
-  weak_concepts text[] default '{}',
-  comment text,
-  updated_at timestamptz default now(),
-  primary key (user_id, subject)
-);
-
-create table attempts (
-  id bigint generated always as identity primary key,
-  user_id uuid references auth.users on delete cascade,
-  created_at timestamptz default now(),
-  type text not null,                 -- 'baseline' | 'attempt'
-  subject text,
-  reasoning_score int,
-  delta int,
-  new_score int,
-  total_after int,
-  phd_after int
-);
-
--- row-level security: each user can only touch their own rows
-alter table scores   enable row level security;
-alter table attempts enable row level security;
-create policy "own scores"   on scores   for all using (auth.uid() = user_id);
-create policy "own attempts" on attempts for all using (auth.uid() = user_id);
-```
-
-(The `using` clause is also enforced on insert, so a user can only write rows where `user_id = auth.uid()`. The app sets that automatically.)
-
-**3. Enable Google** — in Supabase: **Authentication → Providers → Google**. It shows you a callback URL like `https://<project-ref>.supabase.co/auth/v1/callback`.
-
-**4. Google Cloud Console** (<https://console.cloud.google.com>):
-- Create a project → **OAuth consent screen** (External; add your email as a test user).
-- **Credentials → Create credentials → OAuth client ID → Web application**.
-- Authorized redirect URI: paste the Supabase callback URL from step 3.
-- Copy the **Client ID** and **Client Secret** back into the Supabase Google provider form and save.
-
-**5. Add a redirect URL for your app** — in Supabase **Authentication → URL Configuration**, add `http://localhost:3000` (and your production URL) to the allowed redirect/site URLs.
-
-**6. Environment** — from Supabase **Settings → API**, copy into `.env.local`:
+Everything lives at the **repo root** (the app was flattened out of a nested folder so Vercel needs no Root Directory override — see §16).
 
 ```
-NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon public key>
+app/
+  layout.js            Root layout; <SpeedInsights/>; <html>/<body>
+  page.js              Renders <Noobtopro/>
+  error.js             App Router error boundary (no white-screen on crashes)
+  globals.css          All styles + design tokens (the .np-* system)
+  api/
+    generate/route.js  POST: diagnostic (3 Qs) or practice (1 Q) question generation
+    grade/route.js     POST: grade reasoning (diagnostic or practice); image-aware
+    learn/route.js     POST: Socratic concept guide; read-through shared cache
+components/
+  Noobtopro.jsx        THE app — one big client component; stage×view state machine
+  SignIn.jsx           OAuth sign-in menu (provider buttons; no email/password)
+  ProfileTab.jsx       Identity card + stats + "Reset my progress"
+  LearnTab.jsx         Weak-concept picker + Socratic guide renderer
+  ProgressDashboard.jsx  Charts (total over time, per-attempt deltas, by-subject)
+lib/
+  groq.js              Server-only Groq client + ALL system prompts (*_SYS)
+  scoring.js           SUBJECTS/ORDER/bands + clampScore/band/blend/totalPoints/phdIndex
+  rateLimit.js         In-memory per-IP fixed-window limiter (used by all 3 routes)
+  store.js             Data layer: Supabase when signed in, localStorage for guests
+  supabase.js          Browser Supabase client + auth helpers + PROVIDERS
+  supabaseAdmin.js     Server-only service-role client (concept cache) + conceptKey()
+db/
+  schema.sql           CANONICAL database DDL (tables, RLS, all RPCs) — run this to provision
+test/                  Vitest suite (see §13)
+.github/workflows/ci.yml   CI: "Test and build" (npm test → npm run build)
+next.config.js         reactStrictMode + security headers
+vercel.json            { "framework": "nextjs" } — pins the build (critical, see §16)
+vitest.config.js       node env + @/ alias + automatic JSX runtime
+jsconfig.json          @/* -> ./*  path alias
+.nvmrc                 Node 24
+.env.example           Documented env vars
+DEPLOYMENT_PLAN.md     Vercel/Supabase/Google setup playbook
+FEATURE_PLAN.md        Sign-in menu / Profile / Learn feature plan + decisions
+AUTH_PROVIDERS.md      Step-by-step GitHub/Discord enablement
 ```
 
-Restart `npm run dev`. The header button now reads **Sign in with Google**, and once signed in, scores and history persist to Supabase and follow you across devices.
+---
 
-> Guest (local) progress **is** migrated into the account on first sign-in, via the atomic `migrate_guest_data` Postgres RPC (see `db/schema.sql`). It only fills an empty account, so it never clobbers existing data.
+## 6. Conventions
+
+- **Plain JavaScript — no TypeScript.** Files are `.js`/`.jsx`. Don't introduce TS without a deliberate decision.
+- **Imports use the `@/` alias** (`@/lib/...`, `@/components/...`), mapped to repo root in `jsconfig.json` + `vitest.config.js`. Avoid relative `../../` imports.
+- **Server-only modules:** `lib/groq.js` and `lib/supabaseAdmin.js` read secrets and must **never** be imported by client components. `lib/supabase.js` is browser-only (it returns `null` server-side).
+- **Naming at the DB boundary:** Postgres columns are `snake_case` (`weak_concepts`, `reasoning_score`); the UI uses `camelCase` (`weakConcepts`, `reasoningScore`). `lib/store.js` maps between them (`rowToEvent`).
+- **CSS:** one stylesheet (`app/globals.css`), all classes prefixed `np-`, driven by CSS custom-property design tokens in `:root` (`--bg #0a0d13`, `--panel`, `--line`, `--text #ECECE4`, `--muted`, `--math/--phys/--chem`, `--display` Fraunces, `--ui` Hanken Grotesk, `--mono` JetBrains Mono). Inline `style={{}}` is used for per-subject color theming.
+- **Every change ships via a PR** that must pass the required **"Test and build"** check (§14, §15). `main` is protected.
+- **Commits** end with `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`. PRs end with the Claude Code generation footer.
 
 ---
 
-## Groq notes
+## 7. Environment variables
 
-- **Default model:** `llama-3.3-70b-versatile` (production, strong reasoning). Override with `GROQ_MODEL`; `openai/gpt-oss-120b` is a stronger reasoning option.
-- **JSON output:** requested via `response_format: { type: "json_object" }` with a robust-parse fallback.
-- **Photo of work:** routed to a vision model (`GROQ_VISION_MODEL`, default Llama 4 Scout — preview tier), with graceful text-only fallback.
-- **Rate limits / cost:** Groq's free tier is roughly ~30 req/min and ~6K tokens/min (see DEPLOYMENT_PLAN.md §6) — fine for prototyping; rapid testing can brush the per-minute token cap and return a `429`. Model IDs rotate — check <https://console.groq.com/docs/models>. (This is Groq's own limit; the app additionally enforces its own per-IP limit — see "API rate limiting" below.)
-- **Concept-guide cache:** `/api/learn` generates a Socratic guide per concept once and reuses it across all accounts via a shared, server-only `concept_guides` table (see `db/schema.sql`). Requires `SUPABASE_SERVICE_ROLE_KEY` to be set; without it the route still works but regenerates each time.
+NEXT_PUBLIC_* values are **inlined into the client bundle at build time** (a change requires a *redeploy*, not just a save). Non-prefixed values are **server-only secrets**. In Vercel, set everything at the **project level** (not Team/Shared — see §16) and scope to Production + Preview + Development.
 
----
-
-## API rate limiting
-
-`/api/generate` and `/api/grade` are guarded by a lightweight per-IP rate limiter (`lib/rateLimit.js`) — **30 requests/minute/IP**, returning `429` with a `Retry-After` header when exceeded. It blunts casual abuse and runaway loops that would otherwise burn the Groq quota.
-
-It is intentionally a **best-effort stop-gap**: the counter is in-memory, so it's per–serverless-instance and resets on cold start, and IP keys can be rotated. Replace it with a durable, shared limiter (e.g. [`@upstash/ratelimit`](https://github.com/upstash/ratelimit) on Upstash Redis) and per-account limits once the product is monetized and abuse is worth defending against properly.
-
----
-
-## How the Progress dashboard is computed
-
-- **Total points** = sum of the three subject scores (0–300).
-- **PhD-level intelligence** = mean of the three subject scores (0–100) — overall progress toward tri-subject mastery.
-- **Points gained/lost** = per-attempt change in a subject score after grading.
-- **Total points over time** = running total from your diagnostic baseline through every graded attempt.
-
-These live in `lib/scoring.js` — change them there to weight subjects differently or redefine "PhD-level intelligence."
+| Variable | Secret? | Required | What it does |
+|---|---|---|---|
+| `GROQ_API_KEY` | **Yes** (mark Sensitive) | For LLM features | Server-side Groq key. Without it, `/api/*` return a friendly 500. |
+| `GROQ_MODEL` | no | no | Override text model. Default `llama-3.3-70b-versatile`. |
+| `GROQ_VISION_MODEL` | no | no | Override vision model for photo grading. Default `meta-llama/llama-4-scout-17b-16e-instruct`. |
+| `NEXT_PUBLIC_SUPABASE_URL` | no (public) | For auth/persistence | Supabase API URL. Without it + the anon key, the app runs guest-only. |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | no (public, RLS-protected) | For auth/persistence | Supabase anon key. Public by design; RLS scopes rows to their owner. |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Yes** (mark Sensitive) | no | Enables the shared concept-guide cache in `/api/learn`. Server-only secret (Supabase → Settings → API → `service_role`). Unset = no cache (still works). |
+| `NEXT_PUBLIC_ENABLE_GITHUB` | no (public) | no | `"true"` shows the GitHub sign-in button. Set **only after** configuring GitHub in Supabase, else it errors on click. |
+| `NEXT_PUBLIC_ENABLE_DISCORD` | no (public) | no | Same, for Discord. |
 
 ---
 
-## Tests
+## 8. Database & persistence
 
-Unit tests run on [Vitest](https://vitest.dev/):
+### Provisioning (canonical source: `db/schema.sql`)
+To stand up the database from scratch (or reproduce it), **run `db/schema.sql` in the Supabase SQL Editor.** It is the single source of truth and contains the tables, RLS, and **all RPCs** — the app depends on the functions, not just the tables. (The live project is already provisioned; migrations were applied via the Supabase connector.) Then enable the redirect URLs / auth providers per `DEPLOYMENT_PLAN.md` / `AUTH_PROVIDERS.md`.
 
-```bash
-npm test          # run once (CI uses this)
-npm run test:watch
-```
+### Tables
+- **`scores`** — `(user_id uuid, subject text check(math|physics|chemistry), score int, weak_concepts text[], comment text, updated_at)`, PK `(user_id, subject)`.
+- **`attempts`** — `(id bigint identity PK, user_id, created_at, type text 'baseline'|'attempt', subject, reasoning_score, delta, new_score, total_after, phd_after)`. Indexed `(user_id, created_at, id)`.
+- **`concept_guides`** *(internal cache)* — `(subject, concept_key, concept, content jsonb, created_at)`, PK `(subject, concept_key)`. **RLS enabled with NO policies** → only the service role (server) can touch it; no end-user can read or pollute it.
 
-They cover the pure scoring logic (`lib/scoring.js`), the Groq client's JSON
-parsing + graceful degradation (`lib/groq.js`), and both API routes' input
-validation and model-output normalization (`app/api/*`) — including the
-regressions hardened during review (score clamping, `band`/`blend` edge cases,
-the image MIME allowlist, and free-text caps). API tests mock Groq's HTTP call,
-so no key or network is needed.
+`scores`/`attempts` have RLS: `for all to authenticated using ((select auth.uid()) = user_id) with check (...)` — each user only ever sees/writes their own rows.
 
-CI (`.github/workflows/ci.yml`) runs `npm test` then `npm run build` on every
-pull request. Enable branch protection on `main` and require the **Test and
-build** check so nothing merges unless both pass.
+### RPCs (Postgres functions, in `db/schema.sql`)
+- **`migrate_guest_data(p_scores jsonb, p_attempts jsonb)`** — atomic, idempotent, advisory-locked per user; migrates guest progress into an **empty** account in one transaction (first-writer-wins; never overwrites). Called on first sign-in. (Service-invoker → RLS applies.)
+- **`delete_user_data()`** — atomic delete of the caller's scores + attempts (Profile → "Reset my progress").
+- *(The concept cache is written/read by the server directly using the service role, not via RPC.)*
 
----
-
-## Deploy on Vercel
-
-This app has a server side — the `/api/generate` and `/api/grade` route handlers that call Groq — so it needs a host that runs Node, not a static host like GitHub Pages. Vercel runs it as-is and keeps `GROQ_API_KEY` server-side.
-
-1. **Import the repo** at <https://vercel.com> → *Add New… → Project*.
-2. **Leave the Root Directory as the repo root** (the default). The Next.js app — its `package.json`, `app/`, `lib/`, etc. — lives at the root of the repository, so Vercel auto-detects the framework as **Next.js** with no Root Directory override. (If you previously deployed when the app was nested in a `noobtopro/` subfolder and set Root Directory to `noobtopro`, clear that setting back to the repo root, or the build will fail to find the app.)
-3. **Add environment variables** (Project → Settings → Environment Variables), scoped to Production + Preview + Development — same names as [`.env.example`](./.env.example):
-   - `GROQ_API_KEY` — required for the LLM features.
-   - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` — optional; enable Google sign-in + storage.
-   - optional `GROQ_MODEL`, `GROQ_VISION_MODEL`.
-
-   Env-var changes apply only to a **new** deployment — redeploy after editing them.
-4. **Push to deploy.** Pushes to the production branch update production; every other branch/PR gets its own **preview URL**, which is ideal for testing fixes in isolation.
-
-For Supabase + Google sign-in (including adding your Vercel URLs to Supabase's redirect allow list, with a `*.vercel.app` wildcard so preview deployments can sign in too), see the Supabase section above and [`DEPLOYMENT_PLAN.md`](./DEPLOYMENT_PLAN.md) at the repo root.
+### `lib/store.js` — the dual-mode data layer
+The UI only ever calls these; they transparently use Supabase when signed in, else `localStorage` (`key "noobtopro:v1"`):
+- `loadState()` — returns `{ scores, history }` (or `{ error }` on a DB failure, so the UI doesn't mistake an error for "new user").
+- `saveScores(scores)` / `recordAttempt(evt)` — persist (error-checked; they throw so callers surface a banner).
+- `migrateGuestToAccount()` — single-flight wrapper around the `migrate_guest_data` RPC; sends a clamped payload; clears the guest copy on success.
+- `deleteAllUserData()` — calls the `delete_user_data` RPC.
+- `resetAll()` — clears the local guest view only.
 
 ---
 
-## Roadmap / known limitations
+## 9. Authentication
 
-1. **Grading consistency is the real risk.** LLM scores drift attempt-to-attempt; production needs anchored rubric exemplars, multiple grading samples averaged, and difficulty-tagged questions.
-2. **Adaptive diagnostic + a true score model (IRT)** so a 0–100 number is reliable, instead of one question per subject.
-3. **A concept graph per subject** so "weak on X" routes to the right next problems.
-4. ~~Local→account migration so guest progress carries over on first sign-in.~~ ✅ Done (atomic `migrate_guest_data` RPC).
+**OAuth-only by design — there is no email/password and no manual sign-up.** Identity is delegated entirely to providers (Google live; GitHub/Discord ready) via Supabase, so we never store credentials or carry that PII responsibility.
+
+- **`lib/supabase.js`** exports `PROVIDERS` (`google` always on; `github`/`discord` gated on `NEXT_PUBLIC_ENABLE_*`), `signInWithProvider(id)` (full-page OAuth redirect, `redirectTo: window.location.origin`), `signInWithGoogle`, `signOutUser`, `isSupabaseConfigured`, `getSupabase` (browser-only, lazy).
+- **Flow:** the **sign-in menu** (`stage: "signin"` → `SignIn.jsx`) shows a button per provider (disabled = "Coming soon"). After the OAuth redirect, `onAuthStateChange("SIGNED_IN")` runs `hydrate()`, which first calls `migrateGuestToAccount()` (guest → account) then `loadState()`. `onAuthStateChange` only re-hydrates on `SIGNED_IN`/`SIGNED_OUT` (not token refreshes).
+- **Guest-first:** you can do the whole diagnostic without logging in; on completion a modal prompts you to sign in to save, and your guest results migrate over.
+- **Enabling GitHub/Discord:** create the OAuth app (callback = the Supabase callback URL above), enable the provider in Supabase, then set `NEXT_PUBLIC_ENABLE_GITHUB`/`…DISCORD=true` and redeploy. Full steps in `AUTH_PROVIDERS.md`.
 
 ---
 
-## Appendix: why Supabase (and the alternatives considered)
+## 10. Server API reference
 
-The data is small and simple: three subject scores per user plus an append-only attempt log. The differentiators were how cleanly each option also handles Google sign-in, the free tier, and ops.
+All three routes are `POST`, `dynamic = "force-dynamic"`, **rate-limited per IP** (`lib/rateLimit.js`: 30 req/min/IP, in-memory; returns `429` + `Retry-After`), validate input (→ `400`), normalize model output, and return a **generic `500`** (the real Groq error is logged server-side, never leaked).
 
-| Option | DB | Auth | Trade-off |
-| --- | --- | --- | --- |
-| **Supabase** (chosen) | Managed Postgres | Built-in (incl. Google) | One vendor; RLS has a small learning curve; free projects pause when idle. |
-| Neon + Auth.js | Serverless Postgres | Auth.js (NextAuth) | You wire auth yourself and manage migrations. |
-| Firebase | Firestore (NoSQL) | Firebase Auth | NoSQL is clunkier for time-series history and SQL-style aggregates. |
-| Turso | SQLite at the edge | (separate) | Still need separate auth; smaller ecosystem. |
+### `POST /api/generate`
+- **Diagnostic:** `{ "kind": "diagnostic" }` → `{ questions: [{subject, topic, question} × 3] }` (one per subject).
+- **Practice:** `{ "kind": "practice", "subject": "math"|"physics"|"chemistry", "score": int, "weakConcepts": string[] }` → `{ subject, topic, targetConcept, difficulty, question }`. Subject validated via `ORDER.includes` (prototype-safe); `weakConcepts` capped.
 
-Supabase won because it collapses two of the three requirements (database + Google sign-in) into one Postgres service that maps cleanly to the history data.
+### `POST /api/grade`
+- `{ kind: "diagnostic"|"practice", subject, question, [targetConcept], [score], reasoning, [image: { mime, data(base64) }] }`.
+- Free-text fields capped (~12k chars); image validated (allowlisted MIME jpeg/png/webp/gif, base64, ~3 MB cap).
+- **Diagnostic →** `{ subject, score(0–100), weakConcepts[], comment }`.
+- **Practice →** `{ reasoningScore(0–100), rubric{conceptual_understanding, logical_structure, strategy, execution_accuracy, communication: 0–4}, correctnessNote, socraticHint, microLesson, weakConcepts[], newScoreSuggestion }`. All scores clamped, rubric normalized, `weakConcepts` coerced to a string array.
+
+### `POST /api/learn`
+- `{ subject, concept }` (a `score` field is accepted but **ignored** — guides are level-neutral and standardized).
+- **Read-through shared cache:** normalizes the concept to a key (`conceptKey`: lowercase/trim/collapse-space/strip-quotes); on a hit returns the stored guide (`cached:true`) **without calling Groq**; on a miss generates via Groq, normalizes, and stores first-writer-wins (`cached:false`). Cache only active when `SUPABASE_SERVICE_ROLE_KEY` is set.
+- **Response:** `{ subject, concept, overview, keyIdeas[], socraticQuestions[], pitfalls[], tryThis, cached }`.
+
+### The Groq client (`lib/groq.js`)
+- Models: text `llama-3.3-70b-versatile`, vision `meta-llama/llama-4-scout-17b-16e-instruct` (overridable via env).
+- All system prompts live here: `DIAG_GEN_SYS`, `DIAG_GRADE_SYS`, `PRACTICE_GEN_SYS`, `PRACTICE_GRADE_SYS`, `LEARN_SYS`. Every grading/teaching prompt forbids revealing answers.
+- `groqJSON({system, user, image})` — calls Groq (JSON mode, with a robust fallback that strips ``` fences and does a **balanced-brace, string-aware** extraction), and on an attached image uses the vision model with graceful text-only fallback.
+
+---
+
+## 11. Scoring model (`lib/scoring.js`)
+
+- `clampScore(v)` — coerce to int `[0,100]`, or **`null`** for no-signal (null/`""`/NaN). Critical: prevents `Number(null)===0` from silently zeroing scores.
+- `band(s)` — score → band name (robust to non-numbers).
+- `blend(prev, suggestion)` — damped update `round(prev*0.65 + sug*0.35)`; a null/garbage suggestion keeps `prev`. **Placeholder — replace with an IRT/Elo model** that accounts for question difficulty and the per-attempt `reasoningScore`.
+- `totalPoints(scores)` — sum of the three subject scores (0–300).
+- `phdIndex(scores)` — mean of the three (0–100); the headline "PhD-level intelligence" number.
+
+---
+
+## 12. Frontend (the state machine)
+
+The entire app is one big client component, **`components/Noobtopro.jsx`**, driven by two independent state variables:
+
+- **`stage`**: `intro | signin | diagnostic | scoring | dashboard | practice` — *where you are in the core flow.*
+- **`view`**: `practice | learn | progress | profile` — *which tab is selected.*
+
+The render switch resolves in this order: `stage === "signin"` (sign-in menu, full-screen) → `view === "profile"` (ProfileTab) → `view === "learn"` (LearnTab) → `view === "progress"` (ProgressDashboard) → else the **Practice flow** (the `stage` machine: intro → diagnostic → scoring loader → dashboard "Where you stand" → practice Q&A + feedback).
+
+Key flows / handlers:
+- `beginDiagnostic()` → `/api/generate` (diagnostic) → answer each → `submitDiagnostic()` grades all three in parallel → dashboard. As a guest, finishing pops the **"save your progress" modal** (dimmed `inert` background, scroll-lock, focus trap, Escape/backdrop close).
+- `startPractice(subject)` / `submitPractice()` → `/api/generate` + `/api/grade`; blends the new score; renders the rubric + Socratic hint + micro-lesson (no answer).
+- `openLearn(subject, concept)` → switches to the Learn tab and fetches `/api/learn` (guarded by a monotonic `learnRun` token so rapid clicks can't show a stale guide).
+- The dashboard's **"Work on" weak-concept tags are buttons** → they call `openLearn`.
+- `hydrate()` (run-token guarded) loads state on mount + on `SIGNED_IN`/`SIGNED_OUT`; image previews use `URL.createObjectURL` and are revoked to avoid leaks.
+
+Components: **SignIn** (provider buttons), **ProfileTab** (identity + stats + confirm-guarded reset), **LearnTab** (concept picker + guide sections), **ProgressDashboard** (dependency-free inline SVG charts).
+
+---
+
+## 13. Testing
+
+**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **~83 tests across 10 files**, all passing.
+
+| File | Covers |
+|---|---|
+| `test/scoring.test.js` | clampScore/band/blend/totalPoints/phdIndex incl. regressions |
+| `test/groq.test.js` | JSON extraction (fences, prose, braces-in-strings), fallback retry, errors |
+| `test/rateLimit.test.js` | window limit, reset, per-key, memory bound (enforceCap) |
+| `test/api-generate.test.js` | validation/400s, prototype-key rejection, non-leaking 500, weakConcepts cap |
+| `test/api-grade.test.js` | validation, MIME/base64, score/rubric normalization, non-leaking 500 |
+| `test/api-learn.test.js` | validation, normalization, **cache hit/miss/write-fail/key-normalization** |
+| `test/store.test.js` | migration payload clamping, no-op paths, delete RPC (mocked Supabase) |
+| `test/signin.test.jsx` | provider buttons, OAuth-only (no password field), enabled-provider |
+| `test/profile.test.jsx` | identity, empty state, stats, confirm-guarded reset |
+| `test/learn.test.jsx` | empty state, concept select, loading, guidance render |
+
+**Mocking patterns:** Groq calls are mocked by stubbing global `fetch`; Supabase is mocked via `vi.mock("@/lib/...")` with `vi.hoisted`; components use `@testing-library/react`. No network or real keys are needed.
+
+---
+
+## 14. Build, CI & deploy
+
+- **Stack:** Next 15 App Router, React 19, Node 24 (`.nvmrc`; Vercel uses 24.x).
+- **`vercel.json`** pins `{ "framework": "nextjs" }` — **do not remove** (see §16).
+- **`next.config.js`** sets `reactStrictMode` + security headers (`X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy`, HSTS, `Permissions-Policy`). A strict CSP is a deliberate TODO.
+- **CI** (`.github/workflows/ci.yml`): on every PR + push to `main`, the **"Test and build"** job runs `npm ci` → `npm test` → `npm run build` (build runs with empty secrets to prove guest mode works). **`main` is branch-protected to require this check.**
+- **Deploy:** Vercel auto-deploys `main` to production and every branch/PR to a preview URL. **Env-var changes require a new deployment to take effect.**
+
+---
+
+## 15. How we work (the dev loop)
+
+This project is built collaboratively with **Claude Code**, and the loop is worth following:
+
+1. **Branch** off `main` (`feat/...`, `fix/...`). Never commit straight to `main` (it's protected).
+2. **Implement + test locally** (`npm test`, `npm run build` both green).
+3. **Open a PR.** CI runs the required **"Test and build"** check.
+4. **Greptile** auto-reviews the PR (the `greptile-apps[bot]`). We **address every comment**, push the fix, then **reply on each thread and resolve it**. (For substantive features we *also* run an internal adversarial multi-agent review before opening the PR and fold its findings in.)
+5. **Squash-merge** once CI is green and threads are resolved.
+6. **Vercel auto-deploys**; we **verify on the live URL** (and re-check the Supabase advisors for DB changes).
+7. Commit/PR trailers as in §6.
+
+History of what's shipped is in `git log` (PRs #2–#15): flatten-for-Vercel, audit hardening (rounds 2–3 + a full-repo audit), rate limiting, the OAuth sign-in menu + Profile + guest→account migration, the save-progress modal, GitHub/Discord toggles, the Learn tab + `/api/learn`, and the shared concept-guide cache.
+
+---
+
+## 16. Troubleshooting & gotchas
+
+**Hard-won lessons — read these before debugging deploys/env:**
+
+- **Vercel env vars must be at the PROJECT level, not Team/"Shared".** Team-level "Shared" vars don't reach the project build unless linked; symptom: the app behaves as if the vars are unset. Add them under the `noobtopro` *project's* Settings → Environment Variables.
+- **NEXT_PUBLIC_* vars are baked in at BUILD time.** After changing one, you must **redeploy** — saving alone does nothing. Verify by grepping the deployed JS bundle for the value.
+- **`vercel.json` framework pin is load-bearing.** Without `{ "framework": "nextjs" }` Vercel may treat the app as "Other" and fail with *"No Output Directory named 'public'"*. Keep it.
+- **App must be at the repo root** (it is). If a Vercel project was ever configured with Root Directory = `noobtopro`, clear it.
+- **Supabase free tier pauses when idle (~7 days)** → reads start failing; any dashboard activity wakes it. `loadState()` surfaces such errors instead of wiping the user to "new user".
+- **Groq free tier ≈ 30 req/min / ~6K tokens/min** → rapid testing can `429`; back off a few seconds.
+- **A GitHub/Discord button that errors on click** = the `NEXT_PUBLIC_ENABLE_*` flag was set before the provider was configured in Supabase. Do the Supabase step first.
+- **Concept cache returns `cached:false` always** = `SUPABASE_SERVICE_ROLE_KEY` isn't set in Vercel.
+- **`npm audit`** shows dev-only (vitest/esbuild) and a transitive postcss-via-Next moderate; the "fix" downgrades Next to v9, so we **accept** these rather than break the build.
+
+---
+
+## 17. Roadmap & known limitations
+
+**Activation (config only, no code):**
+- Set `SUPABASE_SERVICE_ROLE_KEY` → turns on the shared concept-guide cache.
+- Configure + enable GitHub & Discord providers → flip `NEXT_PUBLIC_ENABLE_*`.
+
+**Product / model:**
+- **Replace `blend()` with a real score model (IRT/Elo)** that weights by question difficulty and per-attempt reasoning quality — the current 65/35 damped blend is a placeholder.
+- Anchored rubric exemplars + multiple grading samples averaged (grading consistency is the real risk — LLM scores drift).
+- Adaptive diagnostic; a **concept graph** per subject so "weak on X" routes to the right next problems.
+- Data export; auto-resume into the diagnostic after the OAuth redirect (currently the redirect resets state).
+
+**Hardening / infra (deferred, documented):**
+- **Durable rate limiter** (e.g. `@upstash/ratelimit`) + per-account limits to replace the in-memory one — do before monetizing / before heavy public traffic.
+- **Server-side auth enforcement** on the API routes (today they're rate-limited + RLS-scoped, but not per-user authenticated).
+- **Atomicity:** practice `saveScores` + `recordAttempt` aren't a single transaction; `activeUserId` has a small TOCTOU window; diagnostic grading is all-or-nothing (one failed grade discards the others) — all known/low-severity.
+- **Strict CSP**; CI lint enforcement (ESLint isn't configured yet); guest-localStorage-full signalling.
+
+---
+
+## 18. Further reading
+
+- **`db/schema.sql`** — canonical database (tables, RLS, RPCs). Run this to provision.
+- **`DEPLOYMENT_PLAN.md`** — full Vercel / Supabase / Google OAuth setup playbook (phased).
+- **`AUTH_PROVIDERS.md`** — exact GitHub & Discord enablement steps.
+- **`FEATURE_PLAN.md`** — the sign-in-menu / Profile / Learn feature plan + the decisions behind the guest-first flow.
+- **`.env.example`** — documented env vars.
+- **`git log`** (PRs #2–#15) — the full build history and rationale.
