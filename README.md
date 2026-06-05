@@ -131,6 +131,14 @@ Restart `npm run dev`. The header button now reads **Sign in with Google**, and 
 
 ---
 
+## API rate limiting
+
+`/api/generate` and `/api/grade` are guarded by a lightweight per-IP rate limiter (`lib/rateLimit.js`) — **30 requests/minute/IP**, returning `429` with a `Retry-After` header when exceeded. It blunts casual abuse and runaway loops that would otherwise burn the Groq quota.
+
+It is intentionally a **best-effort stop-gap**: the counter is in-memory, so it's per–serverless-instance and resets on cold start, and IP keys can be rotated. Replace it with a durable, shared limiter (e.g. [`@upstash/ratelimit`](https://github.com/upstash/ratelimit) on Upstash Redis) and per-account limits once the product is monetized and abuse is worth defending against properly.
+
+---
+
 ## How the Progress dashboard is computed
 
 - **Total points** = sum of the three subject scores (0–300).

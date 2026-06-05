@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { POST } from "@/app/api/grade/route";
+import { _resetRateLimits } from "@/lib/rateLimit";
 
 // Build a POST Request the route handler can consume.
 function req(bodyObjOrString) {
@@ -26,6 +27,7 @@ function mockGroqReturning(payload) {
 
 beforeEach(() => {
   process.env.GROQ_API_KEY = "test-key";
+  _resetRateLimits();
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -89,6 +91,24 @@ describe("POST /api/grade — input validation (no network)", () => {
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toMatch(/Unsupported image type/i);
+  });
+});
+
+describe("POST /api/grade — rate limiting", () => {
+  it("returns 429 with Retry-After once the per-IP limit is exceeded", async () => {
+    mockGroqReturning({ subject: "math", score: 50, weakConcepts: [], comment: "" });
+    const headers = { "Content-Type": "application/json", "x-real-ip": "5.5.5.5" };
+    const mk = () =>
+      new Request("http://test.local/api/grade", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ kind: "diagnostic", subject: "math", question: "Q" }),
+      });
+    let res;
+    // 30/min is the limit; fire 31 from one IP. Bad-input requests still count.
+    for (let i = 0; i < 31; i++) res = await POST(mk());
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBeTruthy();
   });
 });
 
