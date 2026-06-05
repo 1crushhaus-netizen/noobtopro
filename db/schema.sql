@@ -137,3 +137,22 @@ end;
 $$;
 
 grant execute on function public.delete_user_data() to authenticated;
+
+-- ---- shared concept-guide cache --------------------------------------------
+-- /api/learn generates a Socratic guide per concept ONCE, then reuses it for
+-- every account (standardized + saves Groq calls). This table is INTERNAL:
+-- RLS is enabled with NO policies, so no end user (anon or authenticated) can
+-- read or write it. The API route accesses it server-side with the
+-- SUPABASE_SERVICE_ROLE_KEY (which bypasses RLS). If that key is unset, caching
+-- is simply skipped — the app still works, generating a guide each time.
+create table if not exists public.concept_guides (
+  subject text not null check (subject in ('math','physics','chemistry')),
+  concept_key text not null,             -- normalized: lower(trim(collapse ws))
+  concept text not null,                 -- canonical display phrasing
+  content jsonb not null,                -- the full normalized guide
+  created_at timestamptz not null default now(),
+  primary key (subject, concept_key)
+);
+alter table public.concept_guides enable row level security;
+-- (No policies on purpose — service-role-only access. Writes use first-writer-
+-- wins: insert ... on conflict do nothing, so a guide is generated once and frozen.)

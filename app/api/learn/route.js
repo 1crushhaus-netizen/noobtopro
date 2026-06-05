@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { groqJSON, LEARN_SYS } from "@/lib/groq";
 import { ORDER, clampScore } from "@/lib/scoring";
 import { rateLimit, clientKey } from "@/lib/rateLimit";
+import { getSupabaseAdmin, conceptKey } from "@/lib/supabaseAdmin";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +38,28 @@ export async function POST(req) {
   }
   const safeConcept = cap(concept.trim(), 200);
   const safeScore = clampScore(score) ?? 0;
+  const key = conceptKey(safeConcept);
+  const sb = getSupabaseAdmin(); // null when SUPABASE_SERVICE_ROLE_KEY isn't set
 
+  // 1) Shared cache hit → return the standardized guide without calling Groq.
+  if (sb) {
+    try {
+      const { data: row } = await sb
+        .from("concept_guides")
+        .select("content")
+        .eq("subject", subject)
+        .eq("concept_key", key)
+        .maybeSingle();
+      if (row && row.content && typeof row.content === "object") {
+        return NextResponse.json({ ...row.content, cached: true });
+      }
+    } catch (e) {
+      console.error("[/api/learn] cache read", e); // fall through to generation
+    }
+  }
+
+  // 2) Miss → generate with Groq, normalize for safe rendering.
+  let guide;
   try {
     const data = await groqJSON({
       system: LEARN_SYS,
@@ -47,8 +69,7 @@ export async function POST(req) {
         `Learner's current level: ${safeScore}/100\n\n` +
         `Teach this concept now — guide, don't solve.`,
     });
-    // Normalize so the UI can always render safely.
-    return NextResponse.json({
+    guide = {
       subject,
       concept: safeConcept,
       overview: cap(data?.overview, 1500),
@@ -56,7 +77,7 @@ export async function POST(req) {
       socraticQuestions: capArr(data?.socraticQuestions, 5, 500),
       pitfalls: capArr(data?.pitfalls, 5, 500),
       tryThis: cap(data?.tryThis, 800),
-    });
+    };
   } catch (e) {
     console.error("[/api/learn]", e);
     return NextResponse.json(
@@ -64,4 +85,21 @@ export async function POST(req) {
       { status: 500 }
     );
   }
+
+  // 3) Store for everyone (best-effort, first-writer-wins). Only worth caching a
+  // guide with real content.
+  if (sb && guide.overview) {
+    try {
+      await sb
+        .from("concept_guides")
+        .upsert(
+          { subject, concept_key: key, concept: safeConcept, content: guide },
+          { onConflict: "subject,concept_key", ignoreDuplicates: true }
+        );
+    } catch (e) {
+      console.error("[/api/learn] cache write", e); // non-fatal
+    }
+  }
+
+  return NextResponse.json({ ...guide, cached: false });
 }

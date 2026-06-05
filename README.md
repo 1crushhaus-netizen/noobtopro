@@ -128,6 +128,7 @@ Restart `npm run dev`. The header button now reads **Sign in with Google**, and 
 - **JSON output:** requested via `response_format: { type: "json_object" }` with a robust-parse fallback.
 - **Photo of work:** routed to a vision model (`GROQ_VISION_MODEL`, default Llama 4 Scout — preview tier), with graceful text-only fallback.
 - **Rate limits / cost:** Groq's free tier is roughly ~30 req/min and ~6K tokens/min (see DEPLOYMENT_PLAN.md §6) — fine for prototyping; rapid testing can brush the per-minute token cap and return a `429`. Model IDs rotate — check <https://console.groq.com/docs/models>. (This is Groq's own limit; the app additionally enforces its own per-IP limit — see "API rate limiting" below.)
+- **Concept-guide cache:** `/api/learn` generates a Socratic guide per concept once and reuses it across all accounts via a shared, server-only `concept_guides` table (see `db/schema.sql`). Requires `SUPABASE_SERVICE_ROLE_KEY` to be set; without it the route still works but regenerates each time.
 
 ---
 
