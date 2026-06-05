@@ -127,7 +127,7 @@ Restart `npm run dev`. The header button now reads **Sign in with Google**, and 
 - **Default model:** `llama-3.3-70b-versatile` (production, strong reasoning). Override with `GROQ_MODEL`; `openai/gpt-oss-120b` is a stronger reasoning option.
 - **JSON output:** requested via `response_format: { type: "json_object" }` with a robust-parse fallback.
 - **Photo of work:** routed to a vision model (`GROQ_VISION_MODEL`, default Llama 4 Scout — preview tier), with graceful text-only fallback.
-- **Rate limits / cost:** the free tier (~1K req/min on most models) is fine for prototyping. Model IDs rotate — check <https://console.groq.com/docs/models>.
+- **Rate limits / cost:** Groq's free tier is roughly ~30 req/min and ~6K tokens/min (see DEPLOYMENT_PLAN.md §6) — fine for prototyping; rapid testing can brush the per-minute token cap and return a `429`. Model IDs rotate — check <https://console.groq.com/docs/models>. (This is Groq's own limit; the app additionally enforces its own per-IP limit — see "API rate limiting" below.)
 
 ---
 
@@ -187,22 +187,6 @@ This app has a server side — the `/api/generate` and `/api/grade` route handle
 4. **Push to deploy.** Pushes to the production branch update production; every other branch/PR gets its own **preview URL**, which is ideal for testing fixes in isolation.
 
 For Supabase + Google sign-in (including adding your Vercel URLs to Supabase's redirect allow list, with a `*.vercel.app` wildcard so preview deployments can sign in too), see the Supabase section above and [`DEPLOYMENT_PLAN.md`](./DEPLOYMENT_PLAN.md) at the repo root.
-
----
-
-## Push this to GitHub
-
-Delivered as files (I can't push to your repo without your GitHub login, which I won't handle). From the unzipped folder:
-
-```bash
-cd noobtopro
-git init && git add . && git commit -m "Initial commit: noobtopro full-stack scaffold (Groq + Supabase)"
-git branch -M main
-git remote add origin https://github.com/1crushhaus-netizen/noobtopro.git
-git push -u origin main
-```
-
-The push prompts for your GitHub credentials (use a Personal Access Token or SSH key) — that's you authenticating, which is correct.
 
 ---
 

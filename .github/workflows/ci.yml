@@ -1,7 +1,8 @@
 name: CI
 
 # Runs on every PR and on pushes to main. Configure branch protection on `main`
-# to require the "test" job below, so nothing merges unless tests + build pass.
+# to require the "Test and build" status check below, so nothing merges unless
+# tests + build pass. (That is the job's `name:`, which is the check context.)
 on:
   pull_request:
   push:

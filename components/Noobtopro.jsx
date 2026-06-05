@@ -133,6 +133,7 @@ function AnswerComposer({ value, onText, img, onAttach, onRemoveImg, onSubmit, s
     <div className="np-card" style={{ padding: 0, overflow: "hidden" }}>
       <textarea
         className="np-input"
+        aria-label="Your reasoning"
         value={value}
         onChange={(e) => onText(e.target.value)}
         placeholder={placeholder || "Show your full reasoning — every step, not just the answer."}
@@ -239,9 +240,12 @@ export default function Noobtopro() {
     hydrate();
     if (!sb) return;
     sb.auth.getUser().then(({ data }) => setUser((data && data.user) || null));
-    const { data: sub } = sb.auth.onAuthStateChange((_e, session) => {
+    const { data: sub } = sb.auth.onAuthStateChange((event, session) => {
       setUser((session && session.user) || null);
-      hydrate();
+      // Only reload data when the identity actually changes. TOKEN_REFRESHED /
+      // USER_UPDATED / INITIAL_SESSION fire routinely and would otherwise re-run
+      // hydrate mid-attempt (the mount call above already covers session restore).
+      if (event === "SIGNED_IN" || event === "SIGNED_OUT") hydrate();
     });
     return () => sub && sub.subscription && sub.subscription.unsubscribe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -274,9 +278,18 @@ export default function Noobtopro() {
     setBusy(true);
     try {
       const data = await api("/api/generate", { kind: "diagnostic" });
-      const qs = (data.questions || []).filter((q) => SUBJECTS[q.subject]);
-      if (qs.length < 3) throw new Error("Could not generate a full diagnostic. Please try again.");
-      qs.sort((a, b) => ORDER.indexOf(a.subject) - ORDER.indexOf(b.subject));
+      // Keep the FIRST question per known subject, then require exactly one for
+      // each of the three. Guards against the model returning duplicates or an
+      // unknown subject, which would otherwise crash the dashboard (scores[k]
+      // undefined). ORDER.includes avoids inherited-key matches.
+      const bySubject = {};
+      for (const q of data.questions || []) {
+        if (q && ORDER.includes(q.subject) && !bySubject[q.subject]) bySubject[q.subject] = q;
+      }
+      const qs = ORDER.map((s) => bySubject[s]).filter(Boolean);
+      if (qs.length < ORDER.length) {
+        throw new Error("Could not generate a full diagnostic. Please try again.");
+      }
       const init = {};
       qs.forEach((q) => (init[q.subject] = { text: "", img: null }));
       setQuestions(qs);
@@ -297,7 +310,13 @@ export default function Noobtopro() {
     setAnswers((a) => ({ ...a, [curSubject]: { ...a[curSubject], text: t } }));
   }
   async function attachCur(file) {
-    const data = await fileToBase64(file);
+    let data;
+    try {
+      data = await fileToBase64(file);
+    } catch {
+      setError("Couldn't read that image. Please try a different file.");
+      return;
+    }
     // Create the object URL OUTSIDE the updater (Strict Mode runs updaters twice
     // and would mint a discarded, leaked blob URL each time). Revoke the previous
     // preview from INSIDE the updater, reading the latest state — so two rapid
@@ -341,7 +360,7 @@ export default function Noobtopro() {
       results.forEach(([k, v]) => (obj[k] = v));
       await saveScores(obj);
       const st = await recordAttempt({ type: "baseline", t: now(), totalAfter: totalPoints(obj), phdAfter: phdIndex(obj) });
-      setHistory(st.history || []);
+      if (st && st.history) setHistory(st.history); // null = couldn't refresh; keep current
       setScores(obj);
       setStage("dashboard");
     } catch (e) {
@@ -357,6 +376,7 @@ export default function Noobtopro() {
     setFeedback(null);
     setScoreDelta(null);
     setPText("");
+    revokePreview(pImg); // release any preview from a previous practice question
     setPImg(null);
     setPQuestion(null);
     setStage("practice");
@@ -369,6 +389,10 @@ export default function Noobtopro() {
         score: s.score,
         weakConcepts: s.weakConcepts || [],
       });
+      // Guard against malformed model output so we don't render an empty prompt.
+      if (!data || typeof data.question !== "string" || !data.question.trim()) {
+        throw new Error("Could not generate a question. Please try again.");
+      }
       setPQuestion(data);
     } catch (e) {
       setError(e.message || "Could not generate a question.");
@@ -378,7 +402,13 @@ export default function Noobtopro() {
   }
 
   async function attachP(file) {
-    const data = await fileToBase64(file);
+    let data;
+    try {
+      data = await fileToBase64(file);
+    } catch {
+      setError("Couldn't read that image. Please try a different file.");
+      return;
+    }
     // URL created outside the updater; previous preview revoked inside it from the
     // latest state, so rapid double-attaches can't leak the first blob (see attachCur).
     const preview = URL.createObjectURL(file);
@@ -422,7 +452,7 @@ export default function Noobtopro() {
         totalAfter: totalPoints(updatedScores),
         phdAfter: phdIndex(updatedScores),
       });
-      setHistory(st.history || []);
+      if (st && st.history) setHistory(st.history); // null = couldn't refresh; keep current
       setScores(updatedScores);
       setScoreDelta(updatedScore - prev.score);
       setFeedback(r);
