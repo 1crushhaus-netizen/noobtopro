@@ -39,13 +39,33 @@ describe("groqJSON", () => {
   });
 
   it("parses valid JSON whose string values contain braces", async () => {
-    // The old first-{/last-} slice grabbed the brace inside the string and broke.
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => reply('{"microLesson":"use the set {a, b}","score":80}'))
     );
     const out = await groqJSON({ system: "s", user: "u" });
     expect(out).toEqual({ microLesson: "use the set {a, b}", score: 80 });
+  });
+
+  it("extracts the object when trailing prose contains a stray brace", async () => {
+    // The genuinely-broken case: a naive first-"{"/last-"}" slice grabs the "}"
+    // from "{1}" in the trailing prose and fails to parse. The balanced scan
+    // stops at the object's real closing brace.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => reply('{"score":80,"microLesson":"see fig 1"} see figure {1}'))
+    );
+    const out = await groqJSON({ system: "s", user: "u" });
+    expect(out).toEqual({ score: 80, microLesson: "see fig 1" });
+  });
+
+  it("ignores a stray brace in leading prose", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => reply('note {see below}: {"a":1}'))
+    );
+    const out = await groqJSON({ system: "s", user: "u" });
+    expect(out).toEqual({ a: 1 });
   });
 
   it("falls back to a non-JSON-mode retry when the first response is unparseable", async () => {
