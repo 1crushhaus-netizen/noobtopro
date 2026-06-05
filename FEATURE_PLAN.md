@@ -42,7 +42,7 @@ Today the app runs fully as a **guest** (localStorage): `beginDiagnostic()` (`co
 
 - **Begin diagnostic** runs immediately for everyone — no login required to start.
 - On reaching the **dashboard** as a guest, a **"Sign in to save your progress"** card appears → opens the **Sign-in menu** (`stage: "signin"`).
-- After sign-in, the guest's localStorage scores/attempts **migrate into the account** (`migrateGuestToAccount()`), into an empty account only, preserving the original attempt timeline.
+- After sign-in, the guest's localStorage scores/attempts **migrate into the account** (`migrateGuestToAccount()` → the atomic `migrate_guest_data` Postgres RPC in [`db/schema.sql`](./db/schema.sql), which must be deployed to Supabase), into an empty account only, preserving the original attempt timeline.
 - The Sign-in menu is also reachable from the header **Sign in** button.
 
 ### 5.2 The Sign-in menu (`stage: "signin"` → `components/SignIn.jsx`)

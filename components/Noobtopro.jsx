@@ -217,7 +217,12 @@ export default function Noobtopro() {
   // Where to return when the sign-in menu is dismissed (so opening it mid-flow
   // and pressing Back doesn't discard an in-progress diagnostic or wrong tab).
   const signinReturn = useRef({ stage: "intro", view: "learn" });
+
+  // Save-progress modal: focus the dialog on open, restore focus on close.
+  const saveModalFocusRef = useRef(null);
+  const saveModalPrevFocus = useRef(null);
   function openSignIn() {
+    if (stage === "signin") return; // don't overwrite the return target with "signin"
     signinReturn.current = { stage, view };
     setStage("signin");
   }
@@ -263,7 +268,7 @@ export default function Noobtopro() {
     const sb = getSupabase();
     hydrate();
     if (!sb) return;
-    sb.auth.getUser().then(({ data }) => setUser((data && data.user) || null));
+    sb.auth.getUser().then(({ data }) => setUser((data && data.user) || null)).catch(() => setUser(null));
     const { data: sub } = sb.auth.onAuthStateChange((event, session) => {
       setUser((session && session.user) || null);
       // Only reload data when the identity actually changes. TOKEN_REFRESHED /
@@ -511,34 +516,55 @@ export default function Noobtopro() {
     }
   }
 
-  // Close the save modal on Escape.
+  // Save-progress modal: Escape to close, move focus into the dialog on open,
+  // and restore focus to the triggering element on close (ARIA dialog pattern).
   useEffect(() => {
     if (!showSaveModal) return;
+    saveModalPrevFocus.current = typeof document !== "undefined" ? document.activeElement : null;
+    saveModalFocusRef.current?.focus();
+    // Lock background scroll while the modal is open.
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     const onKey = (e) => { if (e.key === "Escape") setShowSaveModal(false); };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+      const prev = saveModalPrevFocus.current;
+      if (prev && typeof prev.focus === "function") prev.focus();
+    };
   }, [showSaveModal]);
+
+  // While the modal is open, make the rest of the page inert so keyboard/screen-
+  // reader users can't reach background controls (proper modal focus containment).
+  const bgInert = showSaveModal && !user ? true : undefined;
 
   /* ----------------------------- render ----------------------------- */
   return (
     <div className="np-shell">
       {showSaveModal && !user && (
-        <div
-          className="np-modal-backdrop"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="np-save-title"
-          onClick={() => setShowSaveModal(false)}
-        >
-          <div className="np-modal" onClick={(e) => e.stopPropagation()}>
-            <button className="np-iconbtn np-modal-close" aria-label="Dismiss" onClick={() => setShowSaveModal(false)}>
+        <div className="np-modal-backdrop" onClick={() => setShowSaveModal(false)}>
+          <div
+            className="np-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="np-save-title"
+            aria-describedby="np-save-desc"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              ref={saveModalFocusRef}
+              className="np-iconbtn np-modal-close"
+              aria-label="Dismiss"
+              onClick={() => setShowSaveModal(false)}
+            >
               <Icon name="x" size={16} />
             </button>
             <div className="np-modal-spark" aria-hidden="true"><Icon name="spark" size={22} /></div>
             <h2 id="np-save-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
               Save your progress
             </h2>
-            <p className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
+            <p id="np-save-desc" className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
               Nice work — you've got your starting scores. Sign in to keep them across devices; your guest
               results carry over automatically.
             </p>
@@ -554,7 +580,7 @@ export default function Noobtopro() {
         </div>
       )}
 
-      <header className="np-top">
+      <header className="np-top" inert={bgInert}>
         <button className="np-brand" onClick={reset} title="Restart">
           noob<span className="np-arrow">→</span>topro
         </button>
@@ -579,7 +605,7 @@ export default function Noobtopro() {
       </header>
 
       {(user || scores) && stage !== "signin" && (
-        <nav className="np-nav">
+        <nav className="np-nav" inert={bgInert}>
           <button className={"np-tab" + (view === "learn" ? " active" : "")} onClick={() => setView("learn")}>Learn</button>
           {scores && (
             <button className={"np-tab" + (view === "progress" ? " active" : "")} onClick={() => setView("progress")}>Progress</button>
@@ -590,7 +616,7 @@ export default function Noobtopro() {
         </nav>
       )}
 
-      <main className="np-main">
+      <main className="np-main" inert={bgInert}>
         {showAuthNote && (
           <div className="np-banner fade-up">
             <span>Google sign-in runs through Supabase. Add your Supabase URL + anon key and enable the Google provider by following the README ("Supabase setup"). The app works fully as a guest in the meantime.</span>
@@ -839,7 +865,7 @@ export default function Noobtopro() {
         )}
       </main>
 
-      <footer className="np-foot">Prototype · grading is performed live by Groq against a reasoning rubric. Scores are demonstrative.</footer>
+      <footer className="np-foot" inert={bgInert}>Prototype · grading is performed live by Groq against a reasoning rubric. Scores are demonstrative.</footer>
     </div>
   );
 }

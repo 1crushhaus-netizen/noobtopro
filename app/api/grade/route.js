@@ -64,6 +64,13 @@ function normalizeRubric(rubric) {
   return out;
 }
 
+// Coerce the model's weakConcepts to an array of <=8 short strings so the client
+// can always safely .map/.slice it (a non-array would otherwise crash rendering).
+function normalizeWeakConcepts(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.filter((c) => typeof c === "string" && c.trim()).slice(0, 8).map((c) => c.slice(0, 200));
+}
+
 export async function POST(req) {
   const rl = rateLimit(clientKey(req));
   if (!rl.ok) {
@@ -115,7 +122,11 @@ export async function POST(req) {
       });
       // Clamp the model's score before it reaches the client/UI.
       const clamped = clampScore(data?.score);
-      return NextResponse.json({ ...data, score: clamped ?? 0 });
+      return NextResponse.json({
+        ...data,
+        score: clamped ?? 0,
+        weakConcepts: normalizeWeakConcepts(data?.weakConcepts),
+      });
     }
 
     // practice
@@ -138,6 +149,7 @@ export async function POST(req) {
       reasoningScore: clampScore(data?.reasoningScore) ?? 0,
       newScoreSuggestion: clampScore(data?.newScoreSuggestion),
       rubric: normalizeRubric(data?.rubric),
+      weakConcepts: normalizeWeakConcepts(data?.weakConcepts),
     });
   } catch (e) {
     // Log server-side; return a generic message so upstream Groq status/body
