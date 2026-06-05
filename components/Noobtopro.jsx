@@ -196,9 +196,22 @@ export default function Noobtopro() {
   const [feedback, setFeedback] = useState(null);
   const [scoreDelta, setScoreDelta] = useState(null);
 
+  // Monotonic token so overlapping hydrate() calls (mount + onAuthStateChange
+  // both fire on load) can't clobber each other: only the newest result wins.
+  const hydrateRun = useRef(0);
+
   // load progress from the data layer (Supabase when signed in, else local)
   async function hydrate() {
+    const myRun = ++hydrateRun.current;
     const st = await loadState();
+    if (myRun !== hydrateRun.current) return; // superseded by a newer hydrate
+    // A failed load (transient DB error, paused project) must NOT be treated as
+    // "no data" — keep current state instead of bouncing the user to the intro,
+    // and tell the user so they can retry rather than facing a silent stall.
+    if (st && st.error) {
+      setError("We couldn't load your saved progress. Check your connection and try again.");
+      return;
+    }
     if (st && st.scores) {
       setScores(st.scores);
       setHistory(st.history || []);

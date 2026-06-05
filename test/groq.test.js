@@ -38,6 +38,39 @@ describe("groqJSON", () => {
     expect(out).toEqual({ a: 1, b: 2 });
   });
 
+  it("parses JSON with braces in a string value amid prose with stray braces", async () => {
+    // Pins the fix on a single input: the leading "{a,b}" defeats the old
+    // indexOf("{") start, and the "{x, y}" inside the string value would defeat
+    // a non-string-aware brace counter. Old extractJSON throws on this; new passes.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => reply('Concept {a,b}: {"microLesson":"use the set {x, y}","score":80}'))
+    );
+    const out = await groqJSON({ system: "s", user: "u" });
+    expect(out).toEqual({ microLesson: "use the set {x, y}", score: 80 });
+  });
+
+  it("extracts the object when trailing prose contains a stray brace", async () => {
+    // The genuinely-broken case: a naive first-"{"/last-"}" slice grabs the "}"
+    // from "{1}" in the trailing prose and fails to parse. The balanced scan
+    // stops at the object's real closing brace.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => reply('{"score":80,"microLesson":"see fig 1"} see figure {1}'))
+    );
+    const out = await groqJSON({ system: "s", user: "u" });
+    expect(out).toEqual({ score: 80, microLesson: "see fig 1" });
+  });
+
+  it("ignores a stray brace in leading prose", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => reply('note {see below}: {"a":1}'))
+    );
+    const out = await groqJSON({ system: "s", user: "u" });
+    expect(out).toEqual({ a: 1 });
+  });
+
   it("falls back to a non-JSON-mode retry when the first response is unparseable", async () => {
     const fetchMock = vi
       .fn()
