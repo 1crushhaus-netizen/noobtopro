@@ -8,6 +8,10 @@ export const dynamic = "force-dynamic";
 // Guards the route (and our Groq bill) against arbitrarily large image payloads.
 const MAX_IMAGE_BASE64_CHARS = 7_500_000;
 
+// Image formats the Groq vision model accepts. Anything else is rejected so an
+// arbitrary MIME string can never reach the upstream call.
+const ALLOWED_IMAGE_MIME = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+
 // The five rubric dimensions the practice grader scores 0–4 each.
 const RUBRIC_KEYS = [
   "conceptual_understanding",
@@ -27,12 +31,12 @@ function normalizeImage(image) {
     return { ok: false, error: "Attached image is too large. Please use a smaller photo." };
   }
   // A missing mime is fine (the Groq client defaults it); a present one must be
-  // a sane image/* type so an arbitrary string never reaches the upstream call.
+  // on the allowlist so an arbitrary string never reaches the upstream call.
   const { mime } = image;
-  if (mime != null && (typeof mime !== "string" || mime.length > 100 || !mime.startsWith("image/"))) {
-    return { ok: false, error: "image.mime must be an image/* type." };
+  if (mime != null && !ALLOWED_IMAGE_MIME.has(mime)) {
+    return { ok: false, error: "Unsupported image type. Use JPEG, PNG, WebP, or GIF." };
   }
-  return { ok: true, image: { mime: typeof mime === "string" ? mime : undefined, data: image.data } };
+  return { ok: true, image: { mime: mime || undefined, data: image.data } };
 }
 
 // Clamp each rubric dimension to an integer in [0, 4]; default missing ones to 0.

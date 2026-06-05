@@ -26,6 +26,10 @@ export const SCALE_NOTE =
 // out of range) to an integer in [0, 100]. Returns null when there is no usable
 // number, so callers can distinguish "no signal" from a real zero.
 export function clampScore(value) {
+  // Guard null/undefined/"" explicitly: Number(null) and Number("") are 0 (a
+  // finite value), which would silently turn "no score" into a real zero and,
+  // via blend(), drag an existing score down. Treat those as "no signal".
+  if (value == null || value === "") return null;
   const n = Number(value);
   if (!Number.isFinite(n)) return null;
   return Math.max(0, Math.min(100, Math.round(n)));
