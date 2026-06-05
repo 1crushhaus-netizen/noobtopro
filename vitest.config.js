@@ -6,9 +6,11 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL(".", import.meta.url)).replace(/\/$/, "");
 
 export default defineConfig({
+  // Use the automatic JSX runtime so test files don't need to import React.
+  esbuild: { jsx: "automatic" },
   test: {
     environment: "node",
-    include: ["test/**/*.test.js"],
+    include: ["test/**/*.test.{js,jsx}"],
   },
   resolve: {
     alias: { "@": root },

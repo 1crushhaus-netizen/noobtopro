@@ -11,9 +11,11 @@ import {
   totalPoints,
   phdIndex,
 } from "@/lib/scoring";
-import { loadState, saveScores, recordAttempt, resetAll } from "@/lib/store";
-import { getSupabase, isSupabaseConfigured, signInWithGoogle, signOutUser } from "@/lib/supabase";
+import { loadState, saveScores, recordAttempt, resetAll, migrateGuestToAccount, deleteAllUserData } from "@/lib/store";
+import { getSupabase, isSupabaseConfigured, signInWithProvider, signOutUser, PROVIDERS } from "@/lib/supabase";
 import ProgressDashboard from "@/components/ProgressDashboard";
+import SignIn from "@/components/SignIn";
+import ProfileTab from "@/components/ProfileTab";
 
 /* ----------------------------- icons (inline, no deps) ----------------------------- */
 function Icon({ name, size = 16 }) {
@@ -186,8 +188,8 @@ function Loader({ subject }) {
 
 /* ----------------------------- app ----------------------------- */
 export default function Noobtopro() {
-  const [stage, setStage] = useState("intro"); // intro | diagnostic | scoring | dashboard | practice
-  const [view, setView] = useState("learn"); // learn | progress
+  const [stage, setStage] = useState("intro"); // intro | signin | diagnostic | scoring | dashboard | practice
+  const [view, setView] = useState("learn"); // learn | progress | profile
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [showAuthNote, setShowAuthNote] = useState(false);
@@ -211,9 +213,30 @@ export default function Noobtopro() {
   // both fire on load) can't clobber each other: only the newest result wins.
   const hydrateRun = useRef(0);
 
+  // Where to return when the sign-in menu is dismissed (so opening it mid-flow
+  // and pressing Back doesn't discard an in-progress diagnostic or wrong tab).
+  const signinReturn = useRef({ stage: "intro", view: "learn" });
+  function openSignIn() {
+    signinReturn.current = { stage, view };
+    setStage("signin");
+  }
+  function closeSignIn() {
+    setView(signinReturn.current.view);
+    setStage(signinReturn.current.stage);
+  }
+
   // load progress from the data layer (Supabase when signed in, else local)
   async function hydrate() {
     const myRun = ++hydrateRun.current;
+    // If the user just signed in and has guest progress, fold it into the
+    // account before loading (no-op when not signed in / nothing to migrate).
+    const mig = await migrateGuestToAccount();
+    if (myRun !== hydrateRun.current) return;
+    if (mig && mig.error) {
+      // Migration failed atomically (nothing written); the guest copy is kept
+      // for a retry on the next load. Let the user know.
+      setError("We couldn't save your guest progress just now. Please try again.");
+    }
     const st = await loadState();
     if (myRun !== hydrateRun.current) return; // superseded by a newer hydrate
     // A failed load (transient DB error, paused project) must NOT be treated as
@@ -245,7 +268,13 @@ export default function Noobtopro() {
       // Only reload data when the identity actually changes. TOKEN_REFRESHED /
       // USER_UPDATED / INITIAL_SESSION fire routinely and would otherwise re-run
       // hydrate mid-attempt (the mount call above already covers session restore).
-      if (event === "SIGNED_IN" || event === "SIGNED_OUT") hydrate();
+      if (event === "SIGNED_IN") {
+        setStage((p) => (p === "signin" ? "dashboard" : p)); // leave the sign-in menu
+        hydrate(); // migrates guest progress, then loads the account
+      } else if (event === "SIGNED_OUT") {
+        setView("learn");
+        hydrate();
+      }
     });
     return () => sub && sub.subscription && sub.subscription.unsubscribe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -270,6 +299,20 @@ export default function Noobtopro() {
     setFeedback(null);
     setScoreDelta(null);
     setError("");
+  }
+
+  // Profile → "Reset my progress": permanently delete the signed-in user's data.
+  async function resetProgress() {
+    try {
+      await deleteAllUserData();
+      setScores(null);
+      setHistory([]);
+      setView("learn");
+      setStage("intro");
+      setError("");
+    } catch (e) {
+      setError(e.message || "Could not reset your progress.");
+    }
   }
 
   /* --- diagnostic --- */
@@ -478,8 +521,8 @@ export default function Noobtopro() {
                 <Icon name="google" size={16} /> Sign out
               </button>
             ) : (
-              <button className="np-signinbtn" onClick={() => signInWithGoogle()}>
-                <Icon name="google" size={16} /> Sign in with Google
+              <button className="np-signinbtn" onClick={openSignIn}>
+                <Icon name="google" size={16} /> Sign in
               </button>
             )
           ) : (
@@ -490,10 +533,15 @@ export default function Noobtopro() {
         </div>
       </header>
 
-      {scores && (
+      {(user || scores) && stage !== "signin" && (
         <nav className="np-nav">
           <button className={"np-tab" + (view === "learn" ? " active" : "")} onClick={() => setView("learn")}>Learn</button>
-          <button className={"np-tab" + (view === "progress" ? " active" : "")} onClick={() => setView("progress")}>Progress</button>
+          {scores && (
+            <button className={"np-tab" + (view === "progress" ? " active" : "")} onClick={() => setView("progress")}>Progress</button>
+          )}
+          {user && (
+            <button className={"np-tab" + (view === "profile" ? " active" : "")} onClick={() => setView("profile")}>Profile</button>
+          )}
         </nav>
       )}
 
@@ -511,7 +559,31 @@ export default function Noobtopro() {
           </div>
         )}
 
-        {view === "progress" && scores ? (
+        {stage === "signin" ? (
+          <SignIn
+            providers={PROVIDERS}
+            onProvider={async (id) => {
+              try {
+                const res = await signInWithProvider(id);
+                if (res && res.error) setError(res.error.message || "Sign-in failed. Please try again.");
+              } catch (e) {
+                setError(e.message || "Sign-in failed. Please try again.");
+              }
+            }}
+            onBack={closeSignIn}
+          />
+        ) : view === "profile" && user ? (
+          <ProfileTab
+            user={user}
+            scores={scores}
+            history={history}
+            onStartDiagnostic={() => { setView("learn"); beginDiagnostic(); }}
+            onPractice={(s) => { setView("learn"); startPractice(s); }}
+            onSignOut={() => signOutUser()}
+            onReset={resetProgress}
+            onViewProgress={() => setView("progress")}
+          />
+        ) : view === "progress" && scores ? (
           <ProgressDashboard
             scores={scores}
             history={history}
@@ -590,11 +662,22 @@ export default function Noobtopro() {
             {/* DASHBOARD (subject scores) */}
             {stage === "dashboard" && scores && (
               <div className="fade-up">
+                {!user && isSupabaseConfigured && (
+                  <div className="np-card np-savecta fade-up">
+                    <div>
+                      <div className="np-savetitle">Save your progress</div>
+                      <div className="np-savedesc">Your results live only in this browser. Sign in to keep them across devices.</div>
+                    </div>
+                    <button className="np-btn np-primary" onClick={openSignIn}>
+                      <Icon name="google" size={15} /> Sign in to save
+                    </button>
+                  </div>
+                )}
                 <h2 className="np-h2">Where you stand</h2>
                 <p className="np-lede" style={{ marginBottom: 22 }}>{SCALE_NOTE}</p>
                 <div className="np-grid3">
                   {ORDER.map((k) => {
-                    const s = scores[k];
+                    const s = scores[k] || { score: 0, weakConcepts: [], comment: "" };
                     return (
                       <div key={k} className="np-card np-scorecard">
                         <div className="np-scorehead">
