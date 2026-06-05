@@ -193,6 +193,7 @@ export default function Noobtopro() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [showAuthNote, setShowAuthNote] = useState(false);
+  const [showSaveModal, setShowSaveModal] = useState(false);
   const [user, setUser] = useState(null);
 
   const [questions, setQuestions] = useState([]);
@@ -269,6 +270,7 @@ export default function Noobtopro() {
       // USER_UPDATED / INITIAL_SESSION fire routinely and would otherwise re-run
       // hydrate mid-attempt (the mount call above already covers session restore).
       if (event === "SIGNED_IN") {
+        setShowSaveModal(false);
         setStage((p) => (p === "signin" ? "dashboard" : p)); // leave the sign-in menu
         hydrate(); // migrates guest progress, then loads the account
       } else if (event === "SIGNED_OUT") {
@@ -285,6 +287,7 @@ export default function Noobtopro() {
     // Release any outstanding image previews before clearing state.
     Object.values(answers).forEach((a) => revokePreview(a && a.img));
     revokePreview(pImg);
+    setShowSaveModal(false);
     setStage("intro");
     setView("learn");
     setQuestions([]);
@@ -406,6 +409,8 @@ export default function Noobtopro() {
       if (st && st.history) setHistory(st.history); // null = couldn't refresh; keep current
       setScores(obj);
       setStage("dashboard");
+      // Guest just finished the diagnostic — prompt them to sign in to keep it.
+      if (!user && isSupabaseConfigured) setShowSaveModal(true);
     } catch (e) {
       setError(e.message || "Grading failed.");
       setStage("diagnostic");
@@ -506,9 +511,49 @@ export default function Noobtopro() {
     }
   }
 
+  // Close the save modal on Escape.
+  useEffect(() => {
+    if (!showSaveModal) return;
+    const onKey = (e) => { if (e.key === "Escape") setShowSaveModal(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showSaveModal]);
+
   /* ----------------------------- render ----------------------------- */
   return (
     <div className="np-shell">
+      {showSaveModal && !user && (
+        <div
+          className="np-modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="np-save-title"
+          onClick={() => setShowSaveModal(false)}
+        >
+          <div className="np-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="np-iconbtn np-modal-close" aria-label="Dismiss" onClick={() => setShowSaveModal(false)}>
+              <Icon name="x" size={16} />
+            </button>
+            <div className="np-modal-spark" aria-hidden="true"><Icon name="spark" size={22} /></div>
+            <h2 id="np-save-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+              Save your progress
+            </h2>
+            <p className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
+              Nice work — you've got your starting scores. Sign in to keep them across devices; your guest
+              results carry over automatically.
+            </p>
+            <button
+              className="np-btn np-primary np-big"
+              style={{ width: "100%", justifyContent: "center" }}
+              onClick={() => { setShowSaveModal(false); openSignIn(); }}
+            >
+              <Icon name="google" size={16} /> Sign in
+            </button>
+            <button className="np-ghost np-modal-later" onClick={() => setShowSaveModal(false)}>Not now</button>
+          </div>
+        </div>
+      )}
+
       <header className="np-top">
         <button className="np-brand" onClick={reset} title="Restart">
           noob<span className="np-arrow">→</span>topro
