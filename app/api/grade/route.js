@@ -1,12 +1,18 @@
 import { NextResponse } from "next/server";
 import { groqJSON, DIAG_GRADE_SYS, PRACTICE_GRADE_SYS } from "@/lib/groq";
-import { clampScore } from "@/lib/scoring";
+import { clampScore, SUBJECTS } from "@/lib/scoring";
 
 export const dynamic = "force-dynamic";
 
 // Base64 inflates bytes ~33%, so this caps the decoded upload near ~5.5 MB.
 // Guards the route (and our Groq bill) against arbitrarily large image payloads.
 const MAX_IMAGE_BASE64_CHARS = 7_500_000;
+
+// Cap each free-text field injected into the prompt. ~12k chars is far longer
+// than any genuine reasoning answer, but bounds the token count (and Groq cost)
+// so a multi-megabyte string can't blow past the model's context window.
+const MAX_TEXT_CHARS = 12_000;
+const capText = (s) => (typeof s === "string" ? s.slice(0, MAX_TEXT_CHARS) : "");
 
 // Image formats the Groq vision model accepts. Anything else is rejected so an
 // arbitrary MIME string can never reach the upstream call.
@@ -58,7 +64,9 @@ export async function POST(req) {
   }
 
   const { kind, subject, question, targetConcept, score, reasoning, image } = body || {};
-  const work = typeof reasoning === "string" && reasoning.trim() ? reasoning.trim() : "(no written reasoning provided)";
+  const work = reasoning && reasoning.trim() ? capText(reasoning.trim()) : "(no written reasoning provided)";
+  const safeQuestion = capText(question);
+  const safeConcept = capText(targetConcept) || "(unspecified)";
 
   if (kind !== "diagnostic" && kind !== "practice") {
     return NextResponse.json(
@@ -72,6 +80,11 @@ export async function POST(req) {
       { status: 400 }
     );
   }
+  // Bound subject to the known set (matches /api/generate) so an arbitrary
+  // string can't be injected into the grading prompt.
+  if (!SUBJECTS[subject]) {
+    return NextResponse.json({ error: `Unknown subject "${subject}".` }, { status: 400 });
+  }
 
   const img = normalizeImage(image);
   if (!img.ok) return NextResponse.json({ error: img.error }, { status: 400 });
@@ -80,7 +93,7 @@ export async function POST(req) {
     if (kind === "diagnostic") {
       const data = await groqJSON({
         system: DIAG_GRADE_SYS,
-        user: `Subject: ${subject}\nQuestion: ${question}\n\nLearner's reasoning:\n"""${work}"""`,
+        user: `Subject: ${subject}\nQuestion: ${safeQuestion}\n\nLearner's reasoning:\n"""${work}"""`,
         image: img.image,
       });
       // Clamp the model's score before it reaches the client/UI.
@@ -94,8 +107,8 @@ export async function POST(req) {
       system: PRACTICE_GRADE_SYS,
       user:
         `Subject: ${subject}\n` +
-        `Question: ${question}\n` +
-        `Concept being probed: ${targetConcept || "(unspecified)"}\n` +
+        `Question: ${safeQuestion}\n` +
+        `Concept being probed: ${safeConcept}\n` +
         `Learner's current level: ${safeScore}/100\n\n` +
         `Learner's reasoning:\n"""${work}"""`,
       image: img.image,

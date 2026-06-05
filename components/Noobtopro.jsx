@@ -275,14 +275,17 @@ export default function Noobtopro() {
   }
   async function attachCur(file) {
     const data = await fileToBase64(file);
-    // Create the object URL OUTSIDE the updater: React Strict Mode runs updaters
-    // twice and would otherwise mint (and leak) a discarded blob URL each attach.
-    revokePreview(curAns.img);
+    // Create the object URL OUTSIDE the updater (Strict Mode runs updaters twice
+    // and would mint a discarded, leaked blob URL each time). Revoke the previous
+    // preview from INSIDE the updater, reading the latest state — so two rapid
+    // attaches (whose render-time closures both see the original img) can't leak
+    // the first blob. Revoking is idempotent, so the double invocation is safe.
     const preview = URL.createObjectURL(file);
-    setAnswers((a) => ({
-      ...a,
-      [curSubject]: { ...a[curSubject], img: { data, mime: file.type, name: file.name, preview } },
-    }));
+    setAnswers((a) => {
+      const prev = a[curSubject] && a[curSubject].img;
+      if (prev && prev.preview !== preview) revokePreview(prev);
+      return { ...a, [curSubject]: { ...a[curSubject], img: { data, mime: file.type, name: file.name, preview } } };
+    });
   }
   function removeCurImg() {
     revokePreview(curAns.img);
@@ -353,11 +356,13 @@ export default function Noobtopro() {
 
   async function attachP(file) {
     const data = await fileToBase64(file);
-    // Object URL created outside the updater (see attachCur) to stay leak-free
-    // under Strict Mode's double invocation.
-    revokePreview(pImg);
+    // URL created outside the updater; previous preview revoked inside it from the
+    // latest state, so rapid double-attaches can't leak the first blob (see attachCur).
     const preview = URL.createObjectURL(file);
-    setPImg({ data, mime: file.type, name: file.name, preview });
+    setPImg((prev) => {
+      if (prev && prev.preview !== preview) revokePreview(prev);
+      return { data, mime: file.type, name: file.name, preview };
+    });
   }
 
   async function submitPractice() {
