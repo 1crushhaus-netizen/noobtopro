@@ -1,0 +1,635 @@
+"use client";
+
+import React, { useState, useRef, useEffect } from "react";
+import {
+  SUBJECTS,
+  ORDER,
+  RUBRIC_LABELS,
+  SCALE_NOTE,
+  band,
+  blend,
+  totalPoints,
+  phdIndex,
+} from "@/lib/scoring";
+import { loadState, saveScores, recordAttempt, resetAll } from "@/lib/store";
+import { getSupabase, isSupabaseConfigured, signInWithGoogle, signOutUser } from "@/lib/supabase";
+import ProgressDashboard from "@/components/ProgressDashboard";
+
+/* ----------------------------- icons (inline, no deps) ----------------------------- */
+function Icon({ name, size = 16 }) {
+  const c = {
+    width: size,
+    height: size,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+  };
+  if (name === "arrow") return <svg {...c}><path d="M5 12h14M13 6l6 6-6 6" /></svg>;
+  if (name === "back") return <svg {...c}><path d="M19 12H5M11 18l-6-6 6-6" /></svg>;
+  if (name === "x") return <svg {...c}><path d="M6 6l12 12M18 6 6 18" /></svg>;
+  if (name === "clip") return <svg {...c}><path d="M21.4 11.05 12.25 20.2a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>;
+  if (name === "bulb") return <svg {...c}><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.3h6c0-1 .4-1.8 1-2.3A7 7 0 0 0 12 2Z" /></svg>;
+  if (name === "refresh") return <svg {...c}><path d="M21 12a9 9 0 1 1-2.64-6.36M21 4v5h-5" /></svg>;
+  if (name === "spark") return <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.9 6.1L20 10l-6.1 1.9L12 18l-1.9-6.1L4 10l6.1-1.9z" /></svg>;
+  if (name === "google") return <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor"><path d="M21.8 10.04H12v3.96h5.62c-.25 1.34-1 2.48-2.13 3.24v2.69h3.45c2.02-1.86 3.18-4.6 3.18-7.85 0-.73-.07-1.43-.2-2.08z" /><path d="M12 22c2.7 0 4.96-.9 6.62-2.43l-3.45-2.69c-.96.64-2.18 1.02-3.17 1.02-2.6 0-4.8-1.76-5.59-4.12H2.84v2.78A10 10 0 0 0 12 22z" /><path d="M6.41 13.78a6 6 0 0 1 0-3.56V7.44H2.84a10 10 0 0 0 0 9.12z" /><path d="M12 5.98c1.47 0 2.79.51 3.83 1.5l2.86-2.86A9.6 9.6 0 0 0 12 2 10 10 0 0 0 2.84 7.44l3.57 2.78C7.2 7.74 9.4 5.98 12 5.98z" /></svg>;
+  return null;
+}
+
+/* ----------------------------- helpers ----------------------------- */
+async function api(path, body) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    data = {};
+  }
+  if (!res.ok || data.error) throw new Error(data.error || `Request failed (${res.status})`);
+  return data;
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(",")[1]);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+
+const now = () => new Date().toISOString();
+
+/* ----------------------------- small ui ----------------------------- */
+function Ring({ value, color, size = 96, stroke = 9 }) {
+  const r = (size - stroke) / 2;
+  const circ = 2 * Math.PI * r;
+  const off = circ * (1 - Math.max(0, Math.min(100, value)) / 100);
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,.09)" strokeWidth={stroke} />
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={r}
+        fill="none"
+        stroke={color}
+        strokeWidth={stroke}
+        strokeLinecap="round"
+        strokeDasharray={circ}
+        strokeDashoffset={off}
+        transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        style={{ transition: "stroke-dashoffset 1s cubic-bezier(.2,.7,.2,1)" }}
+      />
+      <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" fill="var(--text)" style={{ fontFamily: "var(--mono)", fontSize: size * 0.3, fontWeight: 700 }}>
+        {Math.round(value)}
+      </text>
+    </svg>
+  );
+}
+
+function SegBar({ value, color }) {
+  return (
+    <div style={{ display: "flex", gap: 4 }}>
+      {[0, 1, 2, 3].map((i) => (
+        <div key={i} style={{ height: 7, flex: 1, borderRadius: 3, background: i < value ? color : "rgba(255,255,255,.09)", transition: "background .4s ease" }} />
+      ))}
+    </div>
+  );
+}
+
+function AnswerComposer({ value, onText, img, onAttach, onRemoveImg, onSubmit, submitLabel, loading, placeholder }) {
+  const fileRef = useRef(null);
+  const canSubmit = (value && value.trim().length > 0) || img;
+  return (
+    <div className="np-card" style={{ padding: 0, overflow: "hidden" }}>
+      <textarea
+        className="np-input"
+        value={value}
+        onChange={(e) => onText(e.target.value)}
+        placeholder={placeholder || "Show your full reasoning — every step, not just the answer."}
+        rows={6}
+      />
+      {img && (
+        <div style={{ padding: "0 16px 8px", display: "flex", alignItems: "center", gap: 10 }}>
+          <img src={img.preview} alt="your work" style={{ height: 56, borderRadius: 8, border: "1px solid var(--line)" }} />
+          <span style={{ fontSize: 13, color: "var(--muted)" }}>{img.name}</span>
+          <button className="np-iconbtn" onClick={onRemoveImg} aria-label="remove image"><Icon name="x" size={15} /></button>
+        </div>
+      )}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", borderTop: "1px solid var(--line)", background: "rgba(255,255,255,.015)" }}>
+        <button className="np-ghost" onClick={() => fileRef.current && fileRef.current.click()}><Icon name="clip" size={15} /> Attach your work</button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          style={{ display: "none" }}
+          onChange={async (e) => {
+            const f = e.target.files && e.target.files[0];
+            if (f) await onAttach(f);
+            e.target.value = "";
+          }}
+        />
+        <button className="np-btn np-primary" disabled={!canSubmit || loading} onClick={onSubmit}>
+          {loading ? "Working…" : submitLabel} {!loading && <Icon name="arrow" size={16} />}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Loader({ subject }) {
+  const lines = ["Reading your reasoning line by line", "Weighing the thinking, not just the answer", "Scoring against the rubric"];
+  const [i, setI] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setI((x) => (x + 1) % lines.length), 1400);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <div className="np-card fade-up" style={{ textAlign: "center", padding: "48px 24px" }}>
+      <div className="np-pulse" style={{ fontFamily: "var(--mono)", fontSize: 13, letterSpacing: 1, color: "var(--muted)" }}>
+        {subject ? subject.toUpperCase() : "EVALUATING"}
+      </div>
+      <div style={{ fontFamily: "var(--display)", fontSize: 22, marginTop: 10 }}>{lines[i]}…</div>
+    </div>
+  );
+}
+
+/* ----------------------------- app ----------------------------- */
+export default function Noobtopro() {
+  const [stage, setStage] = useState("intro"); // intro | diagnostic | scoring | dashboard | practice
+  const [view, setView] = useState("learn"); // learn | progress
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [showAuthNote, setShowAuthNote] = useState(false);
+  const [user, setUser] = useState(null);
+
+  const [questions, setQuestions] = useState([]);
+  const [qi, setQi] = useState(0);
+  const [answers, setAnswers] = useState({});
+
+  const [scores, setScores] = useState(null);
+  const [history, setHistory] = useState([]);
+
+  const [pSubject, setPSubject] = useState(null);
+  const [pQuestion, setPQuestion] = useState(null);
+  const [pText, setPText] = useState("");
+  const [pImg, setPImg] = useState(null);
+  const [feedback, setFeedback] = useState(null);
+  const [scoreDelta, setScoreDelta] = useState(null);
+
+  // load progress from the data layer (Supabase when signed in, else local)
+  async function hydrate() {
+    const st = await loadState();
+    if (st && st.scores) {
+      setScores(st.scores);
+      setHistory(st.history || []);
+      setStage((p) => (p === "intro" || p === "scoring" ? "dashboard" : p));
+    } else {
+      setScores(null);
+      setHistory((st && st.history) || []);
+      setStage((p) => (p === "dashboard" || p === "practice" ? "intro" : p));
+      setView("learn");
+    }
+  }
+
+  useEffect(() => {
+    const sb = getSupabase();
+    hydrate();
+    if (!sb) return;
+    sb.auth.getUser().then(({ data }) => setUser((data && data.user) || null));
+    const { data: sub } = sb.auth.onAuthStateChange((_e, session) => {
+      setUser((session && session.user) || null);
+      hydrate();
+    });
+    return () => sub && sub.subscription && sub.subscription.unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function reset() {
+    await resetAll();
+    setStage("intro");
+    setView("learn");
+    setQuestions([]);
+    setQi(0);
+    setAnswers({});
+    setScores(null);
+    setHistory([]);
+    setPSubject(null);
+    setPQuestion(null);
+    setPText("");
+    setPImg(null);
+    setFeedback(null);
+    setScoreDelta(null);
+    setError("");
+  }
+
+  /* --- diagnostic --- */
+  async function beginDiagnostic() {
+    setError("");
+    setBusy(true);
+    try {
+      const data = await api("/api/generate", { kind: "diagnostic" });
+      const qs = (data.questions || []).filter((q) => SUBJECTS[q.subject]);
+      if (qs.length < 3) throw new Error("Could not generate a full diagnostic. Please try again.");
+      qs.sort((a, b) => ORDER.indexOf(a.subject) - ORDER.indexOf(b.subject));
+      const init = {};
+      qs.forEach((q) => (init[q.subject] = { text: "", img: null }));
+      setQuestions(qs);
+      setAnswers(init);
+      setQi(0);
+      setStage("diagnostic");
+    } catch (e) {
+      setError(e.message || "Something went wrong.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const curSubject = questions[qi] ? questions[qi].subject : null;
+  const curAns = curSubject ? answers[curSubject] || { text: "", img: null } : { text: "", img: null };
+
+  function setCurText(t) {
+    setAnswers((a) => ({ ...a, [curSubject]: { ...a[curSubject], text: t } }));
+  }
+  async function attachCur(file) {
+    const data = await fileToBase64(file);
+    setAnswers((a) => ({
+      ...a,
+      [curSubject]: { ...a[curSubject], img: { data, mime: file.type, name: file.name, preview: URL.createObjectURL(file) } },
+    }));
+  }
+  function removeCurImg() {
+    setAnswers((a) => ({ ...a, [curSubject]: { ...a[curSubject], img: null } }));
+  }
+
+  function nextDiagnostic() {
+    if (qi < questions.length - 1) setQi(qi + 1);
+    else submitDiagnostic();
+  }
+
+  async function submitDiagnostic() {
+    setError("");
+    setStage("scoring");
+    try {
+      const results = await Promise.all(
+        questions.map(async (q) => {
+          const a = answers[q.subject] || { text: "", img: null };
+          const r = await api("/api/grade", {
+            kind: "diagnostic",
+            subject: q.subject,
+            question: q.question,
+            reasoning: a.text,
+            image: a.img ? { mime: a.img.mime, data: a.img.data } : undefined,
+          });
+          return [q.subject, { score: r.score, weakConcepts: r.weakConcepts || [], comment: r.comment || "" }];
+        })
+      );
+      const obj = {};
+      results.forEach(([k, v]) => (obj[k] = v));
+      await saveScores(obj);
+      const st = await recordAttempt({ type: "baseline", t: now(), totalAfter: totalPoints(obj), phdAfter: phdIndex(obj) });
+      setHistory(st.history || []);
+      setScores(obj);
+      setStage("dashboard");
+    } catch (e) {
+      setError(e.message || "Grading failed.");
+      setStage("diagnostic");
+    }
+  }
+
+  /* --- practice --- */
+  async function startPractice(subject) {
+    setError("");
+    setPSubject(subject);
+    setFeedback(null);
+    setScoreDelta(null);
+    setPText("");
+    setPImg(null);
+    setPQuestion(null);
+    setStage("practice");
+    setBusy(true);
+    try {
+      const s = scores[subject];
+      const data = await api("/api/generate", {
+        kind: "practice",
+        subject,
+        score: s.score,
+        weakConcepts: s.weakConcepts || [],
+      });
+      setPQuestion(data);
+    } catch (e) {
+      setError(e.message || "Could not generate a question.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function attachP(file) {
+    const data = await fileToBase64(file);
+    setPImg({ data, mime: file.type, name: file.name, preview: URL.createObjectURL(file) });
+  }
+
+  async function submitPractice() {
+    setError("");
+    setBusy(true);
+    try {
+      const prev = scores[pSubject];
+      const r = await api("/api/grade", {
+        kind: "practice",
+        subject: pSubject,
+        question: pQuestion.question,
+        targetConcept: pQuestion.targetConcept,
+        score: prev.score,
+        reasoning: pText,
+        image: pImg ? { mime: pImg.mime, data: pImg.data } : undefined,
+      });
+      const updatedScore = blend(prev.score, r.newScoreSuggestion);
+      const updatedScores = {
+        ...scores,
+        [pSubject]: {
+          score: updatedScore,
+          weakConcepts: r.weakConcepts && r.weakConcepts.length ? r.weakConcepts : prev.weakConcepts,
+          comment: prev.comment,
+        },
+      };
+      await saveScores(updatedScores);
+      const st = await recordAttempt({
+        type: "attempt",
+        t: now(),
+        subject: pSubject,
+        reasoningScore: r.reasoningScore,
+        delta: updatedScore - prev.score,
+        newScore: updatedScore,
+        totalAfter: totalPoints(updatedScores),
+        phdAfter: phdIndex(updatedScores),
+      });
+      setHistory(st.history || []);
+      setScores(updatedScores);
+      setScoreDelta(updatedScore - prev.score);
+      setFeedback(r);
+    } catch (e) {
+      setError(e.message || "Grading failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /* ----------------------------- render ----------------------------- */
+  return (
+    <div className="np-shell">
+      <header className="np-top">
+        <button className="np-brand" onClick={reset} title="Restart">
+          noob<span className="np-arrow">→</span>topro
+        </button>
+        <span className="np-tag">prove what you know · climb from noob to pro</span>
+        <div className="np-signin">
+          {isSupabaseConfigured ? (
+            user ? (
+              <button className="np-signinbtn" onClick={() => signOutUser()} title={user.email || ""}>
+                <Icon name="google" size={16} /> Sign out
+              </button>
+            ) : (
+              <button className="np-signinbtn" onClick={() => signInWithGoogle()}>
+                <Icon name="google" size={16} /> Sign in with Google
+              </button>
+            )
+          ) : (
+            <button className="np-signinbtn" onClick={() => setShowAuthNote(true)}>
+              <Icon name="google" size={16} /> Sign in
+            </button>
+          )}
+        </div>
+      </header>
+
+      {scores && (
+        <nav className="np-nav">
+          <button className={"np-tab" + (view === "learn" ? " active" : "")} onClick={() => setView("learn")}>Learn</button>
+          <button className={"np-tab" + (view === "progress" ? " active" : "")} onClick={() => setView("progress")}>Progress</button>
+        </nav>
+      )}
+
+      <main className="np-main">
+        {showAuthNote && (
+          <div className="np-banner fade-up">
+            <span>Google sign-in runs through Supabase. Add your Supabase URL + anon key and enable the Google provider by following the README ("Supabase setup"). The app works fully as a guest in the meantime.</span>
+            <button className="np-ghost" onClick={() => setShowAuthNote(false)}><Icon name="x" size={14} /> dismiss</button>
+          </div>
+        )}
+        {error && (
+          <div className="np-error fade-up">
+            <span>{error}</span>
+            <button className="np-ghost" onClick={() => setError("")}><Icon name="x" size={14} /> dismiss</button>
+          </div>
+        )}
+
+        {view === "progress" && scores ? (
+          <ProgressDashboard
+            scores={scores}
+            history={history}
+            onPractice={(s) => { setView("learn"); startPractice(s); }}
+          />
+        ) : (
+          <>
+            {/* INTRO */}
+            {stage === "intro" && (
+              <div className="fade-up">
+                <h1 className="np-h1">No lessons. No spoon-feeding.<br />Just your own thinking, measured.</h1>
+                <p className="np-lede">
+                  noobtopro doesn't teach you and then test you. It hands you problems, reads <em>how you reason</em>, and
+                  scores each subject from 0 (absolute beginner) to 100 (PhD-level). When you're stuck, it won't give the
+                  answer — it nudges with a question and teaches only the concept you're missing.
+                </p>
+                <div className="np-steps">
+                  {[
+                    ["01", "Diagnose", "Three open problems — one each in math, physics, chemistry. Solve them and explain every step."],
+                    ["02", "Get placed", "Your reasoning is graded on a 5-part rubric and mapped to a 0–100 score per subject."],
+                    ["03", "Climb", "Pick a subject. Get calibrated problems. Sound reasoning moves your score — even when the answer's wrong."],
+                  ].map(([n, t, d]) => (
+                    <div key={n} className="np-card np-step">
+                      <div className="np-stepnum">{n}</div>
+                      <div className="np-steptitle">{t}</div>
+                      <div className="np-stepdesc">{d}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="np-subjectrow">
+                  {ORDER.map((k) => (
+                    <span key={k} className="np-chip" style={{ borderColor: SUBJECTS[k].color }}>
+                      <span style={{ color: SUBJECTS[k].color, fontFamily: "var(--mono)" }}>{SUBJECTS[k].glyph}</span> {SUBJECTS[k].label}
+                    </span>
+                  ))}
+                </div>
+                <button className="np-btn np-primary np-big" onClick={beginDiagnostic} disabled={busy}>
+                  {busy ? "Preparing your diagnostic…" : "Begin diagnostic"} {!busy && <Icon name="arrow" size={18} />}
+                </button>
+              </div>
+            )}
+
+            {/* DIAGNOSTIC */}
+            {stage === "diagnostic" && questions[qi] && (
+              <div className="fade-up" key={qi}>
+                <div className="np-progress">
+                  {questions.map((q, i) => (
+                    <div key={i} className="np-progdot" style={{ background: i <= qi ? SUBJECTS[q.subject].color : "rgba(255,255,255,.12)" }} />
+                  ))}
+                </div>
+                <div className="np-qmeta">
+                  <span style={{ color: SUBJECTS[curSubject].color }}>{SUBJECTS[curSubject].glyph}</span>
+                  <span style={{ fontFamily: "var(--mono)", letterSpacing: 1 }}>
+                    {SUBJECTS[curSubject].label.toUpperCase()} · DIAGNOSTIC {qi + 1}/{questions.length}
+                  </span>
+                  {questions[qi].topic && <span className="np-topic">{questions[qi].topic}</span>}
+                </div>
+                <div className="np-card np-question">{questions[qi].question}</div>
+                <AnswerComposer
+                  value={curAns.text}
+                  onText={setCurText}
+                  img={curAns.img}
+                  onAttach={attachCur}
+                  onRemoveImg={removeCurImg}
+                  onSubmit={nextDiagnostic}
+                  submitLabel={qi < questions.length - 1 ? "Next question" : "Submit for scoring"}
+                  loading={false}
+                />
+                <p className="np-hint">noobtopro grades your <em>thinking</em>, so explain your full approach — or attach a photo of your worked notes.</p>
+              </div>
+            )}
+
+            {/* SCORING */}
+            {stage === "scoring" && <Loader subject="evaluating all three" />}
+
+            {/* DASHBOARD (subject scores) */}
+            {stage === "dashboard" && scores && (
+              <div className="fade-up">
+                <h2 className="np-h2">Where you stand</h2>
+                <p className="np-lede" style={{ marginBottom: 22 }}>{SCALE_NOTE}</p>
+                <div className="np-grid3">
+                  {ORDER.map((k) => {
+                    const s = scores[k];
+                    return (
+                      <div key={k} className="np-card np-scorecard">
+                        <div className="np-scorehead">
+                          <span style={{ color: SUBJECTS[k].color, fontFamily: "var(--mono)", fontSize: 20 }}>{SUBJECTS[k].glyph}</span>
+                          <span className="np-scorelabel">{SUBJECTS[k].label}</span>
+                        </div>
+                        <Ring value={s.score} color={SUBJECTS[k].color} />
+                        <div className="np-bandtag" style={{ color: SUBJECTS[k].color }}>{band(s.score)}</div>
+                        {s.comment && <div className="np-comment">{s.comment}</div>}
+                        {s.weakConcepts && s.weakConcepts.length > 0 && (
+                          <div className="np-weakwrap">
+                            <div className="np-weaklabel">Work on</div>
+                            <div className="np-weaktags">
+                              {s.weakConcepts.slice(0, 3).map((w, i) => (<span key={i} className="np-weaktag">{w}</span>))}
+                            </div>
+                          </div>
+                        )}
+                        <button className="np-btn np-outline" style={{ marginTop: 14, borderColor: SUBJECTS[k].color, color: SUBJECTS[k].color }} onClick={() => startPractice(k)}>
+                          Practice {SUBJECTS[k].label} <Icon name="arrow" size={15} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* PRACTICE */}
+            {stage === "practice" && (
+              <div className="fade-up">
+                <button className="np-ghost" style={{ marginBottom: 14 }} onClick={() => setStage("dashboard")}>
+                  <Icon name="back" size={15} /> Back to scores
+                </button>
+
+                {busy && !pQuestion && <Loader subject={pSubject ? SUBJECTS[pSubject].label : ""} />}
+
+                {pQuestion && (
+                  <>
+                    <div className="np-qmeta">
+                      <span style={{ color: SUBJECTS[pSubject].color }}>{SUBJECTS[pSubject].glyph}</span>
+                      <span style={{ fontFamily: "var(--mono)", letterSpacing: 1 }}>
+                        {SUBJECTS[pSubject].label.toUpperCase()} · {(pQuestion.difficulty || "").toUpperCase()}
+                      </span>
+                      {pQuestion.targetConcept && <span className="np-topic">{pQuestion.targetConcept}</span>}
+                      <span className="np-livescore" style={{ borderColor: SUBJECTS[pSubject].color }}>
+                        {scores[pSubject].score}<span style={{ color: "var(--muted)" }}>/100</span>
+                        {scoreDelta !== null && scoreDelta !== 0 && (
+                          <span style={{ color: scoreDelta > 0 ? "var(--phys)" : "var(--chem)", marginLeft: 6 }}>
+                            {scoreDelta > 0 ? "+" : ""}{scoreDelta}
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                    <div className="np-card np-question">{pQuestion.question}</div>
+
+                    {!feedback && (
+                      <>
+                        <AnswerComposer
+                          value={pText}
+                          onText={setPText}
+                          img={pImg}
+                          onAttach={attachP}
+                          onRemoveImg={() => setPImg(null)}
+                          onSubmit={submitPractice}
+                          submitLabel="Submit reasoning"
+                          loading={busy}
+                        />
+                        <p className="np-hint">No answer will be handed to you. Reason it out, then submit.</p>
+                      </>
+                    )}
+
+                    {feedback && (
+                      <div className="fade-up">
+                        <div className="np-card np-feedhead">
+                          <div>
+                            <div className="np-feedlabel">Reasoning quality this attempt</div>
+                            <div className="np-feedscore">{feedback.reasoningScore}<span style={{ color: "var(--muted)", fontSize: 18 }}>/100</span></div>
+                          </div>
+                          <div className="np-rubric">
+                            {Object.keys(RUBRIC_LABELS).map((k) => (
+                              <div key={k} className="np-rubrow">
+                                <span className="np-rublabel">{RUBRIC_LABELS[k]}</span>
+                                <SegBar value={(feedback.rubric && feedback.rubric[k]) || 0} color={SUBJECTS[pSubject].color} />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {feedback.correctnessNote && <div className="np-note">{feedback.correctnessNote}</div>}
+
+                        <div className="np-card np-socratic">
+                          <div className="np-cardicon"><Icon name="bulb" size={16} /> A question to move you forward</div>
+                          <div className="np-socratictext">{feedback.socraticHint}</div>
+                        </div>
+
+                        <div className="np-card np-lesson">
+                          <div className="np-cardicon" style={{ color: SUBJECTS[pSubject].color }}><Icon name="spark" size={16} /> Concept you're missing</div>
+                          <div className="np-lessontext">{feedback.microLesson}</div>
+                        </div>
+
+                        <div className="np-feedactions">
+                          <button className="np-btn np-primary" onClick={() => startPractice(pSubject)} disabled={busy}>
+                            <Icon name="refresh" size={15} /> Next problem
+                          </button>
+                          <button className="np-ghost" onClick={() => setView("progress")}>See progress over time</button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </main>
+
+      <footer className="np-foot">Prototype · grading is performed live by Groq against a reasoning rubric. Scores are demonstrative.</footer>
+    </div>
+  );
+}
