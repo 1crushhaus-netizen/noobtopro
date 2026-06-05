@@ -16,6 +16,7 @@ import { getSupabase, isSupabaseConfigured, signInWithProvider, signOutUser, PRO
 import ProgressDashboard from "@/components/ProgressDashboard";
 import SignIn from "@/components/SignIn";
 import ProfileTab from "@/components/ProfileTab";
+import LearnTab from "@/components/LearnTab";
 
 /* ----------------------------- icons (inline, no deps) ----------------------------- */
 function Icon({ name, size = 16 }) {
@@ -189,7 +190,7 @@ function Loader({ subject }) {
 /* ----------------------------- app ----------------------------- */
 export default function Noobtopro() {
   const [stage, setStage] = useState("intro"); // intro | signin | diagnostic | scoring | dashboard | practice
-  const [view, setView] = useState("learn"); // learn | progress | profile
+  const [view, setView] = useState("practice"); // practice | learn | progress | profile
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [showAuthNote, setShowAuthNote] = useState(false);
@@ -210,17 +211,27 @@ export default function Noobtopro() {
   const [feedback, setFeedback] = useState(null);
   const [scoreDelta, setScoreDelta] = useState(null);
 
+  // Learn tab: a selected weak concept + its Socratic guidance.
+  const [learnConcept, setLearnConcept] = useState(null); // { subject, concept }
+  const [learnContent, setLearnContent] = useState(null);
+  const [learnBusy, setLearnBusy] = useState(false);
+  const [learnError, setLearnError] = useState("");
+
   // Monotonic token so overlapping hydrate() calls (mount + onAuthStateChange
   // both fire on load) can't clobber each other: only the newest result wins.
   const hydrateRun = useRef(0);
 
   // Where to return when the sign-in menu is dismissed (so opening it mid-flow
   // and pressing Back doesn't discard an in-progress diagnostic or wrong tab).
-  const signinReturn = useRef({ stage: "intro", view: "learn" });
+  const signinReturn = useRef({ stage: "intro", view: "practice" });
 
   // Save-progress modal: focus the dialog on open, restore focus on close.
   const saveModalFocusRef = useRef(null);
   const saveModalPrevFocus = useRef(null);
+
+  // Monotonic token so a slow /api/learn response can't overwrite a newer
+  // concept the user has since clicked.
+  const learnRun = useRef(0);
   function openSignIn() {
     if (stage === "signin") return; // don't overwrite the return target with "signin"
     signinReturn.current = { stage, view };
@@ -260,7 +271,7 @@ export default function Noobtopro() {
       setScores(null);
       setHistory((st && st.history) || []);
       setStage((p) => (p === "dashboard" || p === "practice" ? "intro" : p));
-      setView("learn");
+      setView("practice");
     }
   }
 
@@ -279,7 +290,7 @@ export default function Noobtopro() {
         setStage((p) => (p === "signin" ? "dashboard" : p)); // leave the sign-in menu
         hydrate(); // migrates guest progress, then loads the account
       } else if (event === "SIGNED_OUT") {
-        setView("learn");
+        setView("practice");
         hydrate();
       }
     });
@@ -293,8 +304,11 @@ export default function Noobtopro() {
     Object.values(answers).forEach((a) => revokePreview(a && a.img));
     revokePreview(pImg);
     setShowSaveModal(false);
+    setLearnConcept(null);
+    setLearnContent(null);
+    setLearnError("");
     setStage("intro");
-    setView("learn");
+    setView("practice");
     setQuestions([]);
     setQi(0);
     setAnswers({});
@@ -315,7 +329,10 @@ export default function Noobtopro() {
       await deleteAllUserData();
       setScores(null);
       setHistory([]);
-      setView("learn");
+      setLearnConcept(null);
+      setLearnContent(null);
+      setLearnError("");
+      setView("practice");
       setStage("intro");
       setError("");
     } catch (e) {
@@ -419,6 +436,27 @@ export default function Noobtopro() {
     } catch (e) {
       setError(e.message || "Grading failed.");
       setStage("diagnostic");
+    }
+  }
+
+  /* --- learn --- */
+  // Open the Learn tab on a concept and fetch a Socratic, answer-free guide.
+  async function openLearn(subject, concept) {
+    const myRun = ++learnRun.current;
+    setView("learn");
+    setLearnConcept({ subject, concept });
+    setLearnContent(null);
+    setLearnError("");
+    setLearnBusy(true);
+    try {
+      const data = await api("/api/learn", { subject, concept, score: scores?.[subject]?.score ?? 0 });
+      if (myRun !== learnRun.current) return; // a newer concept was selected
+      setLearnContent(data);
+    } catch (e) {
+      if (myRun !== learnRun.current) return;
+      setLearnError(e.message || "Could not load the concept guide.");
+    } finally {
+      if (myRun === learnRun.current) setLearnBusy(false);
     }
   }
 
@@ -606,7 +644,10 @@ export default function Noobtopro() {
 
       {(user || scores) && stage !== "signin" && (
         <nav className="np-nav" inert={bgInert}>
-          <button className={"np-tab" + (view === "learn" ? " active" : "")} onClick={() => setView("learn")}>Learn</button>
+          <button className={"np-tab" + (view === "practice" ? " active" : "")} onClick={() => setView("practice")}>Practice</button>
+          {scores && (
+            <button className={"np-tab" + (view === "learn" ? " active" : "")} onClick={() => setView("learn")}>Learn</button>
+          )}
           {scores && (
             <button className={"np-tab" + (view === "progress" ? " active" : "")} onClick={() => setView("progress")}>Progress</button>
           )}
@@ -648,17 +689,27 @@ export default function Noobtopro() {
             user={user}
             scores={scores}
             history={history}
-            onStartDiagnostic={() => { setView("learn"); beginDiagnostic(); }}
-            onPractice={(s) => { setView("learn"); startPractice(s); }}
+            onStartDiagnostic={() => { setView("practice"); beginDiagnostic(); }}
+            onPractice={(s) => { setView("practice"); startPractice(s); }}
             onSignOut={() => signOutUser()}
             onReset={resetProgress}
             onViewProgress={() => setView("progress")}
+          />
+        ) : view === "learn" && scores ? (
+          <LearnTab
+            scores={scores}
+            active={learnConcept}
+            content={learnContent}
+            busy={learnBusy}
+            error={learnError}
+            onSelect={openLearn}
+            onPractice={(s) => { setView("practice"); startPractice(s); }}
           />
         ) : view === "progress" && scores ? (
           <ProgressDashboard
             scores={scores}
             history={history}
-            onPractice={(s) => { setView("learn"); startPractice(s); }}
+            onPractice={(s) => { setView("practice"); startPractice(s); }}
           />
         ) : (
           <>
@@ -762,7 +813,17 @@ export default function Noobtopro() {
                           <div className="np-weakwrap">
                             <div className="np-weaklabel">Work on</div>
                             <div className="np-weaktags">
-                              {s.weakConcepts.slice(0, 3).map((w, i) => (<span key={i} className="np-weaktag">{w}</span>))}
+                              {s.weakConcepts.slice(0, 3).map((w, i) => (
+                                <button
+                                  key={i}
+                                  type="button"
+                                  className="np-weaktag np-weaktag-btn"
+                                  title={`Learn: ${w}`}
+                                  onClick={() => openLearn(k, w)}
+                                >
+                                  {w}
+                                </button>
+                              ))}
                             </div>
                           </div>
                         )}
