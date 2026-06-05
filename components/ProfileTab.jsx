@@ -95,7 +95,15 @@ export default function ProfileTab({
 
           <div className="np-feedactions">
             <button className="np-ghost" onClick={onViewProgress}>See progress over time</button>
-            <button className="np-ghost" onClick={onReset} style={{ color: "var(--chem)" }}>Reset my progress</button>
+            <button
+              className="np-ghost"
+              style={{ color: "var(--chem)" }}
+              onClick={() => {
+                if (window.confirm("This permanently deletes all your scores and history. Continue?")) onReset();
+              }}
+            >
+              Reset my progress
+            </button>
           </div>
         </>
       )}

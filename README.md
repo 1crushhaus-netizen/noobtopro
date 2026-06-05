@@ -118,7 +118,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon public key>
 
 Restart `npm run dev`. The header button now reads **Sign in with Google**, and once signed in, scores and history persist to Supabase and follow you across devices.
 
-> Guest (local) progress is not auto-migrated on first sign-in — a signed-in user starts from their own record.
+> Guest (local) progress **is** migrated into the account on first sign-in, via the atomic `migrate_guest_data` Postgres RPC (see `db/schema.sql`). It only fills an empty account, so it never clobbers existing data.
 
 ---
 
@@ -195,7 +195,7 @@ For Supabase + Google sign-in (including adding your Vercel URLs to Supabase's r
 1. **Grading consistency is the real risk.** LLM scores drift attempt-to-attempt; production needs anchored rubric exemplars, multiple grading samples averaged, and difficulty-tagged questions.
 2. **Adaptive diagnostic + a true score model (IRT)** so a 0–100 number is reliable, instead of one question per subject.
 3. **A concept graph per subject** so "weak on X" routes to the right next problems.
-4. **Local→account migration** so guest progress carries over on first sign-in.
+4. ~~Local→account migration so guest progress carries over on first sign-in.~~ ✅ Done (atomic `migrate_guest_data` RPC).
 
 ---
 

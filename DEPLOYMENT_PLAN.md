@@ -90,7 +90,10 @@ Goal: a working URL before any keys, to confirm the build + hosting are solid. T
 >   public, RLS-protected value. Paste both into Vercel → Settings → Environment
 >   Variables (Production + Preview + Development), then redeploy.
 
-The schema that was applied (for reference; `lib/store.js` expects exactly this):
+The full applied schema — **tables, RLS, and the two required RPCs**
+(`migrate_guest_data`, `delete_user_data`) — lives in [`db/schema.sql`](./db/schema.sql),
+which is the source of truth for reproducing the database. `lib/store.js` depends
+on those functions, not just the tables. The tables (for quick reference):
 
 ```sql
 create table scores (
@@ -158,7 +161,7 @@ The app calls `signInWithOAuth` with `redirectTo: window.location.origin`, so it
 
 **E. Test:** click **Sign in with Google** on the live site → Google consent → you land back signed in, and your scores/history now persist to Supabase.
 
-> Known limitation (by design): guest progress is **not** auto-migrated on first sign-in — a new account starts fresh. I can add local→account migration later if you want it (§13).
+> Guest progress **is** migrated into the account on first sign-in (atomic `migrate_guest_data` RPC; see `db/schema.sql`), so a guest who completes the diagnostic and then signs in keeps their results.
 
 ---
 
@@ -206,7 +209,7 @@ I will **not** push to your GitHub without you — I'll prepare commits and you 
 - **Env changes need a redeploy** — keys added in Vercel don't apply to the *current* deployment; redeploy after each change.
 - **Preview-URL sign-in** — without the `noobtopro-*.vercel.app/**` wildcard in Supabase, sign-in works in production but fails on preview URLs.
 - **Groq model drift** — Groq rotates model IDs; the two defaults are valid today, but if a call starts 400'ing, the model ID is the first suspect (override via env, no code change).
-- **Guest data isn't migrated** on first sign-in (by design, for now).
+- **Guest data is migrated** into the account on first sign-in (atomic `migrate_guest_data` RPC).
 
 ---
 

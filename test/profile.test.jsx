@@ -32,13 +32,20 @@ describe("ProfileTab", () => {
     expect(screen.getByText("Chemistry")).toBeTruthy();
   });
 
-  it("fires onSignOut and onReset", () => {
+  it("fires onSignOut, and onReset only after confirmation", () => {
     const onSignOut = vi.fn();
     const onReset = vi.fn();
     render(<ProfileTab user={user} scores={scores} history={[]} onSignOut={onSignOut} onReset={onReset} onPractice={() => {}} onViewProgress={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: /sign out/i }));
     expect(onSignOut).toHaveBeenCalled();
+
+    // Reset is guarded by a confirm() — declined: no-op; confirmed: fires.
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    fireEvent.click(screen.getByRole("button", { name: /reset my progress/i }));
+    expect(onReset).not.toHaveBeenCalled();
+    confirmSpy.mockReturnValue(true);
     fireEvent.click(screen.getByRole("button", { name: /reset my progress/i }));
     expect(onReset).toHaveBeenCalled();
+    confirmSpy.mockRestore();
   });
 });
