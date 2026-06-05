@@ -22,11 +22,21 @@ export const SCALE_NOTE =
 
 // scores shape used across the app: { math: { score, weakConcepts, comment }, ... }
 
+// Coerce any value (including model output that may be missing, a string, or
+// out of range) to an integer in [0, 100]. Returns null when there is no usable
+// number, so callers can distinguish "no signal" from a real zero.
+export function clampScore(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
 export function band(s) {
-  if (s < 20) return "Absolute beginner";
-  if (s < 40) return "Foundational";
-  if (s < 60) return "Intermediate";
-  if (s < 80) return "Advanced";
+  const n = clampScore(s) ?? 0;
+  if (n < 20) return "Absolute beginner";
+  if (n < 40) return "Foundational";
+  if (n < 60) return "Intermediate";
+  if (n < 80) return "Advanced";
   return "PhD-level";
 }
 
@@ -34,8 +44,11 @@ export function band(s) {
 // A production build should replace this with an IRT / Elo-style model that
 // accounts for question difficulty and uncertainty.
 export function blend(prev, suggestion) {
-  const sug = Math.max(0, Math.min(100, Number(suggestion) || 0));
-  if (typeof prev !== "number") return Math.round(sug);
+  const sug = clampScore(suggestion);
+  // A malformed/missing suggestion (e.g. the grader returned no number) must not
+  // drag an existing score toward zero — keep the learner's current level.
+  if (sug === null) return typeof prev === "number" ? prev : 0;
+  if (typeof prev !== "number") return sug;
   return Math.max(0, Math.min(100, Math.round(prev * 0.65 + sug * 0.35)));
 }
 

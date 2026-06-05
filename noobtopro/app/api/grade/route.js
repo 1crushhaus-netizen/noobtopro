@@ -1,32 +1,75 @@
 import { NextResponse } from "next/server";
 import { groqJSON, DIAG_GRADE_SYS, PRACTICE_GRADE_SYS } from "@/lib/groq";
+import { clampScore } from "@/lib/scoring";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(req) {
-  try {
-    const { kind, subject, question, targetConcept, score, reasoning, image } = await req.json();
-    const work = reasoning && reasoning.trim() ? reasoning.trim() : "(no written reasoning provided)";
+// Base64 inflates bytes ~33%, so this caps the decoded upload near ~5.5 MB.
+// Guards the route (and our Groq bill) against arbitrarily large image payloads.
+const MAX_IMAGE_BASE64_CHARS = 7_500_000;
 
+// Validate an optional attached image. Returns { ok, image } or { ok:false, error }.
+function normalizeImage(image) {
+  if (image == null) return { ok: true, image: undefined };
+  if (typeof image !== "object" || typeof image.data !== "string") {
+    return { ok: false, error: "image must be an object with base64 string data." };
+  }
+  if (image.data.length > MAX_IMAGE_BASE64_CHARS) {
+    return { ok: false, error: "Attached image is too large. Please use a smaller photo." };
+  }
+  return { ok: true, image: { mime: image.mime, data: image.data } };
+}
+
+export async function POST(req) {
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Request body must be valid JSON." }, { status: 400 });
+  }
+
+  const { kind, subject, question, targetConcept, score, reasoning, image } = body || {};
+  const work = typeof reasoning === "string" && reasoning.trim() ? reasoning.trim() : "(no written reasoning provided)";
+
+  if (kind !== "diagnostic" && kind !== "practice") {
+    return NextResponse.json(
+      { error: 'kind must be "diagnostic" or "practice".' },
+      { status: 400 }
+    );
+  }
+  if (typeof subject !== "string" || typeof question !== "string") {
+    return NextResponse.json(
+      { error: "subject and question are required." },
+      { status: 400 }
+    );
+  }
+
+  const img = normalizeImage(image);
+  if (!img.ok) return NextResponse.json({ error: img.error }, { status: 400 });
+
+  try {
     if (kind === "diagnostic") {
       const data = await groqJSON({
         system: DIAG_GRADE_SYS,
         user: `Subject: ${subject}\nQuestion: ${question}\n\nLearner's reasoning:\n"""${work}"""`,
-        image,
+        image: img.image,
       });
-      return NextResponse.json(data);
+      // Clamp the model's score before it reaches the client/UI.
+      const clamped = clampScore(data?.score);
+      return NextResponse.json({ ...data, score: clamped ?? 0 });
     }
 
     // practice
+    const safeScore = clampScore(score) ?? 0;
     const data = await groqJSON({
       system: PRACTICE_GRADE_SYS,
       user:
         `Subject: ${subject}\n` +
         `Question: ${question}\n` +
-        `Concept being probed: ${targetConcept}\n` +
-        `Learner's current level: ${score}/100\n\n` +
+        `Concept being probed: ${targetConcept || "(unspecified)"}\n` +
+        `Learner's current level: ${safeScore}/100\n\n` +
         `Learner's reasoning:\n"""${work}"""`,
-      image,
+      image: img.image,
     });
     return NextResponse.json(data);
   } catch (e) {
