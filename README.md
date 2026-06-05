@@ -142,6 +142,28 @@ These live in `lib/scoring.js` — change them there to weight subjects differen
 
 ---
 
+## Tests
+
+Unit tests run on [Vitest](https://vitest.dev/):
+
+```bash
+npm test          # run once (CI uses this)
+npm run test:watch
+```
+
+They cover the pure scoring logic (`lib/scoring.js`), the Groq client's JSON
+parsing + graceful degradation (`lib/groq.js`), and both API routes' input
+validation and model-output normalization (`app/api/*`) — including the
+regressions hardened during review (score clamping, `band`/`blend` edge cases,
+the image MIME allowlist, and free-text caps). API tests mock Groq's HTTP call,
+so no key or network is needed.
+
+CI (`.github/workflows/ci.yml`) runs `npm test` then `npm run build` on every
+pull request. Enable branch protection on `main` and require the **Test and
+build** check so nothing merges unless both pass.
+
+---
+
 ## Deploy on Vercel
 
 This app has a server side — the `/api/generate` and `/api/grade` route handlers that call Groq — so it needs a host that runs Node, not a static host like GitHub Pages. Vercel runs it as-is and keeps `GROQ_API_KEY` server-side.

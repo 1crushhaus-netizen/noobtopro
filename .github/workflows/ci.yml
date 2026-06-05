@@ -1,0 +1,36 @@
+name: CI
+
+# Runs on every PR and on pushes to main. Configure branch protection on `main`
+# to require the "test" job below, so nothing merges unless tests + build pass.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+        env:
+          # Build must succeed without real secrets; the app degrades to guest
+          # mode and the API routes only read these at request time.
+          GROQ_API_KEY: ""
+          NEXT_PUBLIC_SUPABASE_URL: ""
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ""
