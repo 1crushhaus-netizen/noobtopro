@@ -150,6 +150,22 @@ describe("POST /api/learn — shared cache", () => {
     expect(written.content.overview).toBe("fresh");
   });
 
+  it("re-normalizes a malformed cached row before serving it", async () => {
+    // A row whose array fields aren't arrays must not reach the client raw.
+    const bad = { subject: "math", concept: "limits", overview: "ok", keyIdeas: "not-an-array", socraticQuestions: null, pitfalls: 5, tryThis: 42 };
+    mocks.getAdmin.mockReturnValue(fakeAdmin({ hitContent: bad }));
+    vi.stubGlobal("fetch", vi.fn(() => { throw new Error("no Groq on a hit"); }));
+    const res = await POST(req({ subject: "math", concept: "limits" }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.cached).toBe(true);
+    expect(Array.isArray(json.keyIdeas)).toBe(true);
+    expect(json.keyIdeas).toEqual([]);
+    expect(Array.isArray(json.socraticQuestions)).toBe(true);
+    expect(Array.isArray(json.pitfalls)).toBe(true);
+    expect(typeof json.tryThis).toBe("string");
+  });
+
   it("still returns the guide if the cache write fails", async () => {
     mocks.getAdmin.mockReturnValue(fakeAdmin({ hitContent: null, upsertThrows: true }));
     mockGroqReturning({ overview: "fresh2", keyIdeas: [], socraticQuestions: [], pitfalls: [], tryThis: "" });
