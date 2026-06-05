@@ -38,6 +38,16 @@ describe("groqJSON", () => {
     expect(out).toEqual({ a: 1, b: 2 });
   });
 
+  it("parses valid JSON whose string values contain braces", async () => {
+    // The old first-{/last-} slice grabbed the brace inside the string and broke.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => reply('{"microLesson":"use the set {a, b}","score":80}'))
+    );
+    const out = await groqJSON({ system: "s", user: "u" });
+    expect(out).toEqual({ microLesson: "use the set {a, b}", score: 80 });
+  });
+
   it("falls back to a non-JSON-mode retry when the first response is unparseable", async () => {
     const fetchMock = vi
       .fn()
