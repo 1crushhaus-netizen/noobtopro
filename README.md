@@ -142,6 +142,24 @@ These live in `lib/scoring.js` — change them there to weight subjects differen
 
 ---
 
+## Deploy on Vercel
+
+This app has a server side — the `/api/generate` and `/api/grade` route handlers that call Groq — so it needs a host that runs Node, not a static host like GitHub Pages. Vercel runs it as-is and keeps `GROQ_API_KEY` server-side.
+
+1. **Import the repo** at <https://vercel.com> → *Add New… → Project*.
+2. **Leave the Root Directory as the repo root** (the default). The Next.js app — its `package.json`, `app/`, `lib/`, etc. — lives at the root of the repository, so Vercel auto-detects the framework as **Next.js** with no Root Directory override. (If you previously deployed when the app was nested in a `noobtopro/` subfolder and set Root Directory to `noobtopro`, clear that setting back to the repo root, or the build will fail to find the app.)
+3. **Add environment variables** (Project → Settings → Environment Variables), scoped to Production + Preview + Development — same names as [`.env.example`](./.env.example):
+   - `GROQ_API_KEY` — required for the LLM features.
+   - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` — optional; enable Google sign-in + storage.
+   - optional `GROQ_MODEL`, `GROQ_VISION_MODEL`.
+
+   Env-var changes apply only to a **new** deployment — redeploy after editing them.
+4. **Push to deploy.** Pushes to the production branch update production; every other branch/PR gets its own **preview URL**, which is ideal for testing fixes in isolation.
+
+For Supabase + Google sign-in (including adding your Vercel URLs to Supabase's redirect allow list, with a `*.vercel.app` wildcard so preview deployments can sign in too), see the Supabase section above and [`DEPLOYMENT_PLAN.md`](./DEPLOYMENT_PLAN.md) at the repo root.
+
+---
+
 ## Push this to GitHub
 
 Delivered as files (I can't push to your repo without your GitHub login, which I won't handle). From the unzipped folder:

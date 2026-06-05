@@ -66,6 +66,18 @@ function fileToBase64(file) {
 
 const now = () => new Date().toISOString();
 
+// Object URLs created for image previews must be revoked or they leak memory
+// for the life of the page. Safe to call with a missing/blob-less image.
+function revokePreview(img) {
+  if (img && img.preview) {
+    try {
+      URL.revokeObjectURL(img.preview);
+    } catch {
+      /* already revoked / not an object URL */
+    }
+  }
+}
+
 /* ----------------------------- small ui ----------------------------- */
 function Ring({ value, color, size = 96, stroke = 9 }) {
   const r = (size - stroke) / 2;
@@ -214,6 +226,9 @@ export default function Noobtopro() {
 
   async function reset() {
     await resetAll();
+    // Release any outstanding image previews before clearing state.
+    Object.values(answers).forEach((a) => revokePreview(a && a.img));
+    revokePreview(pImg);
     setStage("intro");
     setView("learn");
     setQuestions([]);
@@ -260,12 +275,17 @@ export default function Noobtopro() {
   }
   async function attachCur(file) {
     const data = await fileToBase64(file);
+    // Create the object URL OUTSIDE the updater: React Strict Mode runs updaters
+    // twice and would otherwise mint (and leak) a discarded blob URL each attach.
+    revokePreview(curAns.img);
+    const preview = URL.createObjectURL(file);
     setAnswers((a) => ({
       ...a,
-      [curSubject]: { ...a[curSubject], img: { data, mime: file.type, name: file.name, preview: URL.createObjectURL(file) } },
+      [curSubject]: { ...a[curSubject], img: { data, mime: file.type, name: file.name, preview } },
     }));
   }
   function removeCurImg() {
+    revokePreview(curAns.img);
     setAnswers((a) => ({ ...a, [curSubject]: { ...a[curSubject], img: null } }));
   }
 
@@ -333,7 +353,11 @@ export default function Noobtopro() {
 
   async function attachP(file) {
     const data = await fileToBase64(file);
-    setPImg({ data, mime: file.type, name: file.name, preview: URL.createObjectURL(file) });
+    // Object URL created outside the updater (see attachCur) to stay leak-free
+    // under Strict Mode's double invocation.
+    revokePreview(pImg);
+    const preview = URL.createObjectURL(file);
+    setPImg({ data, mime: file.type, name: file.name, preview });
   }
 
   async function submitPractice() {
@@ -575,7 +599,7 @@ export default function Noobtopro() {
                           onText={setPText}
                           img={pImg}
                           onAttach={attachP}
-                          onRemoveImg={() => setPImg(null)}
+                          onRemoveImg={() => { revokePreview(pImg); setPImg(null); }}
                           onSubmit={submitPractice}
                           submitLabel="Submit reasoning"
                           loading={busy}
