@@ -87,15 +87,15 @@ A focused screen with one button per provider and a short trust line ("We never 
 6. **`app/globals.css`** — `np-`-style classes for the sign-in buttons and the profile card (reuse existing tokens).
 7. **Tests** — `deleteAllUserData` (mock Supabase); gating logic (when `!user`, Begin diagnostic opens the sign-in menu and does **not** call `/api/generate`); `SignIn` renders Google enabled + GitHub/Discord disabled; `ProfileTab` renders its three states.
 
-## 7. Adding GitHub & Discord later (turning the placeholders on)
+## 7. Adding GitHub & Discord (turning the placeholders on)
 
-Each is the same shape as the Google setup — create an OAuth app at the provider, point its callback at Supabase, enable the provider in Supabase, then flip `enabled: true` in `PROVIDERS`. The Supabase callback is stable: `https://vwvhgnlgubctrgksyohr.supabase.co/auth/v1/callback`.
+The buttons are now **env-toggleable** — `PROVIDERS` reads `NEXT_PUBLIC_ENABLE_GITHUB` / `NEXT_PUBLIC_ENABLE_DISCORD`, so each goes live the moment it's configured, with **no app-code change**. Full step-by-step (verified against Supabase docs) is in [`AUTH_PROVIDERS.md`](./AUTH_PROVIDERS.md). In short, per provider:
 
-- **GitHub:** GitHub → Settings → Developer settings → **OAuth Apps → New** → Authorization callback URL = the Supabase callback → copy Client ID/Secret → Supabase → Auth → Providers → **GitHub** → enable + paste.
-- **Discord:** Discord Developer Portal → **New Application** → OAuth2 → add the Supabase callback as a redirect → copy Client ID/Secret → Supabase → Auth → Providers → **Discord** → enable + paste.
-- Same redirect allow-list as Google (Supabase → Auth → URL Configuration) already covers them.
+1. Create the OAuth app at the provider, callback = `https://vwvhgnlgubctrgksyohr.supabase.co/auth/v1/callback`.
+2. Paste Client ID/Secret into Supabase → Auth → Sign In/Providers → enable.
+3. Set `NEXT_PUBLIC_ENABLE_GITHUB=true` (or `…DISCORD`) in Vercel + redeploy.
 
-Until then the buttons stay disabled with a "Coming soon" badge — no dead ends.
+Until step 3, the button stays disabled with a "Coming soon" badge — no dead ends. Do step 2 before step 3 so an enabled button is never pointed at an unconfigured provider.
 
 ## 8. Optional: enforce the gate server-side
 

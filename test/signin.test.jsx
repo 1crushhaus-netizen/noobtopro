@@ -48,4 +48,24 @@ describe("SignIn menu", () => {
     fireEvent.click(screen.getByRole("button", { name: /back/i }));
     expect(onBack).toHaveBeenCalled();
   });
+
+  it("renders an enabled GitHub/Discord provider as a working button", () => {
+    // When the env flags turn these on, the same component must let them sign in.
+    const enabledAll = [
+      { id: "google", label: "Google", enabled: true },
+      { id: "github", label: "GitHub", enabled: true },
+      { id: "discord", label: "Discord", enabled: true },
+    ];
+    const onProvider = vi.fn();
+    render(<SignIn providers={enabledAll} onProvider={onProvider} onBack={() => {}} />);
+    const gh = screen.getByRole("button", { name: /continue with github/i });
+    const dc = screen.getByRole("button", { name: /continue with discord/i });
+    expect(gh.disabled).toBe(false);
+    expect(dc.disabled).toBe(false);
+    expect(screen.queryByText(/coming soon/i)).toBe(null);
+    fireEvent.click(gh);
+    expect(onProvider).toHaveBeenCalledWith("github");
+    fireEvent.click(dc);
+    expect(onProvider).toHaveBeenCalledWith("discord");
+  });
 });
