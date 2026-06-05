@@ -36,13 +36,14 @@ Today the app runs fully as a **guest** (localStorage): `beginDiagnostic()` (`co
 
 ## 5. UX flows
 
-### 5.1 Begin diagnostic → Sign-in menu
+### 5.1 Guest-first diagnostic, then prompt to save (IMPLEMENTED P1)
 
-The landing CTA's behaviour depends on auth:
+> **Decision (final):** rather than gating *before* the diagnostic, anyone can take it as a **guest**; on completion we prompt them to sign in to save. This is the friendlier "try, then convert" flow.
 
-- **Not signed in** → **Begin diagnostic** routes to the **Sign-in menu** (a new `stage: "signin"`), *not* a direct provider call.
-- **Signed in, no diagnostic yet** → **Begin diagnostic** runs `beginDiagnostic()` directly.
-- **Signed in, diagnostic done** → `hydrate()` already routes to the dashboard, so they skip intro.
+- **Begin diagnostic** runs immediately for everyone — no login required to start.
+- On reaching the **dashboard** as a guest, a **"Sign in to save your progress"** card appears → opens the **Sign-in menu** (`stage: "signin"`).
+- After sign-in, the guest's localStorage scores/attempts **migrate into the account** (`migrateGuestToAccount()`), into an empty account only, preserving the original attempt timeline.
+- The Sign-in menu is also reachable from the header **Sign in** button.
 
 ### 5.2 The Sign-in menu (`stage: "signin"` → `components/SignIn.jsx`)
 
@@ -113,9 +114,9 @@ The sign-in menu is a **UX** gate; `/api/generate` and `/api/grade` can still be
 
 | # | Decision | Default |
 |---|---|---|
-| 1 | **Guest mode** now that sign-in is required to start | Keep the localStorage code as a harmless fallback; don't remove it yet |
-| 2 | **Existing guest progress** on first sign-in | Add local→account migration so it carries over (P2) |
-| 3 | **After sign-in** | P1: land on an enabled intro; P2: auto-resume into the diagnostic via the sessionStorage flag |
+| 1 | **Guest mode** | ✅ **Decided:** keep it — diagnostic runs in guest mode, then we prompt to sign in to save (§5.1) |
+| 2 | **Existing guest progress** on first sign-in | ✅ **Decided & implemented:** `migrateGuestToAccount()` folds guest scores/attempts into an empty account on sign-in |
+| 3 | **After sign-in** | Land on the dashboard with migrated data; full-page OAuth redirect resets state (auto-resume via sessionStorage deferred to P2) |
 | 4 | **If Supabase isn't configured** (dev/local) | Fall back to today's open behaviour rather than blocking |
 | 5 | **Enforcement** | Client-side gate only for now; add the server JWT check later if abuse appears |
 | 6 | **No manual email/password auth** | **Fixed by you** — OAuth-only, never store credentials (§2) |
