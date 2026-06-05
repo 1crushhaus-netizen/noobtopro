@@ -38,13 +38,16 @@ describe("groqJSON", () => {
     expect(out).toEqual({ a: 1, b: 2 });
   });
 
-  it("parses valid JSON whose string values contain braces", async () => {
+  it("parses JSON with braces in a string value amid prose with stray braces", async () => {
+    // Pins the fix on a single input: the leading "{a,b}" defeats the old
+    // indexOf("{") start, and the "{x, y}" inside the string value would defeat
+    // a non-string-aware brace counter. Old extractJSON throws on this; new passes.
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => reply('{"microLesson":"use the set {a, b}","score":80}'))
+      vi.fn(async () => reply('Concept {a,b}: {"microLesson":"use the set {x, y}","score":80}'))
     );
     const out = await groqJSON({ system: "s", user: "u" });
-    expect(out).toEqual({ microLesson: "use the set {a, b}", score: 80 });
+    expect(out).toEqual({ microLesson: "use the set {x, y}", score: 80 });
   });
 
   it("extracts the object when trailing prose contains a stray brace", async () => {
