@@ -172,13 +172,46 @@ body {
 @keyframes npBackdropIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes npModalIn { from { opacity: 0; transform: translateY(12px) scale(.97); } to { opacity: 1; transform: none; } }
 
+/* ---- clickable weak-concept tags + Learn tab ---- */
+.np-weaktag-btn {
+  font-family: var(--ui); color: var(--text); cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, transform .1s ease;
+}
+.np-weaktag-btn:hover { border-color: rgba(255,255,255,.32); background: rgba(255,255,255,.09); }
+.np-weaktag-btn:active { transform: translateY(1px); }
+
+.np-learngroup { padding: 6px 0; }
+.np-learngroup + .np-learngroup { border-top: 1px solid var(--line); margin-top: 6px; }
+.np-learngrouphead {
+  display: flex; align-items: center; gap: 8px; margin: 6px 0 10px;
+  font-size: 14px; font-weight: 600;
+}
+.np-concepttag {
+  background: rgba(255,255,255,.04); border: 1px solid var(--line); color: var(--text);
+  border-radius: 8px; padding: 6px 12px; font-size: 13px; font-family: var(--ui);
+  cursor: pointer; transition: border-color .15s ease, background .15s ease, color .15s ease;
+}
+.np-concepttag:hover { border-color: rgba(255,255,255,.3); background: rgba(255,255,255,.08); }
+.np-concepttag.active { background: rgba(255,255,255,.06); font-weight: 600; }
+
+.np-learnlist { list-style: none; padding: 0; margin: 4px 0 0; display: flex; flex-direction: column; gap: 9px; }
+.np-learnlist li {
+  position: relative; padding-left: 18px; font-size: 15px; line-height: 1.5; color: var(--text);
+}
+.np-learnlist li::before {
+  content: ""; position: absolute; left: 2px; top: 9px;
+  width: 6px; height: 6px; border-radius: 50%; background: var(--dot, var(--muted));
+}
+
 /* ---- keyboard focus visibility (a11y) ---- */
 .np-providerbtn:focus-visible,
 .np-btn:focus-visible,
 .np-ghost:focus-visible,
 .np-signinbtn:focus-visible,
 .np-tab:focus-visible,
-.np-iconbtn:focus-visible {
+.np-iconbtn:focus-visible,
+.np-weaktag-btn:focus-visible,
+.np-concepttag:focus-visible {
   outline: 2px solid var(--math);
   outline-offset: 2px;
 }
