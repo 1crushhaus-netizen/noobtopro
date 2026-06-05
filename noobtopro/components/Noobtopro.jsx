@@ -275,19 +275,18 @@ export default function Noobtopro() {
   }
   async function attachCur(file) {
     const data = await fileToBase64(file);
-    setAnswers((a) => {
-      revokePreview(a[curSubject] && a[curSubject].img);
-      return {
-        ...a,
-        [curSubject]: { ...a[curSubject], img: { data, mime: file.type, name: file.name, preview: URL.createObjectURL(file) } },
-      };
-    });
+    // Create the object URL OUTSIDE the updater: React Strict Mode runs updaters
+    // twice and would otherwise mint (and leak) a discarded blob URL each attach.
+    revokePreview(curAns.img);
+    const preview = URL.createObjectURL(file);
+    setAnswers((a) => ({
+      ...a,
+      [curSubject]: { ...a[curSubject], img: { data, mime: file.type, name: file.name, preview } },
+    }));
   }
   function removeCurImg() {
-    setAnswers((a) => {
-      revokePreview(a[curSubject] && a[curSubject].img);
-      return { ...a, [curSubject]: { ...a[curSubject], img: null } };
-    });
+    revokePreview(curAns.img);
+    setAnswers((a) => ({ ...a, [curSubject]: { ...a[curSubject], img: null } }));
   }
 
   function nextDiagnostic() {
@@ -354,10 +353,11 @@ export default function Noobtopro() {
 
   async function attachP(file) {
     const data = await fileToBase64(file);
-    setPImg((prev) => {
-      revokePreview(prev);
-      return { data, mime: file.type, name: file.name, preview: URL.createObjectURL(file) };
-    });
+    // Object URL created outside the updater (see attachCur) to stay leak-free
+    // under Strict Mode's double invocation.
+    revokePreview(pImg);
+    const preview = URL.createObjectURL(file);
+    setPImg({ data, mime: file.type, name: file.name, preview });
   }
 
   async function submitPractice() {
@@ -599,7 +599,7 @@ export default function Noobtopro() {
                           onText={setPText}
                           img={pImg}
                           onAttach={attachP}
-                          onRemoveImg={() => setPImg((prev) => { revokePreview(prev); return null; })}
+                          onRemoveImg={() => { revokePreview(pImg); setPImg(null); }}
                           onSubmit={submitPractice}
                           submitLabel="Submit reasoning"
                           loading={busy}
