@@ -44,7 +44,7 @@ export default function ProfileTab({
       {!completed ? (
         <div className="np-card" style={{ textAlign: "center", padding: "36px 24px" }}>
           <h2 className="np-h2">No diagnostic yet</h2>
-          <p className="np-lede" style={{ marginBottom: 20 }}>
+          <p className="np-lede" style={{ margin: "0 auto 20px" }}>
             Take the three-question diagnostic to get your starting scores in math, physics, and chemistry.
           </p>
           <button className="np-btn np-primary np-big" onClick={onStartDiagnostic}>Begin diagnostic</button>
