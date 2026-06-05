@@ -18,7 +18,13 @@ function LineChart({ values, yMax = 300, color = "#F2B441" }) {
   const grid = [0, yMax / 3, (2 * yMax) / 3, yMax];
 
   return (
-    <svg className="np-chart" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet">
+    <svg
+      className="np-chart"
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-label={`Total points over time across ${values.length} graded points, ending at ${values[values.length - 1]} of ${yMax}.`}
+    >
       {grid.map((g, i) => (
         <g key={i}>
           <line x1={padL} x2={W - padR} y1={y(g)} y2={y(g)} stroke="rgba(255,255,255,.07)" strokeWidth="1" />
@@ -51,7 +57,13 @@ function BarChart({ items }) {
   const bw = Math.min(46, slot * 0.6);
 
   return (
-    <svg className="np-chart" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet">
+    <svg
+      className="np-chart"
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-label={`Points gained or lost across ${items.length} graded attempts.`}
+    >
       <line x1={padL} x2={W - padR} y1={zeroY} y2={zeroY} stroke="rgba(255,255,255,.18)" strokeWidth="1" />
       {items.map((d, i) => {
         const cx = padL + slot * (i + 0.5);

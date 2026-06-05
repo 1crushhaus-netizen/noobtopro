@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server";
 import { groqJSON, DIAG_GRADE_SYS, PRACTICE_GRADE_SYS } from "@/lib/groq";
-import { clampScore, SUBJECTS } from "@/lib/scoring";
+import { clampScore, ORDER } from "@/lib/scoring";
 import { rateLimit, clientKey } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 
-// Base64 inflates bytes ~33%, so this caps the decoded upload near ~5.5 MB.
-// Guards the route (and our Groq bill) against arbitrarily large image payloads.
-const MAX_IMAGE_BASE64_CHARS = 7_500_000;
+// Cap the base64 image at ~3 MB decoded. Kept under Vercel's ~4.5 MB request
+// body limit so this check is actually reachable (the platform would otherwise
+// reject the request first), and bounds the cost of the base64 validation below.
+const MAX_IMAGE_BASE64_CHARS = 4_000_000;
+// Standard base64 alphabet (no data: prefix, no whitespace).
+const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 
 // Cap each free-text field injected into the prompt. ~12k chars is far longer
 // than any genuine reasoning answer, but bounds the token count (and Groq cost)
@@ -36,6 +39,11 @@ function normalizeImage(image) {
   }
   if (image.data.length > MAX_IMAGE_BASE64_CHARS) {
     return { ok: false, error: "Attached image is too large. Please use a smaller photo." };
+  }
+  // Reject anything that isn't real base64 before it's spliced into the data:
+  // URL sent upstream (length-bounded above, so this regex is cheap).
+  if (!BASE64_RE.test(image.data)) {
+    return { ok: false, error: "Attached image is not valid base64 data." };
   }
   // A missing mime is fine (the Groq client defaults it); a present one must be
   // on the allowlist so an arbitrary string never reaches the upstream call.
@@ -89,9 +97,9 @@ export async function POST(req) {
       { status: 400 }
     );
   }
-  // Bound subject to the known set (matches /api/generate) so an arbitrary
-  // string can't be injected into the grading prompt.
-  if (!SUBJECTS[subject]) {
+  // Bound subject to the known set (matches /api/generate). ORDER.includes — not
+  // SUBJECTS[subject] — so inherited keys ("constructor"/"__proto__") can't pass.
+  if (!ORDER.includes(subject)) {
     return NextResponse.json({ error: `Unknown subject "${subject}".` }, { status: 400 });
   }
 
@@ -132,6 +140,12 @@ export async function POST(req) {
       rubric: normalizeRubric(data?.rubric),
     });
   } catch (e) {
-    return NextResponse.json({ error: e.message || "Grading failed" }, { status: 500 });
+    // Log server-side; return a generic message so upstream Groq status/body
+    // detail (keys, quota state, model IDs) never leaks to the client.
+    console.error("[/api/grade]", e);
+    return NextResponse.json(
+      { error: "Grading is temporarily unavailable. Please try again." },
+      { status: 500 }
+    );
   }
 }

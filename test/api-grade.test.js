@@ -64,6 +64,46 @@ describe("POST /api/grade — input validation (no network)", () => {
     expect(json.error).toMatch(/Unknown subject/);
   });
 
+  it("rejects an inherited/prototype subject key with 400", async () => {
+    for (const subject of ["constructor", "__proto__", "toString"]) {
+      const res = await POST(req({ kind: "diagnostic", subject, question: "Q" }));
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it("rejects non-base64 image data with 400", async () => {
+    const res = await POST(
+      req({
+        kind: "diagnostic",
+        subject: "math",
+        question: "Q",
+        image: { mime: "image/png", data: "not*valid*base64!" },
+      })
+    );
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toMatch(/base64/i);
+  });
+
+  it("returns a generic 500 that does not leak upstream Groq detail", async () => {
+    // Groq replies non-OK with a revealing body; the route must not echo it.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 401,
+        text: async () => '{"error":{"message":"Invalid API Key sk-secret-123"}}',
+      }))
+    );
+    const res = await POST(
+      req({ kind: "diagnostic", subject: "math", question: "Q", reasoning: "x" })
+    );
+    expect(res.status).toBe(500);
+    const json = await res.json();
+    expect(json.error).not.toMatch(/401|Invalid API Key|sk-secret/);
+    expect(json.error).toMatch(/temporarily unavailable/i);
+  });
+
   it("rejects an oversized image with 400", async () => {
     const huge = "a".repeat(7_500_001);
     const res = await POST(

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { groqJSON, DIAG_GEN_SYS, PRACTICE_GEN_SYS } from "@/lib/groq";
-import { SUBJECTS, clampScore } from "@/lib/scoring";
+import { ORDER, clampScore } from "@/lib/scoring";
 import { rateLimit, clientKey } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
@@ -39,17 +39,21 @@ export async function POST(req) {
       );
     }
 
-    // practice
-    if (!SUBJECTS[subject]) {
+    // practice — use ORDER.includes (not SUBJECTS[subject]) so inherited keys
+    // like "constructor"/"__proto__" can't pass the allowlist.
+    if (!ORDER.includes(subject)) {
       return NextResponse.json(
         { error: `Unknown subject "${subject}".` },
         { status: 400 }
       );
     }
     const safeScore = clampScore(score) ?? 0;
-    const concepts = Array.isArray(weakConcepts)
-      ? weakConcepts.filter((c) => typeof c === "string")
-      : [];
+    // Bound the concept list (count + per-item length) before it enters the
+    // prompt, mirroring the free-text caps on /api/grade.
+    const concepts = (Array.isArray(weakConcepts) ? weakConcepts : [])
+      .filter((c) => typeof c === "string")
+      .slice(0, 10)
+      .map((c) => c.slice(0, 200));
 
     const data = await groqJSON({
       system: PRACTICE_GEN_SYS,
@@ -61,6 +65,12 @@ export async function POST(req) {
     });
     return NextResponse.json(data);
   } catch (e) {
-    return NextResponse.json({ error: e.message || "Generation failed" }, { status: 500 });
+    // Log the real cause server-side; return a generic message so upstream Groq
+    // status/body detail never leaks to the client.
+    console.error("[/api/generate]", e);
+    return NextResponse.json(
+      { error: "Question generation is temporarily unavailable. Please try again." },
+      { status: 500 }
+    );
   }
 }
