@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { groqJSON, LEARN_SYS } from "@/lib/groq";
-import { ORDER, clampScore } from "@/lib/scoring";
+import { ORDER } from "@/lib/scoring";
 import { rateLimit, clientKey } from "@/lib/rateLimit";
 import { getSupabaseAdmin, conceptKey } from "@/lib/supabaseAdmin";
 
@@ -45,7 +45,7 @@ export async function POST(req) {
     return NextResponse.json({ error: "Request body must be valid JSON." }, { status: 400 });
   }
 
-  const { subject, concept, score } = body || {};
+  const { subject, concept } = body || {};
   if (!ORDER.includes(subject)) {
     return NextResponse.json({ error: `Unknown subject "${subject}".` }, { status: 400 });
   }
@@ -53,7 +53,6 @@ export async function POST(req) {
     return NextResponse.json({ error: "concept is required." }, { status: 400 });
   }
   const safeConcept = cap(concept.trim(), 200);
-  const safeScore = clampScore(score) ?? 0;
   const key = conceptKey(safeConcept);
   const sb = getSupabaseAdmin(); // null when SUPABASE_SERVICE_ROLE_KEY isn't set
 
@@ -83,9 +82,8 @@ export async function POST(req) {
       system: LEARN_SYS,
       user:
         `Subject: ${subject}\n` +
-        `Concept to teach: ${safeConcept}\n` +
-        `Learner's current level: ${safeScore}/100\n\n` +
-        `Teach this concept now — guide, don't solve.`,
+        `Concept to teach: ${safeConcept}\n\n` +
+        `Write the one standard, level-neutral guide for this concept now — teach, don't solve.`,
     });
     guide = normalizeGuide(subject, safeConcept, data);
   } catch (e) {

@@ -9,22 +9,35 @@ vi.mock("@/lib/supabaseAdmin", () => ({
 }));
 
 // Build a fake admin client matching the route's from().select().eq().eq()
-// .maybeSingle() reads and from().upsert() writes.
+// .maybeSingle() reads and from().upsert() writes. Captures the table + filters
+// so a column/value regression on the cache-read path is catchable.
 function fakeAdmin({ hitContent = null, onUpsert, upsertThrows } = {}) {
-  return {
-    from: () => ({
-      select: () => ({
-        eq: () => ({
-          eq: () => ({ maybeSingle: async () => ({ data: hitContent ? { content: hitContent } : null }) }),
+  const filters = {};
+  const client = {
+    filters,
+    from: (table) => {
+      filters.table = table;
+      return {
+        select: () => ({
+          eq: (c1, v1) => {
+            filters[c1] = v1;
+            return {
+              eq: (c2, v2) => {
+                filters[c2] = v2;
+                return { maybeSingle: async () => ({ data: hitContent ? { content: hitContent } : null }) };
+              },
+            };
+          },
         }),
-      }),
-      upsert: async (row) => {
-        if (upsertThrows) throw new Error("write blew up");
-        onUpsert?.(row);
-        return { error: null };
-      },
-    }),
+        upsert: async (row) => {
+          if (upsertThrows) throw new Error("write blew up");
+          onUpsert?.(row);
+          return { error: null };
+        },
+      };
+    },
   };
+  return client;
 }
 
 import { POST } from "@/app/api/learn/route";
@@ -121,7 +134,8 @@ describe("POST /api/learn — guidance", () => {
 describe("POST /api/learn — shared cache", () => {
   it("returns a cached guide WITHOUT calling Groq on a hit", async () => {
     const stored = { subject: "math", concept: "limits", overview: "cached overview", keyIdeas: ["a"], socraticQuestions: [], pitfalls: [], tryThis: "" };
-    mocks.getAdmin.mockReturnValue(fakeAdmin({ hitContent: stored }));
+    const admin = fakeAdmin({ hitContent: stored });
+    mocks.getAdmin.mockReturnValue(admin);
     const failFetch = vi.fn(() => { throw new Error("Groq should not be called on a cache hit"); });
     vi.stubGlobal("fetch", failFetch);
 
@@ -131,6 +145,21 @@ describe("POST /api/learn — shared cache", () => {
     expect(json.cached).toBe(true);
     expect(json.overview).toBe("cached overview");
     expect(failFetch).not.toHaveBeenCalled();
+    // queried the right table + normalized key
+    expect(admin.filters.table).toBe("concept_guides");
+    expect(admin.filters.subject).toBe("math");
+    expect(admin.filters.concept_key).toBe("limits"); // "Limits " normalized
+  });
+
+  it("keys the cache by the normalized concept (no score in the key)", async () => {
+    const stored = { subject: "math", concept: "Le Chatelier", overview: "ok", keyIdeas: [], socraticQuestions: [], pitfalls: [], tryThis: "" };
+    const admin = fakeAdmin({ hitContent: stored });
+    mocks.getAdmin.mockReturnValue(admin);
+    vi.stubGlobal("fetch", vi.fn(() => { throw new Error("no Groq on a hit"); }));
+    // Different score, messy casing/spacing → same standardized guide.
+    const res = await POST(req({ subject: "math", concept: "  LE   Chatelier ", score: 95 }));
+    expect(res.status).toBe(200);
+    expect(admin.filters.concept_key).toBe("le chatelier");
   });
 
   it("on a miss, generates with Groq and writes the guide to the cache", async () => {
