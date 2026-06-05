@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { groqJSON, DIAG_GRADE_SYS, PRACTICE_GRADE_SYS } from "@/lib/groq";
 import { clampScore, SUBJECTS } from "@/lib/scoring";
+import { rateLimit, clientKey } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +57,14 @@ function normalizeRubric(rubric) {
 }
 
 export async function POST(req) {
+  const rl = rateLimit(clientKey(req));
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: "Too many requests. Please slow down and try again shortly." },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
+    );
+  }
+
   let body;
   try {
     body = await req.json();

@@ -78,8 +78,19 @@ Goal: a working URL before any keys, to confirm the build + hosting are solid. T
 
 ## 7. Phase 3 — Supabase database (durable storage)
 
-1. Create a project at **supabase.com** (free tier; pick a region near you).
-2. **SQL Editor → New query** → paste and run the schema below (tables + RLS). It's the schema your `lib/store.js` already expects.
+> **✅ DONE — provisioned via the Supabase connector.** A free-tier project
+> **`noobtopro`** (ref `vwvhgnlgubctrgksyohr`, region `us-east-1`) was created and
+> the schema below was applied as a migration (`init_scores_and_attempts`), with
+> RLS enabled and the security advisor reporting no lints. The remaining step is
+> to add the two `NEXT_PUBLIC_SUPABASE_*` env vars in Vercel (values below) and
+> enable an auth provider (Phase 4) so users can sign in and persist data.
+>
+> - **Project URL:** `https://vwvhgnlgubctrgksyohr.supabase.co`
+> - **anon key:** in `.env.local` (gitignored) and in the chat hand-off — it's a
+>   public, RLS-protected value. Paste both into Vercel → Settings → Environment
+>   Variables (Production + Preview + Development), then redeploy.
+
+The schema that was applied (for reference; `lib/store.js` expects exactly this):
 
 ```sql
 create table scores (

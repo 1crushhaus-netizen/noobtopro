@@ -51,7 +51,17 @@ async function api(path, body) {
   } catch {
     data = {};
   }
-  if (!res.ok || data.error) throw new Error(data.error || `Request failed (${res.status})`);
+  if (!res.ok || data.error) {
+    let msg = data.error || `Request failed (${res.status})`;
+    if (res.status === 429) {
+      // Surface the server's Retry-After so the user knows how long to wait.
+      const retry = Number(res.headers.get("Retry-After"));
+      if (Number.isFinite(retry) && retry > 0) {
+        msg = `Too many requests — please wait ${retry}s and try again.`;
+      }
+    }
+    throw new Error(msg);
+  }
   return data;
 }
 

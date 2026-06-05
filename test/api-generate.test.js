@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { POST } from "@/app/api/generate/route";
+import { _resetRateLimits } from "@/lib/rateLimit";
 
 function req(bodyObjOrString) {
   const body =
@@ -23,6 +24,7 @@ function mockGroqReturning(payload) {
 
 beforeEach(() => {
   process.env.GROQ_API_KEY = "test-key";
+  _resetRateLimits();
 });
 afterEach(() => {
   vi.unstubAllGlobals();

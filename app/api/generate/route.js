@@ -1,10 +1,19 @@
 import { NextResponse } from "next/server";
 import { groqJSON, DIAG_GEN_SYS, PRACTICE_GEN_SYS } from "@/lib/groq";
 import { SUBJECTS, clampScore } from "@/lib/scoring";
+import { rateLimit, clientKey } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req) {
+  const rl = rateLimit(clientKey(req));
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: "Too many requests. Please slow down and try again shortly." },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
+    );
+  }
+
   let body;
   try {
     body = await req.json();
