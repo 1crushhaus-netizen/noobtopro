@@ -8,10 +8,22 @@ on:
   push:
     branches: [main]
 
+# Least privilege: this workflow only checks out and builds — it never writes to
+# the repo, posts comments, or publishes artifacts, so read-only is sufficient.
+permissions:
+  contents: read
+
+# Cancel superseded runs: a newer push to the same branch/PR supersedes the older
+# one, so don't keep burning CI minutes on stale commits.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: Test and build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 

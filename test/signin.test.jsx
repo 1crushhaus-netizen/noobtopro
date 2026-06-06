@@ -4,7 +4,10 @@ import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import SignIn from "@/components/SignIn";
 import { PROVIDERS } from "@/lib/supabase";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllEnvs();
+});
 
 describe("SignIn menu", () => {
   it("PROVIDERS: only Google is enabled (GitHub/Discord are placeholders)", () => {
@@ -12,6 +15,19 @@ describe("SignIn menu", () => {
     expect(byId.google).toBe(true);
     expect(byId.github).toBe(false);
     expect(byId.discord).toBe(false);
+  });
+
+  it("PROVIDERS reflects the NEXT_PUBLIC_ENABLE_* flags evaluated at module load", async () => {
+    // The real gating: lib/supabase reads the env flags when the module is loaded,
+    // so re-import under stubbed env and assert each provider flips accordingly.
+    vi.stubEnv("NEXT_PUBLIC_ENABLE_GITHUB", "true");
+    vi.stubEnv("NEXT_PUBLIC_ENABLE_DISCORD", "false");
+    vi.resetModules(); // force lib/supabase to re-evaluate PROVIDERS with the stubbed env
+    const mod = await import("@/lib/supabase");
+    const byId = Object.fromEntries(mod.PROVIDERS.map((p) => [p.id, p.enabled]));
+    expect(byId.github).toBe(true); // flag "true" -> enabled
+    expect(byId.discord).toBe(false); // flag "false" (not "true") -> disabled
+    expect(byId.google).toBe(true); // always on, independent of env
   });
 
   it("renders one button per provider; Google enabled, GitHub/Discord disabled with 'Coming soon'", () => {

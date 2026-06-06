@@ -1,11 +1,32 @@
 /** @type {import('next').NextConfig} */
 
-// Defense-in-depth security headers applied to every response. We deliberately
-// omit a strict Content-Security-Policy for now: Next.js injects inline runtime
-// scripts and the app uses inline style objects, so a correct CSP needs nonces
-// and per-route testing — tracked as a follow-up. The headers below are safe and
-// require no per-page changes.
+// Baseline Content-Security-Policy. This is a defense-in-depth allow-list, not a
+// strictly nonce-based policy: Next.js injects inline hydration/streaming scripts
+// and the app sets inline style objects, so script-src/style-src keep
+// 'unsafe-inline' (a nonce-based script-src via middleware is the documented next
+// step). What it DOES lock down meaningfully: object-src 'none', base-uri 'self',
+// form-action 'self', frame-ancestors 'none' (defeats clickjacking even where
+// X-Frame-Options can't), and tight default/connect/img/font/style source lists.
+// Origins allow-listed for actual app dependencies:
+//   - style/font: Google Fonts (@import in app/globals.css)
+//   - connect: Supabase (REST/auth) + Vercel Speed Insights beacon
+//   - img: data:/blob: (diagnostic photo previews) + https: (OAuth avatars)
+const csp = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "form-action 'self'",
+  "img-src 'self' data: blob: https:",
+  "font-src 'self' https://fonts.gstatic.com",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "script-src 'self' 'unsafe-inline'",
+  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://vitals.vercel-insights.com",
+].join("; ");
+
+// Defense-in-depth security headers applied to every response.
 const securityHeaders = [
+  { key: "Content-Security-Policy", value: csp },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "SAMEORIGIN" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },

@@ -4,7 +4,7 @@
 
 **Chosen approach:** deploy to **Vercel** (you selected this). It hosts the existing Next.js app *as-is* — the two Groq routes run as real serverless functions, your Groq key stays server-side and secret, and every branch/push gets its own preview URL. That's a better fit for a bug-fixing cycle than GitHub Pages, which can't run this app's backend at all.
 
-> **Status: DRAFT FOR YOUR REVIEW.** Nothing has been changed or deployed yet. Read it, edit anything, then tell me to proceed. See [§13 Your call before I start](#13-your-call-before-i-start) for the open choices.
+> **Status: COMPLETE — deployed and live.** This was the original deployment plan; all phases below were executed and the app is live in production (see README §2 for the live URLs). It is retained as a **historical record of how the deployment was done** — the future/"tell me to proceed" tense throughout reflects its origin as a pre-deploy plan. For current state, the README is the source of truth.
 
 ---
 
@@ -90,10 +90,13 @@ Goal: a working URL before any keys, to confirm the build + hosting are solid. T
 >   public, RLS-protected value. Paste both into Vercel → Settings → Environment
 >   Variables (Production + Preview + Development), then redeploy.
 
-The full applied schema — **tables, RLS, and the two required RPCs**
-(`migrate_guest_data`, `delete_user_data`) — lives in [`db/schema.sql`](./db/schema.sql),
-which is the source of truth for reproducing the database. `lib/store.js` depends
-on those functions, not just the tables. The tables (for quick reference):
+The full applied schema — **tables, RLS, and all RPCs** — lives in
+[`db/schema.sql`](./db/schema.sql), which is the source of truth for reproducing
+the database. It now defines **four RPCs** (`migrate_guest_data`,
+`delete_user_data`, `save_progress`, `try_add_diagnostic`) and **four tables**
+(`scores`, `attempts`, plus the service-role-only `concept_guides` and
+`diagnostic_pool` caches). `lib/store.js` depends on those functions, not just the
+tables. The two core tables (for quick reference — see `db/schema.sql` for the rest):
 
 ```sql
 create table scores (
@@ -194,7 +197,7 @@ I'll walk this checklist with you on the live URL and confirm each:
 These are minor and safe; I'll do them on a branch and show you the diff before anything is committed/pushed:
 
 1. **Add `.env.example`** — ✅ done. Documents every variable (`GROQ_API_KEY`, optional `GROQ_MODEL` / `GROQ_VISION_MODEL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`) with no real secrets.
-2. **Pin the Node version** — ✅ done. `package.json` declares `"engines": { "node": ">=18.18.0" }` and a `.nvmrc` is present so Vercel and local builds match.
+2. **Pin the Node version** — ✅ done. `package.json` declares `"engines": { "node": ">=20.19.0" }` and a `.nvmrc` (Node 24) is present so Vercel and local builds match.
 3. **Flatten the app to the repo root** — ✅ done. Removed the nested `noobtopro/` subfolder so Vercel needs no Root Directory override (§3).
 4. **A short "Deploy on Vercel" section in the README**, replacing the GitHub-push-only instructions, so the repo documents the real workflow.
 5. **(Only if you want it later)** local→account progress migration on first sign-in, and per-preview redirect handling if you adopt a custom domain.

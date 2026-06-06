@@ -3,10 +3,12 @@
 --
 -- This is the full DDL applied to the Supabase project (via the connector /
 -- migrations). It is committed so the database is reproducible from version
--- control. The app's lib/store.js depends on exactly these tables AND on the
--- two RPCs below (migrate_guest_data, delete_user_data) — provisioning the
--- tables alone is NOT enough; the functions must exist or sign-in migration and
--- "Reset my progress" will fail at runtime.
+-- control. The app depends on exactly these tables AND on the RPCs below —
+-- migrate_guest_data, delete_user_data, save_progress (called by lib/store.js)
+-- and try_add_diagnostic (called by the /api/generate server route) — so
+-- provisioning the tables alone is NOT enough; the functions must exist or sign-in
+-- migration, "Reset my progress", the practice/diagnostic write path, and the
+-- diagnostic-pool fill will fail at runtime.
 --
 -- Apply in order. Safe to re-run (idempotent where practical).
 -- ===========================================================================
@@ -121,6 +123,11 @@ begin
 end;
 $$;
 
+-- Grant hygiene: Postgres grants EXECUTE to PUBLIC by default, which would let the
+-- anon role call this RPC (it would still fail the auth.uid() null-check, but no
+-- unauthenticated role should hold the grant at all). Revoke PUBLIC/anon, then
+-- grant only to authenticated.
+revoke all on function public.migrate_guest_data(jsonb, jsonb) from public, anon;
 grant execute on function public.migrate_guest_data(jsonb, jsonb) to authenticated;
 
 -- ---- RPC: atomic delete of the caller's data (Profile -> "Reset my progress")
@@ -141,6 +148,7 @@ begin
 end;
 $$;
 
+revoke all on function public.delete_user_data() from public, anon;
 grant execute on function public.delete_user_data() to authenticated;
 
 -- ---- RPC: atomic save of a score update + its matching attempt --------------
@@ -214,6 +222,7 @@ begin
 end;
 $$;
 
+revoke all on function public.save_progress(jsonb, jsonb) from public, anon;
 grant execute on function public.save_progress(jsonb, jsonb) to authenticated;
 
 -- ---- shared concept-guide cache --------------------------------------------

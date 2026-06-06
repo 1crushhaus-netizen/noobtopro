@@ -258,3 +258,27 @@ describe("POST /api/grade — difficulty band threading (practice)", () => {
     expect(sentUserMessage(fetchMock)).toMatch(/difficulty band: \(unspecified\)/i);
   });
 });
+
+describe("POST /api/grade — valid image is accepted and forwarded to the vision model", () => {
+  it("accepts a valid base64 image and sends it as a data: URL on the multimodal model", async () => {
+    const fetchMock = mockGroqReturning({ subject: "math", score: 70, weakConcepts: [], comment: "ok" });
+    const res = await POST(
+      req({
+        kind: "diagnostic",
+        subject: "math",
+        question: "Q",
+        reasoning: "see my photo",
+        image: { mime: "image/png", data: "aGVsbG8=" }, // valid base64 ("hello")
+      })
+    );
+    expect(res.status).toBe(200);
+    const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+    // Photo grading must route to the vision model regardless of the grade flag.
+    expect(sent.model).toBe("meta-llama/llama-4-scout-17b-16e-instruct");
+    // The user message is multimodal: a text part + an image_url with the data: URL.
+    const userMsg = sent.messages.find((m) => m.role === "user");
+    expect(Array.isArray(userMsg.content)).toBe(true);
+    const imgPart = userMsg.content.find((p) => p.type === "image_url");
+    expect(imgPart.image_url.url).toBe("data:image/png;base64,aGVsbG8=");
+  });
+});

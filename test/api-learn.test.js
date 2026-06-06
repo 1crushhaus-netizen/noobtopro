@@ -1,12 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-// Mock the admin Supabase client so we can drive cache hits/misses. conceptKey
-// stays a real, simple normalizer.
+// Mock only getSupabaseAdmin so we can drive cache hits/misses; keep the REAL
+// conceptKey normalizer (via importActual) so the route's cache-key derivation —
+// quote-stripping, whitespace collapse, lowercasing — is genuinely exercised
+// rather than shadowed by a re-implementation that could drift from production.
 const mocks = vi.hoisted(() => ({ getAdmin: vi.fn(() => null) }));
-vi.mock("@/lib/supabaseAdmin", () => ({
-  getSupabaseAdmin: () => mocks.getAdmin(),
-  conceptKey: (c) => String(c || "").trim().toLowerCase().replace(/\s+/g, " "),
-}));
+vi.mock("@/lib/supabaseAdmin", async (importActual) => {
+  const actual = await importActual();
+  return { getSupabaseAdmin: () => mocks.getAdmin(), conceptKey: actual.conceptKey };
+});
 
 // Build a fake admin client matching the route's from().select().eq().eq()
 // .maybeSingle() reads and from().upsert() writes. Captures the table + filters
@@ -204,6 +206,18 @@ describe("POST /api/learn — shared cache", () => {
     const res = await POST(req({ subject: "math", concept: "  LE   Chatelier ", score: 95 }));
     expect(res.status).toBe(200);
     expect(admin.filters.concept_key).toBe("le chatelier");
+  });
+
+  it("strips surrounding quotes when keying the cache (real conceptKey normalizer)", async () => {
+    // Exercises the real normalizer's quote-stripping: a model/UI that wraps the
+    // concept in quotes must hit the SAME shared guide as the unquoted concept.
+    const stored = { subject: "math", concept: "limits", overview: "ok", keyIdeas: [], socraticQuestions: [], pitfalls: [], tryThis: "" };
+    const admin = fakeAdmin({ hitContent: stored, expectSubject: "math", expectKey: "limits" });
+    mocks.getAdmin.mockReturnValue(admin);
+    vi.stubGlobal("fetch", vi.fn(() => { throw new Error("no Groq on a hit"); }));
+    const res = await POST(req({ subject: "math", concept: '"Limits"' }));
+    expect(res.status).toBe(200);
+    expect(admin.filters.concept_key).toBe("limits"); // quotes stripped by real conceptKey
   });
 
   it("on a miss, generates with Groq and writes the guide to the cache", async () => {
