@@ -32,7 +32,7 @@ vi.mock("@/lib/supabase", () => ({
   }),
 }));
 
-import { migrateGuestToAccount, deleteAllUserData, loadState, saveScores, recordAttempt } from "@/lib/store";
+import { migrateGuestToAccount, deleteAllUserData, loadState, saveScores, recordAttempt, saveProgress } from "@/lib/store";
 
 const KEY = "noobtopro:v1";
 const signedIn = { data: { session: { user: { id: "u1" } } } };
@@ -156,5 +156,47 @@ describe("signed-in data layer (Supabase paths)", () => {
     };
     const res = await recordAttempt({ type: "attempt", subject: "math", reasoningScore: 50 });
     expect(res.history).toBe(null);
+  });
+});
+
+describe("saveProgress (atomic score + attempt write)", () => {
+  const scores = { math: { score: 62, weakConcepts: ["x"], comment: "c" } };
+  const evt = { type: "attempt", t: "t1", subject: "math", reasoningScore: 70, delta: 2, newScore: 62, totalAfter: 62, phdAfter: 21 };
+
+  it("signed-in: calls the single save_progress RPC with snake_cased payload, then refreshes history", async () => {
+    mocks.db = { attemptsSelect: { data: [{ type: "attempt", created_at: "t1", subject: "math", reasoning_score: 70, delta: 2, new_score: 62, total_after: 62, phd_after: 21 }], error: null } };
+    const res = await saveProgress(scores, evt);
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+    const [fn, args] = mocks.rpc.mock.calls[0];
+    expect(fn).toBe("save_progress");
+    expect(args.p_scores).toEqual([{ subject: "math", score: 62, weak_concepts: ["x"], comment: "c" }]);
+    expect(args.p_attempt).toMatchObject({ type: "attempt", subject: "math", reasoning_score: 70, new_score: 62, created_at: "t1" });
+    expect(res.history[0]).toMatchObject({ type: "attempt", newScore: 62, reasoningScore: 70 });
+  });
+
+  it("signed-in: throws when the RPC fails and does NOT fall back to a separate score write (atomicity)", async () => {
+    mocks.rpc.mockResolvedValueOnce({ error: { message: "boom" } });
+    await expect(saveProgress(scores, evt)).rejects.toThrow(/boom/);
+    // The only write attempted is the single atomic RPC — no independent scores upsert.
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+    expect(mocks.rpc.mock.calls[0][0]).toBe("save_progress");
+  });
+
+  it("signed-in: returns history:null when only the post-write refresh read fails", async () => {
+    mocks.db = { attemptsSelect: { data: null, error: { message: "read failed" } } };
+    const res = await saveProgress(scores, evt);
+    expect(res.history).toBe(null); // the write still committed
+  });
+
+  it("guest: writes scores + appended history locally in one shot, no RPC", async () => {
+    mocks.session = guest;
+    window.localStorage.setItem(KEY, JSON.stringify({ scores: null, history: [{ type: "baseline", t: "t0" }] }));
+    const res = await saveProgress(scores, evt);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    const local = JSON.parse(window.localStorage.getItem(KEY));
+    expect(local.scores).toEqual(scores);
+    expect(local.history).toHaveLength(2);
+    expect(local.history[1]).toMatchObject({ type: "attempt", subject: "math" });
+    expect(res.history).toHaveLength(2);
   });
 });
