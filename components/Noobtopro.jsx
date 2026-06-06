@@ -363,12 +363,17 @@ export default function Noobtopro() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // The "Restart" logo. Clears the transient diagnostic/practice/learn flow state
+  // and returns home. Crucially, it must NOT make a signed-in user's PERSISTED
+  // progress disappear: scores/history live in the DB (only Profile → "Reset my
+  // progress" deletes them). For a signed-in user we keep that data and re-hydrate;
+  // only a guest's local-only session is cleared.
   async function reset() {
     diagRun.current++; // supersede any in-flight diagnostic grade so it can't land a stale write
     practiceRun.current++; // and any in-flight practice grade (see submitPractice's guard)
     setBusy(false); // a superseded in-flight grade won't clear its own busy flag (its finally is run-guarded)
-    await resetAll();
-    // Release any outstanding image previews before clearing state.
+    // Release any outstanding image previews and clear the transient flow state
+    // (applies whether signed in or guest).
     Object.values(answers).forEach((a) => revokePreview(a && a.img));
     revokePreview(pImg);
     setShowSaveModal(false);
@@ -376,13 +381,9 @@ export default function Noobtopro() {
     setLearnContent(null);
     setLearnError("");
     setLearnQuestion(null);
-    setStage("intro");
-    setView("practice");
     setQuestions([]);
     setQi(0);
     setAnswers({});
-    setScores(null);
-    setHistory([]);
     setPSubject(null);
     setPQuestion(null);
     setPText("");
@@ -390,6 +391,22 @@ export default function Noobtopro() {
     setFeedback(null);
     setScoreDelta(null);
     setError("");
+    setView("practice");
+
+    if (user) {
+      // Signed in: do NOT blank the persisted scores. Return to the dashboard (or
+      // the intro if they haven't been ranked yet) and re-hydrate from the data
+      // layer so the view always matches what's stored — previously reset() dropped
+      // scores to null and never reloaded, so progress vanished until a refresh.
+      setStage(scores ? "dashboard" : "intro");
+      hydrate();
+    } else {
+      // Guest: "Restart" clears the local-only session and returns to the intro.
+      await resetAll();
+      setScores(null);
+      setHistory([]);
+      setStage("intro");
+    }
   }
 
   // Profile → "Reset my progress": permanently delete the signed-in user's data.
