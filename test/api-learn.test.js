@@ -11,7 +11,7 @@ vi.mock("@/lib/supabaseAdmin", () => ({
 // Build a fake admin client matching the route's from().select().eq().eq()
 // .maybeSingle() reads and from().upsert() writes. Captures the table + filters
 // so a column/value regression on the cache-read path is catchable.
-function fakeAdmin({ hitContent = null, onUpsert, upsertThrows } = {}) {
+function fakeAdmin({ hitContent = null, onUpsert, upsertThrows, expectSubject = null, expectKey = null } = {}) {
   const filters = {};
   const client = {
     filters,
@@ -24,7 +24,18 @@ function fakeAdmin({ hitContent = null, onUpsert, upsertThrows } = {}) {
             return {
               eq: (c2, v2) => {
                 filters[c2] = v2;
-                return { maybeSingle: async () => ({ data: hitContent ? { content: hitContent } : null }) };
+                return {
+                  maybeSingle: async () => {
+                    // Honor the filter VALUES: a hit is returned only when the
+                    // queried subject/key match what the caller expects. This makes
+                    // a wrong-column / wrong-value regression on the read path fail
+                    // the test, instead of returning a hit regardless of filters.
+                    const subjectOk = expectSubject == null || filters.subject === expectSubject;
+                    const keyOk = expectKey == null || filters.concept_key === expectKey;
+                    const hit = hitContent && subjectOk && keyOk;
+                    return { data: hit ? { content: hitContent } : null };
+                  },
+                };
               },
             };
           },
@@ -153,7 +164,7 @@ describe("POST /api/learn — shared cache", () => {
 
   it("keys the cache by the normalized concept (no score in the key)", async () => {
     const stored = { subject: "math", concept: "Le Chatelier", overview: "ok", keyIdeas: [], socraticQuestions: [], pitfalls: [], tryThis: "" };
-    const admin = fakeAdmin({ hitContent: stored });
+    const admin = fakeAdmin({ hitContent: stored, expectSubject: "math", expectKey: "le chatelier" });
     mocks.getAdmin.mockReturnValue(admin);
     vi.stubGlobal("fetch", vi.fn(() => { throw new Error("no Groq on a hit"); }));
     // Different score, messy casing/spacing → same standardized guide.
@@ -182,7 +193,7 @@ describe("POST /api/learn — shared cache", () => {
   it("re-normalizes a malformed cached row before serving it", async () => {
     // A row whose array fields aren't arrays must not reach the client raw.
     const bad = { subject: "math", concept: "limits", overview: "ok", keyIdeas: "not-an-array", socraticQuestions: null, pitfalls: 5, tryThis: 42 };
-    mocks.getAdmin.mockReturnValue(fakeAdmin({ hitContent: bad }));
+    mocks.getAdmin.mockReturnValue(fakeAdmin({ hitContent: bad, expectSubject: "math", expectKey: "limits" }));
     vi.stubGlobal("fetch", vi.fn(() => { throw new Error("no Groq on a hit"); }));
     const res = await POST(req({ subject: "math", concept: "limits" }));
     expect(res.status).toBe(200);

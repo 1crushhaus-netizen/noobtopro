@@ -69,10 +69,10 @@ export default function LearnTab({ scores, active, content, busy, error, onSelec
         </div>
       )}
 
-      {error && <div className="np-error" style={{ marginBottom: 16 }}><span>{error}</span></div>}
+      {error && <div className="np-error" role="alert" style={{ marginBottom: 16 }}><span>{error}</span></div>}
 
       {busy && (
-        <div className="np-card np-pulse" style={{ textAlign: "center", padding: "40px 24px", fontFamily: "var(--display)", fontSize: 20 }}>
+        <div className="np-card np-pulse" role="status" aria-live="polite" style={{ textAlign: "center", padding: "40px 24px", fontFamily: "var(--display)", fontSize: 20 }}>
           Building your guide to {active?.concept}…
         </div>
       )}

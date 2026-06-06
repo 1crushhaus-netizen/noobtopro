@@ -84,6 +84,10 @@ export async function POST(req) {
         `Subject: ${subject}\n` +
         `Concept to teach: ${safeConcept}\n\n` +
         `Write the one standard, level-neutral guide for this concept now — teach, don't solve.`,
+      // A full concept guide (overview + key ideas + Socratic questions + pitfalls
+      // + try-this) is the longest response we ask Groq for; give it more room than
+      // the shared 1200-token default so a verbose guide can't be truncated mid-JSON.
+      maxTokens: 3000,
     });
     guide = normalizeGuide(subject, safeConcept, data);
   } catch (e) {

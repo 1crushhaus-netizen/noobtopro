@@ -275,6 +275,16 @@ export default function Noobtopro() {
     }
   }
 
+  // Mirror the latest in-progress image previews so the auth listener (set up once
+  // on mount, with a stale closure) can revoke them when a sign-out abandons the
+  // current diagnostic/practice — otherwise those object URLs leak until reload.
+  const answersRef = useRef(answers);
+  const pImgRef = useRef(pImg);
+  useEffect(() => {
+    answersRef.current = answers;
+    pImgRef.current = pImg;
+  });
+
   useEffect(() => {
     const sb = getSupabase();
     hydrate();
@@ -290,6 +300,10 @@ export default function Noobtopro() {
         setStage((p) => (p === "signin" ? "dashboard" : p)); // leave the sign-in menu
         hydrate(); // migrates guest progress, then loads the account
       } else if (event === "SIGNED_OUT") {
+        // Signing out abandons any in-progress diagnostic/practice — free its
+        // image previews before re-hydrating so the object URLs don't leak.
+        Object.values(answersRef.current || {}).forEach((a) => revokePreview(a && a.img));
+        revokePreview(pImgRef.current);
         setView("practice");
         hydrate();
       }

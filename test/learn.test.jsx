@@ -27,9 +27,16 @@ describe("LearnTab", () => {
     expect(screen.getByRole("button", { name: "energy transformation" })).toBeTruthy();
   });
 
-  it("shows a loading state while fetching", () => {
+  it("shows a loading state while fetching, announced to screen readers (role=status)", () => {
     render(<LearnTab scores={scores} active={{ subject: "math", concept: "limits" }} content={null} busy={true} error="" onSelect={() => {}} />);
     expect(screen.getByText(/building your guide to limits/i)).toBeTruthy();
+    // The async loading state must live in a polite live region so AT users hear it.
+    expect(screen.getByRole("status").textContent).toMatch(/building your guide to limits/i);
+  });
+
+  it("announces an async error to screen readers (role=alert)", () => {
+    render(<LearnTab scores={scores} active={{ subject: "math", concept: "limits" }} content={null} busy={false} error="Could not load the concept guide." onSelect={() => {}} />);
+    expect(screen.getByRole("alert").textContent).toMatch(/could not load the concept guide/i);
   });
 
   it("renders the guidance sections (no answer, just teaching)", () => {
