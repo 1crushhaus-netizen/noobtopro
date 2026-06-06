@@ -1,6 +1,6 @@
 # noobtopro — Feature Plan: Auth-Gated Diagnostic, Sign-In Menu & Profile Tab
 
-**Status: DRAFT FOR REVIEW.** Nothing is built yet. Read it, tweak the decisions in §11, then say "go" and I'll implement (P1 first).
+**Status: IMPLEMENTED.** The features planned here — the OAuth sign-in menu (`components/SignIn.jsx`), the Profile tab (`components/ProfileTab.jsx`), the guest-first diagnostic, and guest→account migration — are all shipped and live (see README §2 and §9; PRs #9, #14). This document is retained as the original plan / decision record; the README is the source of truth for current behavior.
 
 ---
 

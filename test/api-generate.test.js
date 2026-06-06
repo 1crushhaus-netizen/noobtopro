@@ -2,11 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 // Mock the admin client so we can drive the diagnostic_pool read-through/self-fill.
 // Default returns null (no service-role key) → the route always generates fresh,
-// which keeps every existing test exercising the original behavior.
+// which keeps every existing test exercising the original behavior. The generate
+// route imports only getSupabaseAdmin (not conceptKey), so that is all we stub.
 const adminMock = vi.hoisted(() => ({ getAdmin: vi.fn(() => null) }));
 vi.mock("@/lib/supabaseAdmin", () => ({
   getSupabaseAdmin: () => adminMock.getAdmin(),
-  conceptKey: (c) => String(c || "").trim().toLowerCase(),
 }));
 
 import { POST } from "@/app/api/generate/route";

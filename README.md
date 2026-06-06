@@ -85,7 +85,7 @@ Score bands (global scale): **0–20** Absolute beginner · **20–40** Foundati
 - ✅ **Guest mode** (no login): full flow stored in `localStorage`. On first sign-in, guest progress **migrates** into the account.
 - ✅ **Profile** tab (identity + stats + reset), **Progress** tab (charts), **Practice** + **Learn** tabs.
 - ✅ "Save your progress" modal after the guest diagnostic.
-- ✅ Per-IP rate limiting; security headers; error boundary.
+- ✅ Per-IP rate limiting; security headers incl. a **baseline CSP**; error boundary; service-role RPCs locked to `authenticated` (PUBLIC/anon revoked).
 - ✅ **Shared caches active** (`SUPABASE_SERVICE_ROLE_KEY` set): the concept-guide cache (each guide generated once, with a bundled "try this" question) and the baseline-diagnostic pool — both reused across users to cut Groq spend. Grading runs on the cheaper `openai/gpt-oss-120b` (`GROQ_GRADE_MODEL`).
 
 **Built but not yet activated (config only):**
@@ -113,19 +113,21 @@ npm run dev                     # http://localhost:3000
 - **To exercise auth + persistence locally:** also set `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` (the local `.env.local` is gitignored; a copy already points at the live project).
 - If `npm install` complains about versions: `npm install next@latest react@latest react-dom@latest @supabase/supabase-js@latest`.
 
-Other commands: `npm test` (run tests once), `npm run test:watch`, `npm run build`, `npm start`, `npm run lint`.
+Other commands: `npm test` (run tests once), `npm run test:watch`, `npm run build`, `npm start`. (There is intentionally no `lint` script yet — ESLint isn't configured; see §17.)
 
 ---
 
 ## Where to start (next two tasks)
 
-If you (human or LLM) are picking this up cold, do these two **in order** — audit first, then fix. Follow the dev loop in [§15](#15-how-we-work-the-dev-loop) for both. (The earlier hand-off tasks — score model, concept cache, "try this" question, diagnostic pool, cheaper grader — are all shipped; see [§2](#2-current-status--live-links). The one deferred *feature* is GitHub/Discord sign-in, tracked in §2 + `AUTH_PROVIDERS.md`.)
+The previous round — a **full-repo audit then full cleanup** — is **shipped**. That round (see [§2](#2-current-status--live-links), [§17](#17-roadmap--known-limitations), and `git log`) found **1 P2 + ~18 P3s** (no P0/P1) and fixed them: the `submitPractice` run-token guard (a stale practice grade landing after sign-out/Restart could write the prior identity's score into the guest store), the diagnostic image-preview blob-URL leak, `REVOKE … FROM PUBLIC` grant hygiene on the three SECURITY INVOKER RPCs (applied to the live DB), a baseline `Content-Security-Policy`, CI `permissions`/`concurrency`/`timeout` hardening, guest-`localStorage`-quota error surfacing, a guest-migration cap, dead-code removal (`saveScores`), a rate-limiter off-by-one, doc fixes, and **+11 tests** (now 145). Supabase advisors are clean (only the two intended service-role-lock INFOs); no open Greptile threads.
 
-### Task 1 — Full codebase audit *(find, don't fix)*
-Audit the entire current `main` end-to-end and produce a **written findings report — make no code changes in this task.** Cover every area: security (secret handling, prompt-injection bounds, RLS, the service-role RPCs), the three API routes, the data layer + `db/schema.sql` (tables, RLS, and all RPCs — `migrate_guest_data`, `delete_user_data`, `save_progress`, `try_add_diagnostic`), the React state machine (`components/Noobtopro.jsx`), the Groq client + prompts (`lib/groq.js`), the tests (watch for false-confidence mocks), and config/CI. Classify each finding **P0/P1/P2/P3**, and **verify it against the actual code before trusting it** — never act on an unverified claim (LLM reviewers, including sub-agents, hallucinate). Also reconcile any open **Greptile** review comments across PRs and run the Supabase **advisors** (`get_advisors`) after reviewing the DB. See [§4](#4-architecture), [§5](#5-repo-map), [§8](#8-database--persistence), [§13](#13-testing), [§16](#16-troubleshooting--gotchas).
+If you (human or LLM) are picking this up cold, the next two suggested tasks — follow the dev loop in [§15](#15-how-we-work-the-dev-loop) for both:
 
-### Task 2 — Full cleanup with fixes
-Working from Task 1's report, **fix every confirmed P0/P1/P2** plus the cheap P3 cleanups, and tidy the codebase (dead code, stale docs, missing test coverage). Add a test for each behavioral fix; keep `npm test` and `npm run build` green; **update this README in the same change** ([§13](#13-testing) test counts, the data model/§8, status/§2, conventions/§6); ship via the dev loop ([§15](#15-how-we-work-the-dev-loop)). For DB changes, edit `db/schema.sql` (the source of truth) **and** apply the migration to the live project, then re-check the advisors. Known P3 backlog to start from (not exhaustive — the audit should re-derive + verify): a strict CSP header (§14); `REVOKE … FROM PUBLIC` grant hygiene on the SECURITY INVOKER RPCs; a diagnostic-answer image-preview leak; screen-reader labels on the Progress charts; a stale engines value in `DEPLOYMENT_PLAN.md`; CI `concurrency`/`permissions` hardening.
+### Task 1 — Nonce-based strict CSP
+A **baseline** CSP now ships (§14) but `script-src`/`style-src` still allow `'unsafe-inline'` (Next injects inline runtime scripts; the app uses inline style objects). Add a middleware that generates a per-request nonce, thread it into Next's inline scripts, and tighten `script-src` to `'self' 'nonce-…'` (drop `'unsafe-inline'`). Roll out as `Content-Security-Policy-Report-Only` first, test **every route + the OAuth redirect + photo-preview + Supabase calls** in a real browser (watch the console for violations), then flip to enforcing. Keep the existing header test green and add one asserting the nonce wiring.
+
+### Task 2 — Extend the score model toward per-item IRT/Elo (§11, §17)
+`blend()` already weights by question difficulty (fixed band midpoints) and per-attempt reasoning quality via an Elo *surprise* term. The next step is **per-item difficulty ratings** (rather than band midpoints) and **calibrating the constants** (`ELO_SCALE`, the confidence range, the `alpha` cap) against logged attempts. (Alternatively, the one deferred *feature* is GitHub/Discord sign-in — config-only, tracked in §2 + `AUTH_PROVIDERS.md`.) Add tests for any new scoring behavior and keep `npm test` / `npm run build` green. For DB changes, edit `db/schema.sql` **and** apply the migration to the live project, then re-check the advisors.
 
 ---
 
@@ -250,9 +252,8 @@ To stand up the database from scratch (or reproduce it), **run `db/schema.sql` i
 ### `lib/store.js` — the dual-mode data layer
 The UI only ever calls these; they transparently use Supabase when signed in, else `localStorage` (`key "noobtopro:v1"`):
 - `loadState()` — returns `{ scores, history }` (or `{ error }` on a DB failure, so the UI doesn't mistake an error for "new user").
-- `saveProgress(scores, evt)` — **the write path** for the diagnostic + practice flows: one atomic `save_progress` RPC (signed-in) or a single `localStorage` write (guest) that persists the score change and its attempt **together**, then returns the refreshed `{ history }`. Throws on failure so callers surface a banner.
-- `saveScores(scores)` / `recordAttempt(evt)` — the lower-level single-table primitives (the app's write path now goes through `saveProgress`; these remain for completeness and tests).
-- `migrateGuestToAccount()` — single-flight wrapper around the `migrate_guest_data` RPC; sends a clamped payload; clears the guest copy on success.
+- `saveProgress(scores, evt)` — **the write path** for the diagnostic + practice flows: one atomic `save_progress` RPC (signed-in) or a single `localStorage` write (guest) that persists the score change and its attempt **together**, then returns the refreshed `{ history }`. Throws on failure so callers surface a banner (the guest path throws on a `localStorage` quota/blocked write too, rather than silently dropping the attempt).
+- `migrateGuestToAccount()` — single-flight wrapper around the `migrate_guest_data` RPC; sends a clamped payload **capped to the most recent 5000 attempts** (the RPC's limit) so a heavy guest still migrates; clears the guest copy on success.
 - `deleteAllUserData()` — calls the `delete_user_data` RPC.
 - `resetAll()` — clears the local guest view only.
 
@@ -327,7 +328,7 @@ Components: **SignIn** (provider buttons), **ProfileTab** (identity + stats + co
 
 ## 13. Testing
 
-**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **134 tests across 11 files**, all passing.
+**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **148 tests across 14 files**, all passing.
 
 | File | Covers |
 |---|---|
@@ -335,11 +336,14 @@ Components: **SignIn** (provider buttons), **ProfileTab** (identity + stats + co
 | `test/groq.test.js` | JSON extraction (fences, prose, braces-in-strings), fallback retry **gating (no retry on hard HTTP errors)**, per-call `max_tokens`, **grade-model routing (gpt-oss + `reasoning_effort` low)**, errors |
 | `test/rateLimit.test.js` | window limit, reset, per-key, memory bound (enforceCap) |
 | `test/api-generate.test.js` | validation/400s, prototype-key rejection, non-leaking 500, weakConcepts cap, **diagnostic pool (warm-serve / cold self-fill via RPC / invalid-row + invalid-generated guards / read-error fall-through)** |
-| `test/api-grade.test.js` | validation, MIME/base64, score/rubric normalization, difficulty-band threading, non-leaking 500 |
-| `test/api-learn.test.js` | validation, normalization, **cache hit/miss/write-fail/key-normalization** (filter-aware mock), tryThisQuestion shaping |
-| `test/store.test.js` | migration clamping, delete RPC, signed-in load/save/record paths + data-wipe guard, **atomic `saveProgress`** (mocked Supabase) |
+| `test/api-grade.test.js` | validation, MIME/base64, score/rubric normalization, difficulty-band threading, **valid-image → vision-model forwarding**, non-leaking 500 |
+| `test/api-learn.test.js` | validation, normalization, **cache hit/miss/write-fail/key-normalization via the real `conceptKey` (quote-strip)**, tryThisQuestion shaping |
+| `test/store.test.js` | migration clamping + **single-flight dedup + >5000-attempt cap**, delete RPC, signed-in load/save paths + **user_id scoping** + data-wipe guard, **atomic `saveProgress`** incl. **guest quota-failure surfacing** (mocked Supabase) |
+| `test/noobtopro.test.jsx` | the state machine: **diagnostic image-preview revoke on completion** + **`submitPractice` run-token guard** (stale grade after Restart doesn't persist or repopulate) |
+| `test/progress.test.jsx` | ProgressDashboard stat summary + **SVG chart accessible names** + empty states |
+| `test/headers.test.js` | `next.config.js` security headers: **baseline CSP directives + allow-listed origins**, `X-Frame-Options: DENY` (matches `frame-ancestors`), nosniff/HSTS |
 | `test/error.test.jsx` | error-boundary logs the caught error + `reset()` on "Try again" |
-| `test/signin.test.jsx` | provider buttons, OAuth-only (no password field), enabled-provider |
+| `test/signin.test.jsx` | provider buttons, OAuth-only (no password field), enabled-provider, **env-flag (`NEXT_PUBLIC_ENABLE_*`) gating** |
 | `test/profile.test.jsx` | identity, empty state, stats, confirm-guarded reset |
 | `test/learn.test.jsx` | empty state, concept select, loading/error **live regions**, guidance render, **try-this question: practice-reuse / regenerate / fallback** |
 
@@ -351,8 +355,8 @@ Components: **SignIn** (provider buttons), **ProfileTab** (identity + stats + co
 
 - **Stack:** Next 15 App Router, React 19, Node 24 (`.nvmrc`; Vercel uses 24.x).
 - **`vercel.json`** pins `{ "framework": "nextjs" }` — **do not remove** (see §16).
-- **`next.config.js`** sets `reactStrictMode` + security headers (`X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy`, HSTS, `Permissions-Policy`). A strict CSP is a deliberate TODO.
-- **CI** (`.github/workflows/ci.yml`): on every PR + push to `main`, the **"Test and build"** job runs `npm ci` → `npm test` → `npm run build` (build runs with empty secrets to prove guest mode works). **`main` is branch-protected to require this check.**
+- **`next.config.js`** sets `reactStrictMode` + security headers (`X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy`, HSTS, `Permissions-Policy`, and a **baseline `Content-Security-Policy`**). The CSP locks down `object-src`/`base-uri`/`form-action`/`frame-ancestors` and tight `default-/connect-/img-/font-/style-src` lists (allow-listing Google Fonts, Supabase, Vercel insights, and `blob:` image previews); `script-src`/`style-src` still keep `'unsafe-inline'` because Next injects inline runtime scripts and the app uses inline style objects — a **nonce-based strict `script-src` via middleware is the documented next step** (§17).
+- **CI** (`.github/workflows/ci.yml`): on every PR + push to `main`, the **"Test and build"** job runs `npm ci` → `npm test` → `npm run build` (build runs with empty secrets to prove guest mode works). Hardened with least-privilege `permissions: contents: read`, `concurrency` (cancel-in-progress on superseded pushes), and a `timeout-minutes`. **`main` is branch-protected to require this check.**
 - **Deploy:** Vercel auto-deploys `main` to production and every branch/PR to a preview URL. **Env-var changes require a new deployment to take effect.**
 
 ---
@@ -369,7 +373,7 @@ This project is built collaboratively with **Claude Code**, and the loop is wort
 6. **Vercel auto-deploys**; we **verify on the live URL** (and re-check the Supabase advisors for DB changes).
 7. Commit/PR trailers as in §6.
 
-History of what's shipped is in `git log` (PRs #2–#15): flatten-for-Vercel, audit hardening (rounds 2–3 + a full-repo audit), rate limiting, the OAuth sign-in menu + Profile + guest→account migration, the save-progress modal, GitHub/Discord toggles, the Learn tab + `/api/learn`, and the shared concept-guide cache.
+History of what's shipped is in `git log` (PRs #2–#26): flatten-for-Vercel, audit hardening (rounds 2–3 + multiple full-repo audits), rate limiting, the OAuth sign-in menu + Profile + guest→account migration, the save-progress modal, GitHub/Discord toggles, the Learn tab + `/api/learn`, the shared concept-guide cache, the difficulty/confidence-weighted Elo-style score model, the cheaper grader (`gpt-oss-120b`) + shared diagnostic pool, dead-code removal, and the audit→cleanup round (the `submitPractice` run-token guard, image-preview-leak fix, RPC grant hygiene, baseline CSP, CI hardening, and the expanded test suite).
 
 ---
 
@@ -385,7 +389,7 @@ History of what's shipped is in `git log` (PRs #2–#15): flatten-for-Vercel, au
 - **Groq free tier ≈ 30 req/min / ~6K tokens/min** → rapid testing can `429`; back off a few seconds.
 - **A GitHub/Discord button that errors on click** = the `NEXT_PUBLIC_ENABLE_*` flag was set before the provider was configured in Supabase. Do the Supabase step first.
 - **Concept cache returns `cached:false` always** = `SUPABASE_SERVICE_ROLE_KEY` isn't set in Vercel.
-- **`npm audit`** shows dev-only (vitest/esbuild) and a transitive postcss-via-Next moderate; the "fix" downgrades Next to v9, so we **accept** these rather than break the build.
+- **`npm audit`** reports **7 vulnerabilities (6 moderate + 1 "critical")**, all **dev-only or transitive**: the "critical" is the Vitest **UI-server** advisory (arbitrary file read/exec *only when the Vitest UI server is listening* — we never launch it; CI uses `vitest run`), plus the esbuild/vite dev-server advisories and a transitive postcss-via-Next moderate. Every available "fix" is a breaking major (Next → v9, Vitest → v4), so we **accept** these rather than break the build. None affect the production bundle.
 
 ---
 
@@ -405,7 +409,9 @@ History of what's shipped is in `git log` (PRs #2–#15): flatten-for-Vercel, au
 - **Durable rate limiter** (e.g. `@upstash/ratelimit`) + per-account limits to replace the in-memory one — do before monetizing / before heavy public traffic.
 - **Server-side auth enforcement** on the API routes (today they're rate-limited + RLS-scoped, but not per-user authenticated).
 - **Atomicity:** the score + attempt write is now one transaction via the `save_progress` RPC (resolving identity once, server-side) — fixed. Remaining: diagnostic grading is all-or-nothing (one failed grade discards the others) — known/low-severity.
-- **Strict CSP**; CI lint enforcement (ESLint isn't configured yet); guest-localStorage-full signalling.
+- **Nonce-based strict CSP** — a baseline CSP now ships (§14); the next step is a middleware-generated nonce so `script-src`/`style-src` can drop `'unsafe-inline'`.
+- **ESLint / CI lint enforcement** — not configured yet; the deprecated, unconfigured `next lint` script was removed (it only dropped into an interactive setup wizard). Wire up flat-config ESLint + `eslint-config-next` and run it in CI before any Next 16 upgrade.
+- *(Done this round: guest-`localStorage`-full now surfaces an error instead of silently dropping the write; the 3 SECURITY INVOKER RPCs `REVOKE` PUBLIC/anon; the `submitPractice` stale-write guard; the diagnostic image-preview leak.)*
 
 ---
 
@@ -416,4 +422,4 @@ History of what's shipped is in `git log` (PRs #2–#15): flatten-for-Vercel, au
 - **`AUTH_PROVIDERS.md`** — exact GitHub & Discord enablement steps.
 - **`FEATURE_PLAN.md`** — the sign-in-menu / Profile / Learn feature plan + the decisions behind the guest-first flow.
 - **`.env.example`** — documented env vars.
-- **`git log`** (PRs #2–#15) — the full build history and rationale.
+- **`git log`** (PRs #2–#26) — the full build history and rationale.

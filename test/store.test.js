@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   rpc: vi.fn(async () => ({ error: null })),
   session: { data: { session: { user: { id: "u1" } } } },
   db: {},
+  calls: {}, // per-table captured args: { [table]: { select, eq:[], order:[], upsert:[] } }
 }));
 vi.mock("@/lib/supabase", () => ({
   isSupabaseConfigured: true,
@@ -16,23 +17,25 @@ vi.mock("@/lib/supabase", () => ({
     rpc: mocks.rpc,
     // A chainable query builder matching supabase-js: select/eq/order return the
     // same thenable (so `await from().select().eq().order().order()` resolves to a
-    // configured {data,error}); upsert/insert resolve to their own results.
+    // configured {data,error}); upsert/insert resolve to their own results. Every
+    // call's args are captured so tests can assert the RLS-scoping filter
+    // (.eq("user_id", uid)) and the stable ordering, not just the returned data.
     from: (table) => {
       const sel = table === "scores" ? mocks.db.scoresSelect : mocks.db.attemptsSelect;
+      const c = (mocks.calls[table] ||= { eq: [], order: [], upsert: [] });
       const chain = {
-        select: () => chain,
-        eq: () => chain,
-        order: () => chain,
+        select: (...a) => { c.select = a; return chain; },
+        eq: (...a) => { c.eq.push(a); return chain; },
+        order: (...a) => { c.order.push(a); return chain; },
         then: (resolve, reject) => Promise.resolve(sel ?? { data: [], error: null }).then(resolve, reject),
-        upsert: async () => mocks.db.scoresUpsert ?? { error: null },
-        insert: async () => mocks.db.attemptsInsert ?? { error: null },
+        upsert: async (...a) => { c.upsert.push(a); return mocks.db.scoresUpsert ?? { error: null }; },
       };
       return chain;
     },
   }),
 }));
 
-import { migrateGuestToAccount, deleteAllUserData, loadState, saveScores, saveProgress } from "@/lib/store";
+import { migrateGuestToAccount, deleteAllUserData, loadState, saveProgress } from "@/lib/store";
 
 const KEY = "noobtopro:v1";
 const signedIn = { data: { session: { user: { id: "u1" } } } };
@@ -43,6 +46,7 @@ beforeEach(() => {
   mocks.rpc.mockClear();
   mocks.session = signedIn;
   mocks.db = {};
+  mocks.calls = {};
 });
 
 describe("migrateGuestToAccount", () => {
@@ -97,6 +101,35 @@ describe("migrateGuestToAccount", () => {
     expect(res.error).toBeTruthy();
     expect(JSON.parse(window.localStorage.getItem(KEY)).scores).not.toBe(null); // retained for retry
   });
+
+  it("is single-flight: two overlapping calls share ONE RPC invocation", async () => {
+    // mount + onAuthStateChange(SIGNED_IN) both call migrateGuestToAccount on load;
+    // the in-flight dedup must collapse them so the migration RPC runs exactly once.
+    // The two calls are issued synchronously (no await between), so the second sees
+    // the in-flight promise the first stored.
+    window.localStorage.setItem(KEY, JSON.stringify({ scores: { math: { score: 50, weakConcepts: [] } }, history: [] }));
+    const p1 = migrateGuestToAccount();
+    const p2 = migrateGuestToAccount(); // overlaps p1 before it resolves
+    expect(p1).toBe(p2); // same in-flight promise returned to both callers
+    const [r1, r2] = await Promise.all([p1, p2]);
+    expect(mocks.rpc).toHaveBeenCalledTimes(1); // deduped, not two migrations
+    expect(r1.migrated).toBe(true);
+    expect(r2.migrated).toBe(true);
+  });
+
+  it("caps the migrated history to the most recent 5000 attempts (RPC payload limit)", async () => {
+    // A guest with >5000 attempts would otherwise hit the RPC's 'payload too large'
+    // guard forever and never migrate; the client trims to the newest 5000.
+    const history = Array.from({ length: 5003 }, (_, i) => ({ type: "attempt", subject: "math", t: `t${i}`, newScore: i % 101 }));
+    window.localStorage.setItem(KEY, JSON.stringify({ scores: { math: { score: 50, weakConcepts: [] } }, history }));
+    const res = await migrateGuestToAccount();
+    expect(res.migrated).toBe(true);
+    const [, args] = mocks.rpc.mock.calls[0];
+    expect(args.p_attempts).toHaveLength(5000);
+    // kept the NEWEST tail (dropped t0..t2; first kept is t3, last is t5002)
+    expect(args.p_attempts[0].created_at).toBe("t3");
+    expect(args.p_attempts[args.p_attempts.length - 1].created_at).toBe("t5002");
+  });
 });
 
 describe("deleteAllUserData", () => {
@@ -139,11 +172,22 @@ describe("signed-in data layer (Supabase paths)", () => {
     expect(st.history[0]).toMatchObject({ type: "attempt", t: "t0", subject: "math", reasoningScore: 70, newScore: 62, totalAfter: 100, phdAfter: 33 });
   });
 
-  it("saveScores throws when the upsert fails so the caller can surface a banner", async () => {
-    mocks.db = { scoresUpsert: { error: { message: "rls denied" } } };
-    await expect(saveScores({ math: { score: 50, weakConcepts: [], comment: "" } })).rejects.toThrow(/rls denied/);
+  it("loadState scopes BOTH reads to the caller's user_id and orders attempts stably", async () => {
+    // Regression guard: every read must filter .eq("user_id", uid) (defense-in-depth
+    // alongside RLS) and the attempts read must order by created_at then id so a
+    // shared-timestamp tie is deterministic.
+    mocks.db = {
+      scoresSelect: { data: [], error: null },
+      attemptsSelect: { data: [], error: null },
+    };
+    await loadState();
+    expect(mocks.calls.scores.eq).toContainEqual(["user_id", "u1"]);
+    expect(mocks.calls.attempts.eq).toContainEqual(["user_id", "u1"]);
+    expect(mocks.calls.attempts.order).toEqual([
+      ["created_at", { ascending: true }],
+      ["id", { ascending: true }],
+    ]);
   });
-
 });
 
 describe("saveProgress (atomic score + attempt write)", () => {
@@ -209,5 +253,18 @@ describe("saveProgress (atomic score + attempt write)", () => {
     expect(local.scores.math.score).toBe(40); // preserved — not wiped
     expect(local.scores.chemistry.score).toBe(30); // preserved
     expect(Object.keys(local.scores).sort()).toEqual(["chemistry", "math", "physics"]);
+  });
+
+  it("guest: throws when the localStorage write fails (quota/blocked) instead of reporting false success", async () => {
+    mocks.session = guest;
+    // Spy the prototype so the jsdom localStorage instance's setItem actually throws.
+    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("QuotaExceededError");
+    });
+    try {
+      await expect(saveProgress(scores, evt)).rejects.toThrow(/full or blocked/i);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

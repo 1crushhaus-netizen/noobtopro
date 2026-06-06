@@ -92,12 +92,18 @@ function revokePreview(img) {
 }
 
 /* ----------------------------- small ui ----------------------------- */
-function Ring({ value, color, size = 96, stroke = 9 }) {
+function Ring({ value, color, size = 96, stroke = 9, label }) {
   const r = (size - stroke) / 2;
   const circ = 2 * Math.PI * r;
   const off = circ * (1 - Math.max(0, Math.min(100, value)) / 100);
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+    <svg
+      width={size}
+      height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      role="img"
+      aria-label={`${label ? `${label}: ` : ""}Score ${Math.round(Math.max(0, Math.min(100, value)))} of 100`}
+    >
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,.09)" strokeWidth={stroke} />
       <circle
         cx={size / 2}
@@ -339,6 +345,8 @@ export default function Noobtopro() {
         Object.values(answersRef.current || {}).forEach((a) => revokePreview(a && a.img));
         revokePreview(pImgRef.current);
         diagRun.current++; // supersede any in-flight diagnostic grade so it can't land a stale write
+        practiceRun.current++; // and any in-flight practice grade (so it can't write the prior identity's score into the guest store)
+        setBusy(false); // clear any busy left by a now-superseded in-flight grade
         setAnswers({});
         setQuestions([]);
         setQi(0);
@@ -357,6 +365,8 @@ export default function Noobtopro() {
 
   async function reset() {
     diagRun.current++; // supersede any in-flight diagnostic grade so it can't land a stale write
+    practiceRun.current++; // and any in-flight practice grade (see submitPractice's guard)
+    setBusy(false); // a superseded in-flight grade won't clear its own busy flag (its finally is run-guarded)
     await resetAll();
     // Release any outstanding image previews before clearing state.
     Object.values(answers).forEach((a) => revokePreview(a && a.img));
@@ -384,6 +394,9 @@ export default function Noobtopro() {
 
   // Profile → "Reset my progress": permanently delete the signed-in user's data.
   async function resetProgress() {
+    diagRun.current++; // supersede any in-flight grade so it can't re-persist deleted data
+    practiceRun.current++;
+    setBusy(false);
     try {
       await deleteAllUserData();
       setScores(null);
@@ -420,6 +433,9 @@ export default function Noobtopro() {
       }
       const init = {};
       qs.forEach((q) => (init[q.subject] = { text: "", img: null }));
+      // Release any previews left over from a previous diagnostic before replacing
+      // the answers map, so re-taking the diagnostic can't leak the old blob URLs.
+      Object.values(answers).forEach((a) => revokePreview(a && a.img));
       setQuestions(qs);
       setAnswers(init);
       setQi(0);
@@ -497,6 +513,10 @@ export default function Noobtopro() {
       if (st && st.history) setHistory(st.history); // null = couldn't refresh; keep current
       setScores(obj);
       setStage("dashboard");
+      // The diagnostic answer images are no longer rendered once we move to the
+      // dashboard; release their preview blob URLs (the base64 was already sent to
+      // the grader) so a completed diagnostic doesn't leak them for the page's life.
+      Object.values(answers).forEach((a) => revokePreview(a && a.img));
       // Guest just finished the diagnostic — prompt them to sign in to keep it.
       if (!user && isSupabaseConfigured) setShowSaveModal(true);
     } catch (e) {
@@ -668,6 +688,13 @@ export default function Noobtopro() {
   }
 
   async function submitPractice() {
+    // Capture the practice run token: sign-out / Restart / "Reset my progress" /
+    // starting another practice all bump practiceRun. If any happens while this grade
+    // is in flight, bail BEFORE persisting — otherwise saveProgress re-resolves the
+    // (now signed-out) identity and writes this score into the guest store, and the
+    // setScores/setFeedback below repopulate the just-cleared UI. Mirrors diagRun in
+    // submitDiagnostic.
+    const myRun = practiceRun.current;
     setError("");
     setBusy(true);
     try {
@@ -682,6 +709,7 @@ export default function Noobtopro() {
         difficulty: pQuestion.difficulty,
         image: pImg ? { mime: pImg.mime, data: pImg.data } : undefined,
       });
+      if (myRun !== practiceRun.current) return; // abandoned mid-grade — don't persist a stale write
       const updatedScore = blend(prev.score, r.newScoreSuggestion, {
         difficulty: pQuestion.difficulty,
         reasoningScore: r.reasoningScore,
@@ -711,14 +739,16 @@ export default function Noobtopro() {
         totalAfter: totalPoints(updatedScores),
         phdAfter: phdIndex(updatedScores),
       });
+      if (myRun !== practiceRun.current) return; // abandoned during the save round-trip — don't repopulate the reset UI
       if (st && st.history) setHistory(st.history); // null = couldn't refresh; keep current
       setScores(updatedScores);
       setScoreDelta(updatedScore - prev.score);
       setFeedback(r);
     } catch (e) {
+      if (myRun !== practiceRun.current) return; // abandoned — don't surface a stale error on the reset UI
       setError(e.message || "Grading failed.");
     } finally {
-      setBusy(false);
+      if (myRun === practiceRun.current) setBusy(false);
     }
   }
 
@@ -978,7 +1008,7 @@ export default function Noobtopro() {
                           <span style={{ color: SUBJECTS[k].color, fontFamily: "var(--mono)", fontSize: 20 }}>{SUBJECTS[k].glyph}</span>
                           <span className="np-scorelabel">{SUBJECTS[k].label}</span>
                         </div>
-                        <Ring value={s.score} color={SUBJECTS[k].color} />
+                        <Ring value={s.score} color={SUBJECTS[k].color} label={SUBJECTS[k].label} />
                         <div className="np-bandtag" style={{ color: SUBJECTS[k].color }}>{band(s.score)}</div>
                         {s.comment && <div className="np-comment">{s.comment}</div>}
                         {s.weakConcepts && s.weakConcepts.length > 0 && (
