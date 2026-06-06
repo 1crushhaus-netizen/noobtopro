@@ -46,8 +46,8 @@
 
 It inverts the usual "learn then test" flow:
 
-1. **Diagnose** — three open problems (one per subject). You solve them and explain every step.
-2. **Get placed** — your *reasoning* is graded on a 5-part rubric and mapped to a **0–100 score per subject**.
+1. **Prove it** — three open problems (one per subject). You solve them and explain every step.
+2. **Get ranked** — your *reasoning* is graded on a 5-part rubric and mapped to a **0–100 rank per subject**.
 3. **Climb** — pick a subject, get problems calibrated to your level, and improve. Sound reasoning moves your score even when the final answer is wrong.
 
 **The unbreakable product rule: never hand over the answer.** When you're stuck, the app responds with a **Socratic hint** (one nudging question), a **micro-lesson** (the underlying *concept*, taught in general terms, never the solution to your specific problem), and a **correctness note** (whether your conclusion holds, without revealing the answer). The **Learn** tab extends this: click a weak concept and get a Socratic concept guide that teaches the idea and method — never a worked answer.

@@ -15,11 +15,11 @@ describe("ProfileTab", () => {
     expect(screen.getByText("ada@example.com")).toBeTruthy();
   });
 
-  it("shows an empty state + Begin diagnostic when there are no scores", () => {
+  it("shows an empty state + the 'Prove it' CTA when there are no scores", () => {
     const onStartDiagnostic = vi.fn();
     render(<ProfileTab user={user} scores={null} history={[]} onStartDiagnostic={onStartDiagnostic} />);
-    expect(screen.getByText(/no diagnostic yet/i)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /begin diagnostic/i }));
+    expect(screen.getByText(/not ranked yet/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /prove it/i }));
     expect(onStartDiagnostic).toHaveBeenCalled();
   });
 

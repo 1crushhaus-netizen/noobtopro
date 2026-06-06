@@ -70,7 +70,7 @@ describe("Noobtopro — diagnostic image previews are revoked on completion (lea
     }));
 
     const { container } = render(<Noobtopro />);
-    fireEvent.click(await screen.findByRole("button", { name: /begin diagnostic/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /prove it/i }));
 
     // Q1 (math): attach an image, advance.
     await screen.findByText("MATHQ");
@@ -82,10 +82,10 @@ describe("Noobtopro — diagnostic image previews are revoked on completion (lea
     await attachImageToCurrentComposer(container);
     fireEvent.click(screen.getByRole("button", { name: /next question/i }));
 
-    // Q3 (chemistry): attach an image, submit for scoring.
+    // Q3 (chemistry): attach an image, get ranked.
     await screen.findByText("CHEMQ");
     await attachImageToCurrentComposer(container);
-    fireEvent.click(screen.getByRole("button", { name: /submit for scoring/i }));
+    fireEvent.click(screen.getByRole("button", { name: /get ranked/i }));
 
     // Lands on the dashboard once grading completes.
     await screen.findByText("Where you stand");
@@ -143,7 +143,7 @@ describe("Noobtopro — submitPractice run-token guard (stale grade after Restar
 
     // Restart (brand button) while the grade is still in flight.
     fireEvent.click(screen.getByTitle("Restart"));
-    await screen.findByRole("button", { name: /begin diagnostic/i }); // back at intro
+    await screen.findByRole("button", { name: /prove it/i }); // back at intro
 
     // Now let the stale grade resolve — the guard must drop it. Flush with a
     // macrotask (setTimeout 0): all queued microtasks — submitPractice's full
@@ -162,6 +162,6 @@ describe("Noobtopro — submitPractice run-token guard (stale grade after Restar
     expect(global.fetch).toHaveBeenCalledWith("/api/grade", expect.anything()); // the grade DID run + resolve
     expect(store.saveProgress).not.toHaveBeenCalled();
     expect(screen.queryByText(/reasoning quality this attempt/i)).toBe(null);
-    expect(screen.getByRole("button", { name: /begin diagnostic/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /prove it/i })).toBeTruthy();
   });
 });

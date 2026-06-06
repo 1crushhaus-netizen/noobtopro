@@ -37,7 +37,7 @@ export default function LearnTab({ scores, active, content, busy, error, questio
         <div className="np-card" style={{ textAlign: "center", padding: "32px 24px" }}>
           <div className="np-h2" style={{ fontSize: 22 }}>No concepts to learn yet</div>
           <p className="np-lede" style={{ margin: "8px auto 0" }}>
-            Take the diagnostic or practice a subject — the concepts you're weak on will show up here.
+            Prove what you know or practice a subject — the concepts you're weak on will show up here.
           </p>
         </div>
       ) : (

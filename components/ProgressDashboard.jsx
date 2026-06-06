@@ -134,7 +134,7 @@ export default function ProgressDashboard({ scores, history = [], onPractice }) 
 
       <div className="np-card np-chartcard">
         <div className="np-charttitle">Total points over time</div>
-        <div className="np-chartsub">From your diagnostic baseline through every graded attempt.</div>
+        <div className="np-chartsub">From your starting scores through every graded attempt.</div>
         {linePoints.length >= 2 ? (
           <LineChart values={linePoints} yMax={300} color="#F2B441" />
         ) : (
