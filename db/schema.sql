@@ -92,7 +92,10 @@ begin
          s->>'subject',
          greatest(0, least(100, coalesce(case when pg_input_is_valid(s->>'score', 'numeric') then round((s->>'score')::numeric) end, 0)))::int,
          coalesce(
-           (select array_agg(left(value, 200)) from jsonb_array_elements_text(s->'weak_concepts') as value),
+           (select array_agg(v order by ord)
+              from (select left(value, 200) as v, ord
+                      from jsonb_array_elements_text(s->'weak_concepts') with ordinality as e(value, ord)
+                     order by ord limit 64) sub),
            '{}'::text[]
          ),
          left(coalesce(s->>'comment', ''), 2000),
@@ -109,11 +112,11 @@ begin
   select uid,
          coalesce(a->>'type', 'attempt'),
          a->>'subject',
-         case when pg_input_is_valid(a->>'reasoning_score', 'numeric') then round((a->>'reasoning_score')::numeric)::int end,
-         case when pg_input_is_valid(a->>'delta', 'numeric') then round((a->>'delta')::numeric)::int end,
-         case when pg_input_is_valid(a->>'new_score', 'numeric') then round((a->>'new_score')::numeric)::int end,
-         case when pg_input_is_valid(a->>'total_after', 'numeric') then round((a->>'total_after')::numeric)::int end,
-         case when pg_input_is_valid(a->>'phd_after', 'numeric') then round((a->>'phd_after')::numeric)::int end,
+         case when pg_input_is_valid(a->>'reasoning_score', 'numeric') then greatest(-2147483648, least(2147483647, round((a->>'reasoning_score')::numeric)))::int end,
+         case when pg_input_is_valid(a->>'delta', 'numeric') then greatest(-2147483648, least(2147483647, round((a->>'delta')::numeric)))::int end,
+         case when pg_input_is_valid(a->>'new_score', 'numeric') then greatest(-2147483648, least(2147483647, round((a->>'new_score')::numeric)))::int end,
+         case when pg_input_is_valid(a->>'total_after', 'numeric') then greatest(-2147483648, least(2147483647, round((a->>'total_after')::numeric)))::int end,
+         case when pg_input_is_valid(a->>'phd_after', 'numeric') then greatest(-2147483648, least(2147483647, round((a->>'phd_after')::numeric)))::int end,
          least(coalesce(case when pg_input_is_valid(a->>'created_at', 'timestamptz') then (a->>'created_at')::timestamptz end, now()), now())
   from jsonb_array_elements(coalesce(p_attempts, '[]'::jsonb)) as a
   where (a->>'subject' is null or a->>'subject' in ('math', 'physics', 'chemistry'))
@@ -183,7 +186,10 @@ begin
          s->>'subject',
          greatest(0, least(100, coalesce(case when pg_input_is_valid(s->>'score', 'numeric') then round((s->>'score')::numeric) end, 0)))::int,
          coalesce(
-           (select array_agg(left(value, 200)) from jsonb_array_elements_text(s->'weak_concepts') as value),
+           (select array_agg(v order by ord)
+              from (select left(value, 200) as v, ord
+                      from jsonb_array_elements_text(s->'weak_concepts') with ordinality as e(value, ord)
+                     order by ord limit 64) sub),
            '{}'::text[]
          ),
          left(coalesce(s->>'comment', ''), 2000),
@@ -212,11 +218,11 @@ begin
     values (uid,
             coalesce(p_attempt->>'type', 'attempt'),
             p_attempt->>'subject',
-            case when pg_input_is_valid(p_attempt->>'reasoning_score', 'numeric') then round((p_attempt->>'reasoning_score')::numeric)::int end,
-            case when pg_input_is_valid(p_attempt->>'delta', 'numeric') then round((p_attempt->>'delta')::numeric)::int end,
-            case when pg_input_is_valid(p_attempt->>'new_score', 'numeric') then round((p_attempt->>'new_score')::numeric)::int end,
-            case when pg_input_is_valid(p_attempt->>'total_after', 'numeric') then round((p_attempt->>'total_after')::numeric)::int end,
-            case when pg_input_is_valid(p_attempt->>'phd_after', 'numeric') then round((p_attempt->>'phd_after')::numeric)::int end,
+            case when pg_input_is_valid(p_attempt->>'reasoning_score', 'numeric') then greatest(-2147483648, least(2147483647, round((p_attempt->>'reasoning_score')::numeric)))::int end,
+            case when pg_input_is_valid(p_attempt->>'delta', 'numeric') then greatest(-2147483648, least(2147483647, round((p_attempt->>'delta')::numeric)))::int end,
+            case when pg_input_is_valid(p_attempt->>'new_score', 'numeric') then greatest(-2147483648, least(2147483647, round((p_attempt->>'new_score')::numeric)))::int end,
+            case when pg_input_is_valid(p_attempt->>'total_after', 'numeric') then greatest(-2147483648, least(2147483647, round((p_attempt->>'total_after')::numeric)))::int end,
+            case when pg_input_is_valid(p_attempt->>'phd_after', 'numeric') then greatest(-2147483648, least(2147483647, round((p_attempt->>'phd_after')::numeric)))::int end,
             least(coalesce(case when pg_input_is_valid(p_attempt->>'created_at', 'timestamptz') then (p_attempt->>'created_at')::timestamptz end, now()), now()));
   end if;
 end;
@@ -318,15 +324,22 @@ create policy "public read ready guides"
   on public.concept_guides for select to anon, authenticated
   using (visibility = 'public' and status = 'ready');
 
--- Exact SQL parity with conceptKey() in lib/supabaseAdmin.js (trim -> lower ->
--- strip leading/trailing quote runs -> collapse internal whitespace -> left 200).
+-- Byte-for-byte parity with conceptKey() in lib/supabaseAdmin.js, verified on the
+-- live DB against the JS golden vectors (test/conceptKey.test.js). Steps:
+--   1. strip control/format chars (C0, DEL+C1, zero-width, BOM) — the chars where
+--      JS \s / String.trim() and Postgres \s disagree — so the two cannot diverge;
+--   2. trim -> lower -> strip leading/trailing quote runs -> collapse whitespace;
+--   3. left(...,200) truncates by CHARACTER, matching JS Array.from(s).slice(0,200).
 -- A drift would leave grader-registered keys that generation never lands on.
 create or replace function public._concept_key(p text)
 returns text language sql immutable set search_path = '' as $$
   select left(
            regexp_replace(
              regexp_replace(
-               lower(regexp_replace(coalesce(p, ''), '^\s+|\s+$', '', 'g')),
+               lower(regexp_replace(
+                 regexp_replace(coalesce(p, ''), '[\x00-\x1F\x7F-\x9F\x200b-\x200d\xfeff]', '', 'g'),
+                 '^\s+|\s+$', '', 'g'
+               )),
                '^["''`]+|["''`]+$', '', 'g'
              ),
              '\s+', ' ', 'g'
@@ -342,6 +355,10 @@ create or replace function public.register_concepts(p_subject text, p_concepts j
 returns void language plpgsql security definer set search_path = public as $$
 begin
   if p_subject not in ('math','physics','chemistry') then return; end if;
+  -- Best-effort global cap on auto-grown PENDING stubs so steered grader traffic
+  -- can't grow concept_guides without bound (no TTL/cleanup yet); curated/ready rows
+  -- are unaffected. A small overshoot under concurrency is fine for this P3 guard.
+  if (select count(*) from public.concept_guides where status = 'pending') >= 50000 then return; end if;
   insert into public.concept_guides (subject, concept_key, concept, topic, status, content, visibility, source)
   select p_subject, _concept_key(val), left(val, 200), 'general_' || p_subject, 'pending', null, 'public', 'grader'
   from jsonb_array_elements_text(coalesce(p_concepts, '[]'::jsonb)) as val

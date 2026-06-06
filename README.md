@@ -10,7 +10,7 @@
 > 3. **Follow the dev loop in §15** (branch → PR → CI "Test and build" → address Greptile → merge → verify) for every change.
 > 4. **Keep this README up to date.** When you change architecture, env vars, the data model, status, or conventions, update the relevant section in the same PR. A stale hand-off doc is worse than none — the next session relies on it being accurate.
 >
-> New here? Jump to [**Where to start (next task: full objective audit)**](#where-to-start-next-task-full-objective-audit-before-the-merge).
+> New here? Jump to [**Where to start (next task: Concept Hub browse UI)**](#where-to-start-next-task-concept-hub-browse-ui).
 
 **Prove what you know. Climb from noob to pro.**
 
@@ -18,7 +18,7 @@
 
 ## Table of contents
 
-- ⭐ [**Where to start (next task: full objective audit)**](#where-to-start-next-task-full-objective-audit-before-the-merge)
+- ⭐ [**Where to start (next task: Concept Hub browse UI)**](#where-to-start-next-task-concept-hub-browse-ui)
 1. [What it is & why](#1-what-it-is--why)
 2. [Current status & live links](#2-current-status--live-links)
 3. [Quickstart](#3-quickstart)
@@ -89,7 +89,7 @@ Score bands (global scale): **0–20** Absolute beginner · **20–40** Foundati
 - ✅ **Shared caches active** (`SUPABASE_SERVICE_ROLE_KEY` set): the concept-guide cache (each guide generated once, with a bundled "try this" question) and the baseline-diagnostic pool — both reused across users to cut Groq spend. Grading runs on the cheaper `openai/gpt-oss-120b` (`GROQ_GRADE_MODEL`).
 
 **In progress:**
-- 🛠️ **Concept Hub** — the universal, categorized, auto-growing concept directory (see "Where to start"). **Backend shipped** (taxonomy + public read-only catalog + grader auto-grow + safety-gated promotion; live DB migrated, advisors clean). The browse UI + curated seed are next, behind `NEXT_PUBLIC_ENABLE_CONCEPT_HUB`.
+- 🛠️ **Concept Hub** — the universal, categorized, auto-growing concept directory (see "Where to start"). **Backend shipped** (taxonomy + public read-only catalog + grader auto-grow + **curation-only** promotion; live DB migrated; **no ERROR-level advisors** — remaining notices are the intended `diagnostic_pool` RLS lock and one unindexed-FK (both INFO), plus the leaked-password WARN tracked in §17). A **curated seed of 10 public guides is already live**; the browse UI + moderation (report/hide/regenerate) flow are next, behind `NEXT_PUBLIC_ENABLE_CONCEPT_HUB`.
 
 **Built but not yet activated (config only):**
 - ⏳ **GitHub / Discord sign-in** — code is env-toggleable and ready; needs the OAuth apps + Supabase provider config + `NEXT_PUBLIC_ENABLE_*` flags (see `AUTH_PROVIDERS.md`).
@@ -120,30 +120,16 @@ Other commands: `npm test` (run tests once), `npm run test:watch`, `npm run buil
 
 ---
 
-## Where to start (next task: full objective audit, before the merge)
+## Where to start (next task: Concept Hub browse UI)
 
-> **You are the pre-merge gate.** **PR #29** (`feat/concept-hub-v1`) is **open and not yet merged.** It bundles two big changes: (1) the **Concept Hub backend** (taxonomy + public-readable `concept_guides` catalog + auto-grow RPCs) and (2) a **security-audit hardening round** (curation-only public hub, same-origin request guard, image magic-byte validation, vision cost cap, PKCE, timestamp clamps, etc. — see [§17](#17-roadmap--known-limitations)). **The owner will merge PR #29 once this session has audited the codebase and confirmed it is sound.** Treat that as your job.
+> **PR #29 (`feat/concept-hub-v1`) has been audited, hardened, and is awaiting merge.** A full pre-merge audit ran on this branch (an 81-agent sweep, then a second 8-lens audit with adversarial per-finding verification against the live DB). **Verdict: 0 P0 / 0 P1 / no merge-blockers** — the curation-only model, RLS isolation, DEFINER-RPC lockdown, and the "no XSS / no secret leak / no SQLi" claims all hold against the real source and the live project. The P2/P3 findings were fixed in an **audit-fix round on this branch** (see [§17](#17-roadmap--known-limitations) → "Audit-fix round": true `_concept_key`↔`conceptKey` parity, int4 clamps, `weak_concepts` cap, sign-out in-memory clear, practice image-preview revoke, guest-blob validation, `isConceptSafe` hardening, a pending-stub cap, plus new tests pinning the curation-only invariant + key parity + request-guard coverage; DB migrations applied to the live project, advisors re-checked clean). **Once the owner merges PR #29, the next task is the Concept Hub browse UI below.**
 
-### The task — a full, objective audit of the ENTIRE codebase
-Use **as many agents as you need and unlimited tokens** — thoroughness beats speed/cost. Produce a **written findings report; do NOT fix in this pass** (find first; a fix round follows via the dev loop, [§15](#15-how-we-work-the-dev-loop), once the owner picks what to act on).
-
-**Be ruthlessly objective and unbiased.** Form your own conclusions:
-- **Treat nothing as safe-by-design.** Code comments and this README that claim something is "intended / safe / service-role only / prototype-safe / can't leak / verified" are **not evidence** — independently confirm each against the actual source and the live DB. Reassuring comments are where bugs hide.
-- **Verify before trusting any finding.** LLM reviewers — including your own sub-agents — hallucinate. Adversarially re-check every candidate finding against the real code (and reproduce/exploit it on paper) before reporting it. An unverified claim is worse than none.
-
-**Cover everything**, with security as a first-class priority:
-- **Security:** authz / multi-tenant isolation (RLS), injection (SQL + prompt), secrets & the server/client boundary, SSRF, XSS, DoS / abuse / cost, privilege escalation, data exposure & privacy.
-- **Data layer + `db/schema.sql`:** every table, RLS policy, grant, and RPC (`migrate_guest_data`, `delete_user_data`, `save_progress`, `try_add_diagnostic`, `register_concepts`, `promote_or_insert_guide`, `_concept_key`). Cross-check the **live** project, not just the file.
-- **The three API routes**, the **Groq client + prompts** (`lib/groq.js`), the **React state machine** (`components/Noobtopro.jsx`), the **scoring model**, the **tests** (hunt for false-confidence mocks + coverage gaps), and **config/CI/deps**.
-- **Pay special attention to the newest, riskiest surface introduced by PR #29:** the public-readable `concept_guides`, the SECURITY DEFINER RPCs, the curation-only model, `lib/requestGuard.js`, `lib/contentSafety.js`, and the **documented residual risks in [§17](#17-roadmap--known-limitations)** (client-computed scores not yet trustworthy; in-memory rate limiter; account-deletion; email/password provider) — confirm those are the *only* residuals and that the hardening actually holds.
-
-**Methodology:** fan out independent finder agents by area/lens; **adversarially verify** each finding; run the Supabase **advisors** (`get_advisors`, security + performance) and inspect live **RLS / policies / grants / function ACLs** as ground truth; **reconcile any open Greptile threads** across PRs. Classify each finding **P0/P1/P2/P3**.
-
-**Deliverable:** the findings report, and an explicit list of any **merge-blockers for PR #29** so the owner can decide whether to merge. If you find confirmed issues, the owner may then ask for a cleanup round (dev loop, [§15](#15-how-we-work-the-dev-loop); for DB changes edit `db/schema.sql` **and** apply the migration to the live project, then re-check advisors).
-
-### Open product work (NOT this session's task — audit first)
-- **Concept Hub v1 cont.:** the browse **UI** (`LearnTab` rebuild + `lib/catalog.js`, behind `NEXT_PUBLIC_ENABLE_CONCEPT_HUB`, decouple from `scores`) and the **curated seed** + curation/report flow.
+### Next task — Concept Hub v1: browse UI + moderation
+- The browse **UI** (`LearnTab` rebuild + a new `lib/catalog.js`, behind `NEXT_PUBLIC_ENABLE_CONCEPT_HUB`, decoupled from `scores`) reads the public `concept_guides` / `concept_topics` directly via PostgREST — no Groq, no RPC. The **curated seed is already live** (10 public guides); what remains is the UI plus the **moderation flow** (report / hide / regenerate) for curation.
 - **v1.1 / roadmap ([§17](#17-roadmap--known-limitations)):** `pg_trgm` fuzzy search, `tags[]` facet, canonical-merge de-dup, durable per-account rate limiter, server-authoritative scoring, nonce-based strict CSP, per-item IRT/Elo, GitHub/Discord sign-in.
+
+### How the pre-merge audit was run (reference for the next gate)
+Be ruthlessly objective; treat README/code claims of "intended / safe / service-role only / verified / fixed" as **not evidence** and confirm each against the actual source **and the live DB**. Fan out independent finder agents by area/lens, then **adversarially verify every candidate finding** and reproduce it on paper (LLM reviewers — including your own sub-agents — hallucinate; an unverified claim is worse than none). Run the Supabase **advisors** (`get_advisors`, security + performance) and inspect live **RLS / policies / grants / function ACLs** as ground truth. **Note:** Greptile's trial review limit is exhausted, so it no longer auto-reviews PRs ([§15](#15-how-we-work-the-dev-loop)) — a manual/self review is now the only gate. Classify findings **P0–P3** and deliver a written report + an explicit merge-blocker list. For DB fixes, edit `db/schema.sql` **and** apply the migration to the live project, then re-check advisors.
 
 ---
 
@@ -267,9 +253,9 @@ To stand up the database from scratch (or reproduce it), **run `db/schema.sql` i
 - **`migrate_guest_data(p_scores jsonb, p_attempts jsonb)`** — atomic, idempotent, advisory-locked per user; migrates guest progress into an **empty** account in one transaction (first-writer-wins; never overwrites). Called on first sign-in. (Service-invoker → RLS applies.)
 - **`delete_user_data()`** — atomic delete of the caller's scores + attempts (Profile → "Reset my progress").
 - **`save_progress(p_scores jsonb, p_attempt jsonb)`** — atomic per-update write: upserts the caller's scores **and** appends the matching attempt in **one transaction** (capturing `auth.uid()` once), so a partial failure can't persist a score without its attempt. Values are clamped / type-allow-listed / guard-cast (PG16+ `pg_input_is_valid`) like the migration RPC. (Service-invoker → RLS applies.) Drives `saveProgress` for the diagnostic baseline and every practice attempt.
-- **`register_concepts(p_subject, p_concepts jsonb)`** *(concept hub)* — auto-grow: registers the grader's (server-normalized) weak concepts as **`pending` stubs** (hidden until generated). `SECURITY DEFINER`, `service_role`-only; `on conflict do nothing` so it never disturbs an existing row. Called non-blocking (`after()`) from `/api/grade`.
-- **`promote_or_insert_guide(p_subject, p_concept, p_content, p_topic, p_level, p_safe)`** *(concept hub)* — on a `/api/learn` generation: **promotes** a `pending` grader stub to `ready` (made `public` iff `p_safe`), else inserts a fresh **user-originated guide kept private (`hidden`)** until vetted; **never overwrites an existing `ready` guide** (first-writer-wins). `SECURITY DEFINER`, `service_role`-only.
-- **`_concept_key(text)`** *(concept hub)* — SQL re-implementation of `conceptKey()` with **byte-for-byte parity** (verified against the JS), so grader-registered keys match generated ones.
+- **`register_concepts(p_subject, p_concepts jsonb)`** *(concept hub)* — auto-grow: registers the grader's (server-normalized) weak concepts as **`pending` stubs** (hidden until generated). `SECURITY DEFINER`, `service_role`-only; `on conflict do nothing` so it never disturbs an existing row; a **best-effort global cap (50k pending stubs)** bounds catalog growth. Called non-blocking (`after()`) from `/api/grade`.
+- **`promote_or_insert_guide(p_subject, p_concept, p_content, p_topic, p_level, p_safe)`** *(concept hub)* — on a `/api/learn` generation: **promotes** a `pending` grader stub to `ready`, else inserts a fresh user-originated guide. **Either way the guide is stored `visibility='hidden'`** (curation-only): cached + servable to a direct opener but **never publicly browsable**. `p_safe` is retained for backward-compat but **no longer grants public visibility** (only a manual `source='curated'` seed is public). **Never overwrites an existing `ready` guide** (first-writer-wins). `SECURITY DEFINER`, `service_role`-only.
+- **`_concept_key(text)`** *(concept hub)* — SQL re-implementation of `conceptKey()` with **byte-for-byte parity**: both strip control/zero-width/BOM chars (the set where JS `\s`/`trim()` and Postgres `\s` disagree) and truncate to 200 by **code point** (`left()` ↔ `Array.from().slice()`). Pinned by `test/conceptKey.test.js` golden vectors + a live-DB equality check, so grader-registered keys always match generated ones.
 - *(The hub's **reads** are browser-direct against the publicly-readable `concept_guides`/`concept_topics` via PostgREST — no RPC, no Groq.)*
 
 ### `lib/store.js` — the dual-mode data layer
@@ -352,21 +338,23 @@ Components: **SignIn** (provider buttons), **ProfileTab** (identity + stats + co
 
 ## 13. Testing
 
-**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **168 tests across 18 files**, all passing.
+**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **201 tests across 20 files**, all passing.
 
 | File | Covers |
 |---|---|
-| `test/scoring.test.js` | clampScore/band/blend (legacy + weighted Elo path)/totalPoints/phdIndex incl. regressions |
+| `test/scoring.test.js` | clampScore/band/blend (legacy + weighted Elo path)/totalPoints/phdIndex incl. regressions **+ non-integer-score coercion** |
 | `test/groq.test.js` | JSON extraction (fences, prose, braces-in-strings), fallback retry **gating (no retry on hard HTTP errors)**, per-call `max_tokens`, **grade-model routing (gpt-oss + `reasoning_effort` low)**, errors |
 | `test/rateLimit.test.js` | window limit, reset, per-key, memory bound (enforceCap) |
 | `test/api-generate.test.js` | validation/400s, prototype-key rejection, non-leaking 500, weakConcepts cap, **diagnostic pool (warm-serve / cold self-fill via RPC / invalid-row + invalid-generated guards / read-error fall-through)** |
-| `test/api-grade.test.js` | validation, MIME/base64, score/rubric normalization, difficulty-band threading, **valid-image → vision-model forwarding**, non-leaking 500 |
-| `test/api-learn.test.js` | validation, normalization, **cache hit/miss via `promote_or_insert_guide` / key-normalization (real `conceptKey`) / LLM-topic validation / safety-gate (`p_safe`)**, tryThisQuestion shaping |
+| `test/api-grade.test.js` | validation, MIME/base64, score/rubric normalization, difficulty-band threading, **valid-image → vision-model forwarding**, **request-guard 403/415**, non-leaking 500 |
+| `test/api-learn.test.js` | validation, normalization, **cache hit/miss via `promote_or_insert_guide` / key-normalization (real `conceptKey`) / LLM-topic validation**, **request-guard 403/415**, tryThisQuestion shaping |
 | `test/taxonomy.test.js` | the 36-topic Subject→Topic tree: 12/subject incl. `general_*`, `isValidTopic`/`normalizeTopic` (case-tolerant, prototype-safe, cross-subject reject), labels/slugs |
-| `test/contentSafety.test.js` | `isConceptSafe` accepts STEM labels; rejects links/emails/markup/blocklist/over-long/symbol-dominated |
-| `test/store.test.js` | migration clamping + **single-flight dedup + >5000-attempt cap**, delete RPC, signed-in load/save paths + **user_id scoping** + data-wipe guard, **atomic `saveProgress`** incl. **guest quota-failure surfacing** (mocked Supabase) |
+| `test/contentSafety.test.js` | `isConceptSafe` accepts STEM labels (incl. accented/Greek); rejects links/emails/markup/blocklist/over-long/symbol-dominated **+ expanded TLDs + zero-width-split evasion** |
+| `test/conceptKey.test.js` | `conceptKey` JS↔SQL parity golden vectors: control/zero-width/BOM strip, surrounding-quote strip, **code-point-safe 200-char truncation** (surrogate-safe) |
+| `test/schema-invariants.test.js` | static guard on `db/schema.sql`: **curation-only invariant** (`promote_or_insert_guide` always `hidden`, never `public`; grader stubs `pending`; read policy = `public`+`ready`) + **`_concept_key` control/zero-width/BOM strip + `left(…,200)`** parity markers |
+| `test/store.test.js` | migration clamping + **single-flight dedup + >5000-attempt cap**, delete RPC, signed-in load/save paths + **user_id scoping** + data-wipe guard, **atomic `saveProgress`** incl. **guest quota-failure surfacing**, **guest-blob sanitization on read + weak_concepts ≤64 cap** (mocked Supabase) |
 | `test/noobtopro.test.jsx` | the state machine: **diagnostic image-preview revoke on completion** + **`submitPractice` run-token guard** (stale grade after Restart doesn't persist or repopulate) |
-| `test/noobtopro-reset.test.jsx` | the **"Restart" logo**: a signed-in user keeps persisted progress (re-hydrates, never blanks) while a guest's local session clears to the intro |
+| `test/noobtopro-reset.test.jsx` | the **"Restart" logo**: a signed-in user keeps persisted progress (re-hydrates, never blanks) while a guest's local session clears to the intro; **sign-out synchronously clears in-memory scores** (shared-device safety) |
 | `test/progress.test.jsx` | ProgressDashboard stat summary + **SVG chart accessible names** + empty states |
 | `test/headers.test.js` | `next.config.js` security headers: **baseline CSP directives + allow-listed origins**, `X-Frame-Options: DENY` (matches `frame-ancestors`), nosniff/HSTS |
 | `test/error.test.jsx` | error-boundary logs the caught error + `reset()` on "Try again" |
@@ -400,7 +388,7 @@ This project is built collaboratively with **Claude Code**, and the loop is wort
 6. **Vercel auto-deploys**; we **verify on the live URL** (and re-check the Supabase advisors for DB changes).
 7. Commit/PR trailers as in §6.
 
-History of what's shipped is in `git log` (PRs #2–#26): flatten-for-Vercel, audit hardening (rounds 2–3 + multiple full-repo audits), rate limiting, the OAuth sign-in menu + Profile + guest→account migration, the save-progress modal, GitHub/Discord toggles, the Learn tab + `/api/learn`, the shared concept-guide cache, the difficulty/confidence-weighted Elo-style score model, the cheaper grader (`gpt-oss-120b`) + shared diagnostic pool, dead-code removal, and the audit→cleanup round (the `submitPractice` run-token guard, image-preview-leak fix, RPC grant hygiene, baseline CSP, CI hardening, and the expanded test suite).
+History of what's shipped is in `git log` (PRs #2–#29): flatten-for-Vercel, audit hardening (rounds 2–3 + multiple full-repo audits), rate limiting, the OAuth sign-in menu + Profile + guest→account migration, the save-progress modal, GitHub/Discord toggles, the Learn tab + `/api/learn`, the shared concept-guide cache, the difficulty/confidence-weighted Elo-style score model, the cheaper grader (`gpt-oss-120b`) + shared diagnostic pool, dead-code removal, and the audit→cleanup round (the `submitPractice` run-token guard, image-preview-leak fix, RPC grant hygiene, baseline CSP, CI hardening, and the expanded test suite).
 
 ---
 
@@ -438,18 +426,20 @@ History of what's shipped is in `git log` (PRs #2–#26): flatten-for-Vercel, au
 
 **Security posture (an objective 81-agent audit ran on the concept-hub branch; findings fixed):**
 - **Fixed this round:** concept hub is now **curation-only public** (auto-grown guides never auto-publish — closes attacker-influenced public content), unsafe concepts are never persisted, a **same-origin + JSON guard** on all API routes (CSRF/cross-site cost abuse), tighter per-route + image rate limits, the **vision fallback no longer double-calls** the model (cost amplification), **image magic-byte validation** (forged-MIME/arbitrary-bytes), a non-string-`reasoning` 500, guest-`localStorage` cleared on sign-out, forgeable-future `created_at` clamped, and **OAuth switched to PKCE** (§9).
-- **Verified clean (not just claimed):** no cross-user data read/write (RLS bound to `auth.uid()`), no SQLi, no XSS sinks, no secret leakage, SECURITY DEFINER RPCs are `service_role`-only — all checked against the live DB.
+- **Audit-fix round (a second full pre-merge audit of PR #29 — 8 finder lenses + adversarial verification — fixes applied to this branch):** `_concept_key`↔`conceptKey` made **true byte-for-byte parity** (control/zero-width/BOM strip + code-point truncation; live-verified) so the read-through cache can't miss on exotic input and the README parity claim is now accurate; **int4-range clamp** on every attempt field in `save_progress`/`migrate_guest_data` (a corrupt guest blob can no longer abort the whole migration); **`weak_concepts` capped at 64** (server RPCs + client); **best-effort 50k cap** on pending grader stubs; **sign-out synchronously clears in-memory scores/history** (shared-device peek); **practice image preview revoked on completion** (matching the diagnostic fix); **guest `localStorage` validated/clamped on read**; `totalPoints`/`phdIndex` coerce non-integer scores; `isConceptSafe` hardened (expanded TLDs, zero-width-split evasion, Unicode-letter count). New tests pin the **curation-only invariant** and **key parity** (`test/schema-invariants.test.js`, `test/conceptKey.test.js`) and add **request-guard 403/415** coverage on all three routes. The audit confirmed **0 P0/0 P1 / no merge-blockers**; everything fixed here was P2/P3.
+- **Verified clean (not just claimed):** no cross-user data read/write (RLS bound to `auth.uid()`), no SQLi, no XSS sinks (all LLM/user content is React-escaped; no `dangerouslySetInnerHTML`), no secret leakage, SECURITY DEFINER RPCs are `service_role`-only, and **no RPC path yields a `public`+`ready` guide** (curation-only holds) — all checked against the live DB.
 - **Accepted residual risks (documented, by decision):**
   - **Scores are client-computed and NOT yet trustworthy** — a user can self-assert their own score (self-only; RLS blocks touching others). Fine while scores are demonstrative; **must move scoring server-authoritative before any score-gated / paid / leaderboard / cross-user feature.**
   - **Durable rate limiter** (e.g. `@upstash/ratelimit`) + per-account limits to replace the in-memory one — do before monetizing / heavy public traffic.
   - **`delete_user_data`** clears the user's scores/attempts but does **not** delete the `auth.users` account (needs an admin-API flow).
   - **Disable the Supabase email/password provider** (the app is OAuth-only) to clear the leaked-password advisor and close an unused signup surface; if kept, enable HIBP leaked-password protection.
   - **Quarantine/report flow** for a poisoned *hidden* guide served on direct open (shared-cache trade-off) — future, alongside the curation UI.
+  - **Shared-device guest migration:** a guest's `localStorage` progress auto-migrates into the **first different account** that signs in on the same browser — but only into an *empty* account (the scores-exists guard blocks any populated account; no PII; RLS intact, write is correctly scoped to that account). Bounded and by-design for the guest→account flow; a future "merge your guest progress?" consent prompt (instead of silent auto-migrate) would close it.
 - **Server-side auth enforcement** on the API routes (today they're same-origin-gated + rate-limited + RLS-scoped, but not per-user authenticated).
 - **Atomicity:** the score + attempt write is now one transaction via the `save_progress` RPC (resolving identity once, server-side) — fixed. Remaining: diagnostic grading is all-or-nothing (one failed grade discards the others) — known/low-severity.
 - **Nonce-based strict CSP** — a baseline CSP now ships (§14); the next step is a middleware-generated nonce so `script-src`/`style-src` can drop `'unsafe-inline'`.
 - **ESLint / CI lint enforcement** — not configured yet; the deprecated, unconfigured `next lint` script was removed (it only dropped into an interactive setup wizard). Wire up flat-config ESLint + `eslint-config-next` and run it in CI before any Next 16 upgrade.
-- *(Done this round: guest-`localStorage`-full now surfaces an error instead of silently dropping the write; the 3 SECURITY INVOKER RPCs `REVOKE` PUBLIC/anon; the `submitPractice` stale-write guard; the diagnostic image-preview leak.)*
+- *(Done previously: guest-`localStorage`-full now surfaces an error instead of silently dropping the write; the 3 SECURITY INVOKER RPCs `REVOKE` PUBLIC/anon; the `submitPractice` stale-write guard; the diagnostic image-preview leak. The audit-fix round above closed the matching **practice** image-preview leak.)*
 
 ---
 
@@ -460,4 +450,4 @@ History of what's shipped is in `git log` (PRs #2–#26): flatten-for-Vercel, au
 - **`AUTH_PROVIDERS.md`** — exact GitHub & Discord enablement steps.
 - **`FEATURE_PLAN.md`** — the sign-in-menu / Profile / Learn feature plan + the decisions behind the guest-first flow.
 - **`.env.example`** — documented env vars.
-- **`git log`** (PRs #2–#26) — the full build history and rationale.
+- **`git log`** (PRs #2–#29) — the full build history and rationale.

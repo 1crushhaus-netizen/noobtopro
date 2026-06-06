@@ -356,6 +356,19 @@ export default function Noobtopro() {
         setFeedback(null);
         setStage("intro");
         setView("practice");
+        // Drop the prior user's in-memory copy of scores/history/learn IMMEDIATELY
+        // (defense-in-depth on shared devices). hydrate()'s no-data branch clears
+        // these too, but only after an awaited getSession() — that async gap leaves a
+        // sub-second window where the next person could click Learn/Progress and see
+        // the prior user's data. These synchronous resets close that window so the
+        // stale data can't render during the async hydrate.
+        setScores(null);
+        setHistory([]);
+        setScoreDelta(null);
+        setLearnConcept(null);
+        setLearnContent(null);
+        setLearnQuestion(null);
+        setLearnError("");
         // Clear the local guest blob on sign-out so the prior user's scores/weak
         // concepts aren't exposed to the next person on a shared device.
         resetAll();
@@ -764,6 +777,12 @@ export default function Noobtopro() {
       setScores(updatedScores);
       setScoreDelta(updatedScore - prev.score);
       setFeedback(r);
+      // The composer/img unmounts once feedback is truthy (the graded view renders),
+      // so the attached photo is no longer shown; release its preview blob URL (the
+      // base64 was already sent to the grader) instead of leaking it until the next
+      // action — mirrors the diagnostic fix that revokes answer previews on completion.
+      revokePreview(pImg);
+      setPImg(null);
     } catch (e) {
       if (myRun !== practiceRun.current) return; // abandoned — don't surface a stale error on the reset UI
       setError(e.message || "Grading failed.");

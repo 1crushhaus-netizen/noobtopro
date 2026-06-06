@@ -34,6 +34,39 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe("POST /api/grade — request guard (CSRF / content-type)", () => {
+  const raw = (headers) =>
+    new Request("http://test.local/api/grade", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ kind: "diagnostic", subject: "math", question: "Q", reasoning: "because" }),
+    });
+
+  it("blocks a forced cross-site request with 403 (no Groq call)", async () => {
+    const failFetch = vi.fn(() => { throw new Error("must not call Groq on a blocked request"); });
+    vi.stubGlobal("fetch", failFetch);
+    const res = await POST(raw({ "Content-Type": "application/json", "Sec-Fetch-Site": "cross-site" }));
+    expect(res.status).toBe(403);
+    expect(failFetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-JSON content-type with 415 (no Groq call)", async () => {
+    const failFetch = vi.fn(() => { throw new Error("must not call Groq on a blocked request"); });
+    vi.stubGlobal("fetch", failFetch);
+    const res = await POST(raw({ "Content-Type": "text/plain" }));
+    expect(res.status).toBe(415);
+    expect(failFetch).not.toHaveBeenCalled();
+  });
+
+  it("allows a same-origin JSON request through to normal handling", async () => {
+    mockGroqReturning({ subject: "math", score: 50, weakConcepts: [], comment: "ok" });
+    const res = await POST(raw({ "Content-Type": "application/json", "Sec-Fetch-Site": "same-origin" }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.score).toBe(50);
+  });
+});
+
 describe("POST /api/grade — input validation (no network)", () => {
   it("rejects a non-JSON body with 400", async () => {
     const failFetch = vi.fn(() => {

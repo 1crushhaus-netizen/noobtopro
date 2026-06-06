@@ -89,6 +89,42 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe("POST /api/learn — request guard (CSRF / content-type)", () => {
+  const raw = (headers) =>
+    new Request("http://test.local/api/learn", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ subject: "math", concept: "limits" }),
+    });
+
+  it("blocks a forced cross-site request with 403 (no Groq call)", async () => {
+    const failFetch = vi.fn(() => { throw new Error("must not call Groq on a blocked request"); });
+    vi.stubGlobal("fetch", failFetch);
+    const admin = fakeAdmin({ hitContent: null });
+    mocks.getAdmin.mockReturnValue(admin);
+    const res = await POST(raw({ "Content-Type": "application/json", "Sec-Fetch-Site": "cross-site" }));
+    expect(res.status).toBe(403);
+    expect(failFetch).not.toHaveBeenCalled();
+    expect(admin.calls.rpc).toBe(null); // no RPC issued
+  });
+
+  it("rejects a non-JSON content-type with 415 (no Groq call)", async () => {
+    const failFetch = vi.fn(() => { throw new Error("must not call Groq on a blocked request"); });
+    vi.stubGlobal("fetch", failFetch);
+    const res = await POST(raw({ "Content-Type": "text/plain" }));
+    expect(res.status).toBe(415);
+    expect(failFetch).not.toHaveBeenCalled();
+  });
+
+  it("allows a same-origin JSON request through to normal handling", async () => {
+    mockGroqReturning({ overview: "guarded but allowed", keyIdeas: [], socraticQuestions: [], pitfalls: [], tryThis: "" });
+    const res = await POST(raw({ "Content-Type": "application/json", "Sec-Fetch-Site": "same-origin" }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.overview).toBe("guarded but allowed");
+  });
+});
+
 describe("POST /api/learn — validation", () => {
   it("rejects an unknown/prototype subject with 400", async () => {
     for (const subject of ["astrology", "constructor", "__proto__"]) {
@@ -241,7 +277,10 @@ describe("POST /api/learn — shared cache", () => {
     expect(admin.calls.rpc.args.p_concept).toBe("energy");
     expect(admin.calls.rpc.args.p_content.overview).toBe("fresh");
     expect(admin.calls.rpc.args.p_topic).toBe("energy_momentum"); // valid LLM topic kept
-    expect(admin.calls.rpc.args.p_safe).toBe(true); // benign concept -> public
+    // p_safe is sent for backward-compat, but promote_or_insert_guide always stores
+    // the guide visibility='hidden' (curation-only) — only manually-curated rows are
+    // ever public. See db/schema.sql promote_or_insert_guide.
+    expect(admin.calls.rpc.args.p_safe).toBe(true);
   });
 
   it("coerces an out-of-taxonomy LLM topic to general_<subject>", async () => {
