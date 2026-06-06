@@ -77,8 +77,13 @@ describe("Restart logo (reset)", () => {
     fireEvent.click(screen.getByTitle("Restart"));
     await flush();
 
-    // The DB was never wiped (resetAll is local-only; the real delete is separate).
+    // Neither destructive path ran for a signed-in user: the DB delete
+    // (deleteAllUserData) nor the local-session wipe (resetAll). Asserting resetAll
+    // too matters because hydrate() re-fetches SCORES from the mock regardless, so
+    // without this a regression that wiped localStorage on the signed-in path would
+    // still pass on the Profile-visible check alone.
     expect(store.deleteAllUserData).not.toHaveBeenCalled();
+    expect(store.resetAll).not.toHaveBeenCalled();
 
     // Re-open Profile: the persisted stats must still be there (pre-fix this showed
     // the "not ranked"/"no diagnostic" empty state because scores were blanked).
