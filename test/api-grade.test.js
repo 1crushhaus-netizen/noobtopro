@@ -210,3 +210,51 @@ describe("POST /api/grade — model output is normalized", () => {
     expect(sentBody.length).toBeLessThan(20_000);
   });
 });
+
+describe("POST /api/grade — difficulty band threading (practice)", () => {
+  // Pull the user-message string actually sent upstream to Groq (no image -> string).
+  function sentUserMessage(fetchMock) {
+    const sentBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const userMsg = sentBody.messages.find((m) => m.role === "user");
+    return typeof userMsg.content === "string" ? userMsg.content : "";
+  }
+
+  const practiceBody = (extra) => ({
+    kind: "practice",
+    subject: "math",
+    question: "Q",
+    targetConcept: "limits",
+    score: 50,
+    reasoning: "work",
+    ...extra,
+  });
+
+  const gradePayload = {
+    reasoningScore: 60,
+    rubric: { conceptual_understanding: 3 },
+    correctnessNote: "n",
+    socraticHint: "h",
+    microLesson: "m",
+    weakConcepts: [],
+    newScoreSuggestion: 55,
+  };
+
+  it("threads a valid difficulty band into the grader prompt (case/space-normalized)", async () => {
+    const fetchMock = mockGroqReturning(gradePayload);
+    const res = await POST(req(practiceBody({ difficulty: "PhD " })));
+    expect(res.status).toBe(200);
+    expect(sentUserMessage(fetchMock)).toMatch(/difficulty band: phd/i);
+  });
+
+  it("normalizes an unknown/garbage difficulty to (unspecified) before prompting", async () => {
+    const fetchMock = mockGroqReturning(gradePayload);
+    await POST(req(practiceBody({ difficulty: "super-impossible" })));
+    expect(sentUserMessage(fetchMock)).toMatch(/difficulty band: \(unspecified\)/i);
+  });
+
+  it("normalizes a missing/non-string difficulty to (unspecified)", async () => {
+    const fetchMock = mockGroqReturning(gradePayload);
+    await POST(req(practiceBody({ difficulty: 123 })));
+    expect(sentUserMessage(fetchMock)).toMatch(/difficulty band: \(unspecified\)/i);
+  });
+});

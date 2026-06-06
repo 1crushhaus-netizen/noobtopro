@@ -6,7 +6,7 @@
 >
 > **If you are an LLM / Claude Code session working on this repo:**
 > 1. **Read this README fully before doing anything else** and treat it as the authoritative description of the platform, its architecture, its conventions (§6), and its current state (§2).
-> 2. **Defer to this README** when it conflicts with your assumptions or general knowledge — it reflects decisions and gotchas (§16) specific to *this* project (e.g. why `vercel.json` pins the framework, why env vars must be project-level, why scoring uses a placeholder blend).
+> 2. **Defer to this README** when it conflicts with your assumptions or general knowledge — it reflects decisions and gotchas (§16) specific to *this* project (e.g. why `vercel.json` pins the framework, why env vars must be project-level, why scoring uses a difficulty/confidence-weighted Elo-style blend (§11)).
 > 3. **Follow the dev loop in §15** (branch → PR → CI "Test and build" → address Greptile → merge → verify) for every change.
 > 4. **Keep this README up to date.** When you change architecture, env vars, the data model, status, or conventions, update the relevant section in the same PR. A stale hand-off doc is worse than none — the next session relies on it being accurate.
 >
@@ -52,7 +52,7 @@ It inverts the usual "learn then test" flow:
 
 **The unbreakable product rule: never hand over the answer.** When you're stuck, the app responds with a **Socratic hint** (one nudging question), a **micro-lesson** (the underlying *concept*, taught in general terms, never the solution to your specific problem), and a **correctness note** (whether your conclusion holds, without revealing the answer). The **Learn** tab extends this: click a weak concept and get a Socratic concept guide that teaches the idea and method — never a worked answer.
 
-**The vision / where this is going.** A trustworthy, standardized "where do I actually stand, and how do I get better" engine for STEM reasoning — eventually monetized. Several current pieces are explicitly *stop-gaps until monetization* (e.g. the in-memory rate limiter) or *placeholders pending a real model* (the score-blend should become an IRT/Elo system). "Standardization across users" is an active goal — e.g. concept guides are generated once and **shared across all accounts**.
+**The vision / where this is going.** A trustworthy, standardized "where do I actually stand, and how do I get better" engine for STEM reasoning — eventually monetized. Several current pieces are explicitly *stop-gaps until monetization* (e.g. the in-memory rate limiter) or *first steps toward a fuller model* (the score-blend is now a difficulty/confidence-weighted Elo-style update; the next step is per-item IRT/Elo ratings rather than fixed difficulty-band midpoints). "Standardization across users" is an active goal — e.g. concept guides are generated once and **shared across all accounts**.
 
 The three subjects (defined in `lib/scoring.js`):
 
@@ -131,10 +131,9 @@ The sign-in menu is already provider-agnostic and env-toggleable; this is config
 - Follow **`AUTH_PROVIDERS.md`** end-to-end: create each OAuth app (callback = the Supabase callback URL in [§2](#2-current-status--live-links)), enable the provider in Supabase, then set `NEXT_PUBLIC_ENABLE_GITHUB` / `NEXT_PUBLIC_ENABLE_DISCORD = "true"` in Vercel and redeploy.
 - **Verify:** the "Continue with GitHub/Discord" buttons go from "Coming soon" to live and complete an OAuth round-trip. See [§9](#9-authentication). *(Do the Supabase step before flipping the flag, or the button errors on click.)*
 
-### Task 3 — Replace the placeholder score model *(core product code)*
-The biggest product win. `blend(prev, suggestion)` in `lib/scoring.js` is a flat 65/35 damped update that **ignores question difficulty and the per-attempt `reasoningScore`** — explicitly a placeholder.
-- Design a difficulty- and confidence-weighted update (a step toward an IRT/Elo model): use the practice question's `difficulty` and the grader's `reasoningScore` to weight how much an attempt moves the subject score. Keep `clampScore`/null-safety semantics.
-- Add tests in `test/scoring.test.js`; thread any new inputs through `/api/grade` → `submitPractice` in `components/Noobtopro.jsx`. See [§11](#11-scoring-model), [§17](#17-roadmap--known-limitations).
+### Task 3 — Replace the placeholder score model *(core product code)* ✅ **shipped**
+The biggest product win, now done. `blend(prev, suggestion, opts)` in `lib/scoring.js` is a difficulty- and confidence-weighted **Elo-style** update (a step toward an IRT/Elo model): the grader's `newScoreSuggestion` sets the target/direction, and a bounded learning rate `alpha` (anchored at the legacy `0.35`) is scaled by the per-attempt `reasoningScore` (confidence) and an Elo *surprise* term over the question's `difficulty` band. It stays backward-compatible with the legacy 65/35 two-arg call and preserves `clampScore`/null-safety. The validated `difficulty` band is also threaded through `/api/grade` so the grader calibrates `reasoningScore`/`newScoreSuggestion` to the item's level. See [§11](#11-scoring-model). Covered by 17 new tests in `test/scoring.test.js` (103 total, all green).
+- **Follow-ups:** replace fixed band midpoints with per-item difficulty ratings (true IRT/Elo); tune `ELO_SCALE` / the confidence range / the `alpha` cap against logged attempt data.
 
 > Smaller good-first-issues if you want to warm up: surface a "Learn this" shortcut from the practice feedback's "Concept you're missing" card; make the Profile tab's by-subject rows clickable into Learn; add a strict CSP (see §14).
 
@@ -285,7 +284,7 @@ All three routes are `POST`, `dynamic = "force-dynamic"`, **rate-limited per IP*
 - **Practice:** `{ "kind": "practice", "subject": "math"|"physics"|"chemistry", "score": int, "weakConcepts": string[] }` → `{ subject, topic, targetConcept, difficulty, question }`. Subject validated via `ORDER.includes` (prototype-safe); `weakConcepts` capped.
 
 ### `POST /api/grade`
-- `{ kind: "diagnostic"|"practice", subject, question, [targetConcept], [score], reasoning, [image: { mime, data(base64) }] }`.
+- `{ kind: "diagnostic"|"practice", subject, question, [targetConcept], [difficulty], [score], reasoning, [image: { mime, data(base64) }] }`. *(practice-only `difficulty` is the question's band, allowlist-validated and used only to calibrate the grader; unknown/missing → `(unspecified)`.)*
 - Free-text fields capped (~12k chars); image validated (allowlisted MIME jpeg/png/webp/gif, base64, ~3 MB cap).
 - **Diagnostic →** `{ subject, score(0–100), weakConcepts[], comment }`.
 - **Practice →** `{ reasoningScore(0–100), rubric{conceptual_understanding, logical_structure, strategy, execution_accuracy, communication: 0–4}, correctnessNote, socraticHint, microLesson, weakConcepts[], newScoreSuggestion }`. All scores clamped, rubric normalized, `weakConcepts` coerced to a string array.
@@ -306,7 +305,7 @@ All three routes are `POST`, `dynamic = "force-dynamic"`, **rate-limited per IP*
 
 - `clampScore(v)` — coerce to int `[0,100]`, or **`null`** for no-signal (null/`""`/NaN). Critical: prevents `Number(null)===0` from silently zeroing scores.
 - `band(s)` — score → band name (robust to non-numbers).
-- `blend(prev, suggestion)` — damped update `round(prev*0.65 + sug*0.35)`; a null/garbage suggestion keeps `prev`. **Placeholder — replace with an IRT/Elo model** that accounts for question difficulty and the per-attempt `reasoningScore`.
+- `blend(prev, suggestion, opts?)` — difficulty- and confidence-weighted damped update, a step toward an IRT/Elo model. `new = round(prev + alpha*(sug - prev))`: the grader's `suggestion` sets the target/direction and `alpha` (learning rate, clamped to `[0.05, 0.6]`) is the legacy anchor `0.35` scaled by **confidence** (`reasoningScore` — a blank attempt barely moves the score, an excellent one moves it more) and an **Elo surprise** term (the gap between the attempt's outcome and the outcome expected from `prev` vs the question's difficulty anchor, aligned to the move's direction — beating an above-level item amplifies an upward move; an outcome that contradicts the suggested direction damps it). Difficulty bands map to midpoint anchors (`beginner 10 … phd 90`, prototype-pollution-safe lookup). **Backward-compatible:** called with two args — or `opts` lacking both signals — it reproduces the exact legacy `round(prev*0.65 + sug*0.35)`. Null-safety unchanged: a null/garbage suggestion keeps `prev` (0 if none); a literal `NaN`/out-of-range `prev` is clamped; output is always an int in `[0,100]`. Threaded from `submitPractice` in `components/Noobtopro.jsx` via `{ difficulty: pQuestion.difficulty, reasoningScore: r.reasoningScore }`.
 - `totalPoints(scores)` — sum of the three subject scores (0–300).
 - `phdIndex(scores)` — mean of the three (0–100); the headline "PhD-level intelligence" number.
 
@@ -402,7 +401,7 @@ History of what's shipped is in `git log` (PRs #2–#15): flatten-for-Vercel, au
 - Configure + enable GitHub & Discord providers → flip `NEXT_PUBLIC_ENABLE_*`.
 
 **Product / model:**
-- **Replace `blend()` with a real score model (IRT/Elo)** that weights by question difficulty and per-attempt reasoning quality — the current 65/35 damped blend is a placeholder.
+- **Extend `blend()` toward a full IRT/Elo model.** The shipped version already weights by question difficulty and per-attempt reasoning quality via an Elo *surprise* term (see §11); remaining work is per-item difficulty ratings (vs fixed band midpoints) and calibrating the constants (`ELO_SCALE`, the confidence range, the `alpha` cap) against logged attempts.
 - Anchored rubric exemplars + multiple grading samples averaged (grading consistency is the real risk — LLM scores drift).
 - Adaptive diagnostic; a **concept graph** per subject so "weak on X" routes to the right next problems.
 - Data export; auto-resume into the diagnostic after the OAuth redirect (currently the redirect resets state).
