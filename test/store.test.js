@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 // Mock the Supabase client so we can assert the RPC payloads without a real DB.
 // `mocks.db` configures what the chainable from() builder resolves to per table,
-// so the signed-in loadState/saveScores/recordAttempt paths are testable too.
+// so the signed-in loadState/saveScores/saveProgress paths are testable too.
 const mocks = vi.hoisted(() => ({
   rpc: vi.fn(async () => ({ error: null })),
   session: { data: { session: { user: { id: "u1" } } } },
@@ -32,7 +32,7 @@ vi.mock("@/lib/supabase", () => ({
   }),
 }));
 
-import { migrateGuestToAccount, deleteAllUserData, loadState, saveScores, recordAttempt, saveProgress } from "@/lib/store";
+import { migrateGuestToAccount, deleteAllUserData, loadState, saveScores, saveProgress } from "@/lib/store";
 
 const KEY = "noobtopro:v1";
 const signedIn = { data: { session: { user: { id: "u1" } } } };
@@ -144,19 +144,6 @@ describe("signed-in data layer (Supabase paths)", () => {
     await expect(saveScores({ math: { score: 50, weakConcepts: [], comment: "" } })).rejects.toThrow(/rls denied/);
   });
 
-  it("recordAttempt throws when the insert fails", async () => {
-    mocks.db = { attemptsInsert: { error: { message: "insert denied" } } };
-    await expect(recordAttempt({ type: "attempt", subject: "math", reasoningScore: 50 })).rejects.toThrow(/insert denied/);
-  });
-
-  it("recordAttempt returns history:null when the post-insert refresh read fails (keeps current chart)", async () => {
-    mocks.db = {
-      attemptsInsert: { error: null },
-      attemptsSelect: { data: null, error: { message: "read failed" } },
-    };
-    const res = await recordAttempt({ type: "attempt", subject: "math", reasoningScore: 50 });
-    expect(res.history).toBe(null);
-  });
 });
 
 describe("saveProgress (atomic score + attempt write)", () => {
