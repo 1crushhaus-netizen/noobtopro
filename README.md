@@ -10,7 +10,7 @@
 > 3. **Follow the dev loop in §15** (branch → PR → CI "Test and build" → address Greptile → merge → verify) for every change.
 > 4. **Keep this README up to date.** When you change architecture, env vars, the data model, status, or conventions, update the relevant section in the same PR. A stale hand-off doc is worse than none — the next session relies on it being accurate.
 >
-> New here? Jump to [**Where to start (first three tasks)**](#where-to-start-first-three-tasks).
+> New here? Jump to [**Where to start (next two tasks)**](#where-to-start-next-two-tasks).
 
 **Prove what you know. Climb from noob to pro.**
 
@@ -18,7 +18,7 @@
 
 ## Table of contents
 
-- ⭐ [**Where to start (first three tasks)**](#where-to-start-first-three-tasks)
+- ⭐ [**Where to start (next two tasks)**](#where-to-start-next-two-tasks)
 1. [What it is & why](#1-what-it-is--why)
 2. [Current status & live links](#2-current-status--live-links)
 3. [Quickstart](#3-quickstart)
@@ -86,12 +86,12 @@ Score bands (global scale): **0–20** Absolute beginner · **20–40** Foundati
 - ✅ **Profile** tab (identity + stats + reset), **Progress** tab (charts), **Practice** + **Learn** tabs.
 - ✅ "Save your progress" modal after the guest diagnostic.
 - ✅ Per-IP rate limiting; security headers; error boundary.
+- ✅ **Shared caches active** (`SUPABASE_SERVICE_ROLE_KEY` set): the concept-guide cache (each guide generated once, with a bundled "try this" question) and the baseline-diagnostic pool — both reused across users to cut Groq spend. Grading runs on the cheaper `openai/gpt-oss-120b` (`GROQ_GRADE_MODEL`).
 
 **Built but not yet activated (config only):**
-- ⏳ **Shared concept-guide cache** — code shipped; **inactive until `SUPABASE_SERVICE_ROLE_KEY` is set in Vercel.** Without it `/api/learn` still works but regenerates each time.
 - ⏳ **GitHub / Discord sign-in** — code is env-toggleable and ready; needs the OAuth apps + Supabase provider config + `NEXT_PUBLIC_ENABLE_*` flags (see `AUTH_PROVIDERS.md`).
 
-**Env vars currently set in Vercel (project-level):** `GROQ_API_KEY` (Sensitive), `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`. **Not set:** `SUPABASE_SERVICE_ROLE_KEY`, `NEXT_PUBLIC_ENABLE_GITHUB`, `NEXT_PUBLIC_ENABLE_DISCORD`.
+**Env vars currently set in Vercel (project-level):** `GROQ_API_KEY` (Sensitive), `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (Sensitive). **Not set:** `NEXT_PUBLIC_ENABLE_GITHUB`, `NEXT_PUBLIC_ENABLE_DISCORD`.
 
 > Dashboard access (Vercel, Supabase, Groq, Google Cloud) lives in the owner's accounts — ask the repo owner for access.
 
@@ -117,25 +117,15 @@ Other commands: `npm test` (run tests once), `npm run test:watch`, `npm run buil
 
 ---
 
-## Where to start (first three tasks)
+## Where to start (next two tasks)
 
-If you (human or LLM) are picking this up cold, these are the three highest-value, well-scoped next tasks — ordered easy → meaningful. Each links to the section/doc you'll need. Follow the dev loop in [§15](#15-how-we-work-the-dev-loop) for all of them.
+If you (human or LLM) are picking this up cold, do these two **in order** — audit first, then fix. Follow the dev loop in [§15](#15-how-we-work-the-dev-loop) for both. (The earlier hand-off tasks — score model, concept cache, "try this" question, diagnostic pool, cheaper grader — are all shipped; see [§2](#2-current-status--live-links). The one deferred *feature* is GitHub/Discord sign-in, tracked in §2 + `AUTH_PROVIDERS.md`.)
 
-### Task 1 — Turn on the shared concept-guide cache *(ops, ~15 min)*
-The code is shipped but inactive because `SUPABASE_SERVICE_ROLE_KEY` isn't set. A good first task to learn the env/deploy loop.
-- Add `SUPABASE_SERVICE_ROLE_KEY` (Supabase → Settings → API → `service_role`) in **Vercel → noobtopro project → Settings → Environment Variables** (mark **Sensitive**, all environments), then redeploy. See [§7](#7-environment-variables), [§16](#16-troubleshooting--gotchas).
-- **Verify:** `POST /api/learn` twice for a fresh concept (e.g. `{"subject":"math","concept":"chain rule"}`) — the second response should be `"cached": true`. Relevant code: `app/api/learn/route.js`, `lib/supabaseAdmin.js`.
+### Task 1 — Full codebase audit *(find, don't fix)*
+Audit the entire current `main` end-to-end and produce a **written findings report — make no code changes in this task.** Cover every area: security (secret handling, prompt-injection bounds, RLS, the service-role RPCs), the three API routes, the data layer + `db/schema.sql` (tables, RLS, and all RPCs — `migrate_guest_data`, `delete_user_data`, `save_progress`, `try_add_diagnostic`), the React state machine (`components/Noobtopro.jsx`), the Groq client + prompts (`lib/groq.js`), the tests (watch for false-confidence mocks), and config/CI. Classify each finding **P0/P1/P2/P3**, and **verify it against the actual code before trusting it** — never act on an unverified claim (LLM reviewers, including sub-agents, hallucinate). Also reconcile any open **Greptile** review comments across PRs and run the Supabase **advisors** (`get_advisors`) after reviewing the DB. See [§4](#4-architecture), [§5](#5-repo-map), [§8](#8-database--persistence), [§13](#13-testing), [§16](#16-troubleshooting--gotchas).
 
-### Task 2 — Stand up GitHub & Discord sign-in *(integration)*
-The sign-in menu is already provider-agnostic and env-toggleable; this is configuration, not app code.
-- Follow **`AUTH_PROVIDERS.md`** end-to-end: create each OAuth app (callback = the Supabase callback URL in [§2](#2-current-status--live-links)), enable the provider in Supabase, then set `NEXT_PUBLIC_ENABLE_GITHUB` / `NEXT_PUBLIC_ENABLE_DISCORD = "true"` in Vercel and redeploy.
-- **Verify:** the "Continue with GitHub/Discord" buttons go from "Coming soon" to live and complete an OAuth round-trip. See [§9](#9-authentication). *(Do the Supabase step before flipping the flag, or the button errors on click.)*
-
-### Task 3 — Replace the placeholder score model *(core product code)* ✅ **shipped**
-The biggest product win, now done. `blend(prev, suggestion, opts)` in `lib/scoring.js` is a difficulty- and confidence-weighted **Elo-style** update (a step toward an IRT/Elo model): the grader's `newScoreSuggestion` sets the target/direction, and a bounded learning rate `alpha` (anchored at the legacy `0.35`) is scaled by the per-attempt `reasoningScore` (confidence) and an Elo *surprise* term over the question's `difficulty` band. It stays backward-compatible with the legacy 65/35 two-arg call and preserves `clampScore`/null-safety. The validated `difficulty` band is also threaded through `/api/grade` so the grader calibrates `reasoningScore`/`newScoreSuggestion` to the item's level. See [§11](#11-scoring-model-libscoringjs). Covered by 20 new tests (17 in `test/scoring.test.js` for the weighted blend, 3 in `test/api-grade.test.js` for difficulty-band threading); 103 total, all green.
-- **Follow-ups:** replace fixed band midpoints with per-item difficulty ratings (true IRT/Elo); tune `ELO_SCALE` / the confidence range / the `alpha` cap against logged attempt data.
-
-> Smaller good-first-issues if you want to warm up: surface a "Learn this" shortcut from the practice feedback's "Concept you're missing" card; make the Profile tab's by-subject rows clickable into Learn; add a strict CSP (see §14).
+### Task 2 — Full cleanup with fixes
+Working from Task 1's report, **fix every confirmed P0/P1/P2** plus the cheap P3 cleanups, and tidy the codebase (dead code, stale docs, missing test coverage). Add a test for each behavioral fix; keep `npm test` and `npm run build` green; **update this README in the same change** ([§13](#13-testing) test counts, the data model/§8, status/§2, conventions/§6); ship via the dev loop ([§15](#15-how-we-work-the-dev-loop)). For DB changes, edit `db/schema.sql` (the source of truth) **and** apply the migration to the live project, then re-check the advisors. Known P3 backlog to start from (not exhaustive — the audit should re-derive + verify): a strict CSP header (§14); `REVOKE … FROM PUBLIC` grant hygiene on the SECURITY INVOKER RPCs; a diagnostic-answer image-preview leak; screen-reader labels on the Progress charts; a stale engines value in `DEPLOYMENT_PLAN.md`; CI `concurrency`/`permissions` hardening.
 
 ---
 
