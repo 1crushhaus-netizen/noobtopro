@@ -11,7 +11,7 @@ import {
   totalPoints,
   phdIndex,
 } from "@/lib/scoring";
-import { loadState, saveScores, recordAttempt, resetAll, migrateGuestToAccount, deleteAllUserData } from "@/lib/store";
+import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData } from "@/lib/store";
 import { getSupabase, isSupabaseConfigured, signInWithProvider, signOutUser, PROVIDERS } from "@/lib/supabase";
 import ProgressDashboard from "@/components/ProgressDashboard";
 import SignIn from "@/components/SignIn";
@@ -275,6 +275,16 @@ export default function Noobtopro() {
     }
   }
 
+  // Mirror the latest in-progress image previews so the auth listener (set up once
+  // on mount, with a stale closure) can revoke them when a sign-out abandons the
+  // current diagnostic/practice — otherwise those object URLs leak until reload.
+  const answersRef = useRef(answers);
+  const pImgRef = useRef(pImg);
+  useEffect(() => {
+    answersRef.current = answers;
+    pImgRef.current = pImg;
+  });
+
   useEffect(() => {
     const sb = getSupabase();
     hydrate();
@@ -290,6 +300,23 @@ export default function Noobtopro() {
         setStage((p) => (p === "signin" ? "dashboard" : p)); // leave the sign-in menu
         hydrate(); // migrates guest progress, then loads the account
       } else if (event === "SIGNED_OUT") {
+        // Signing out abandons any in-progress diagnostic/practice. Free its image
+        // previews and clear the composer state, then drop to "intro" so the
+        // abandoned flow unmounts cleanly — without the explicit stage reset, a
+        // sign-out mid-diagnostic leaves stage="diagnostic" with no questions (a
+        // blank screen), since hydrate()'s no-data branch only resets dashboard/
+        // practice. hydrate() then loads the guest view (intro -> dashboard if the
+        // guest already has scores).
+        Object.values(answersRef.current || {}).forEach((a) => revokePreview(a && a.img));
+        revokePreview(pImgRef.current);
+        setAnswers({});
+        setQuestions([]);
+        setQi(0);
+        setPImg(null);
+        setPText("");
+        setPQuestion(null);
+        setFeedback(null);
+        setStage("intro");
         setView("practice");
         hydrate();
       }
@@ -426,8 +453,8 @@ export default function Noobtopro() {
       );
       const obj = {};
       results.forEach(([k, v]) => (obj[k] = v));
-      await saveScores(obj);
-      const st = await recordAttempt({ type: "baseline", t: now(), totalAfter: totalPoints(obj), phdAfter: phdIndex(obj) });
+      // Atomic: persist the baseline scores AND the baseline attempt together.
+      const st = await saveProgress(obj, { type: "baseline", t: now(), totalAfter: totalPoints(obj), phdAfter: phdIndex(obj) });
       if (st && st.history) setHistory(st.history); // null = couldn't refresh; keep current
       setScores(obj);
       setStage("dashboard");
@@ -536,8 +563,10 @@ export default function Noobtopro() {
           comment: prev.comment,
         },
       };
-      await saveScores(updatedScores);
-      const st = await recordAttempt({
+      // Atomic: persist the updated score AND its attempt in one transaction, so a
+      // partial failure can't leave the score saved but the attempt lost (which a
+      // retry would then re-grade and overwrite).
+      const st = await saveProgress(updatedScores, {
         type: "attempt",
         t: now(),
         subject: pSubject,

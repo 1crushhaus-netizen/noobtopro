@@ -89,4 +89,61 @@ describe("groqJSON", () => {
     );
     await expect(groqJSON({ system: "s", user: "u" })).rejects.toThrow(/429/);
   });
+
+  it("does NOT retry on a hard HTTP error (429) — fails fast after one call", async () => {
+    // Regression: a 429/401/5xx is not fixed by retrying without response_format;
+    // the old code retried, doubling cost and 429 pressure. It must fail after ONE call.
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 429, text: async () => "rate limited" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(groqJSON({ system: "s", user: "u" })).rejects.toThrow(/429/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("DOES retry without response_format on an HTTP 400 (model rejected json mode)", async () => {
+    // A 400 can mean the model rejected response_format; retrying plain is worth it.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 400, text: async () => "response_format unsupported" })
+      .mockResolvedValueOnce(reply('{"ok":true}'));
+    vi.stubGlobal("fetch", fetchMock);
+    const out = await groqJSON({ system: "s", user: "u" });
+    expect(out).toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to a text-only grade on the text model when a vision call hits a hard error (429)", async () => {
+    // A 429/5xx on the VISION model is model-specific; TEXT_MODEL is a separate
+    // endpoint, so a degraded text-only grade is still a valid recovery (not a
+    // total failure). First (vision) call 429 → second call must be text-only.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 429, text: async () => "vision rate limited" })
+      .mockResolvedValueOnce(reply('{"reasoningScore":50}'));
+    vi.stubGlobal("fetch", fetchMock);
+    const out = await groqJSON({ system: "s", user: "u", image: { data: "abc", mime: "image/png" } });
+    expect(out).toEqual({ reasoningScore: 50 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(secondBody.model).toBe("llama-3.3-70b-versatile"); // TEXT_MODEL
+    expect(typeof secondBody.messages[1].content).toBe("string"); // text-only, no image array
+  });
+
+  it("fails fast on a vision 401/403 (shared key) without a pointless text-only retry", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 401, text: async () => "bad key" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      groqJSON({ system: "s", user: "u", image: { data: "abc", mime: "image/png" } })
+    ).rejects.toThrow(/401/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("threads a per-call maxTokens into the request body, defaulting to 1200", async () => {
+    const fetchMock = vi.fn(async () => reply('{"ok":true}'));
+    vi.stubGlobal("fetch", fetchMock);
+    await groqJSON({ system: "s", user: "u", maxTokens: 3000 });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).max_tokens).toBe(3000);
+    fetchMock.mockClear();
+    await groqJSON({ system: "s", user: "u" });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).max_tokens).toBe(1200);
+  });
 });

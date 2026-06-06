@@ -29,7 +29,7 @@
 8. [Database & persistence](#8-database--persistence)
 9. [Authentication](#9-authentication)
 10. [Server API reference](#10-server-api-reference)
-11. [Scoring model](#11-scoring-model)
+11. [Scoring model](#11-scoring-model-libscoringjs)
 12. [Frontend (the state machine)](#12-frontend-the-state-machine)
 13. [Testing](#13-testing)
 14. [Build, CI & deploy](#14-build-ci--deploy)
@@ -132,7 +132,7 @@ The sign-in menu is already provider-agnostic and env-toggleable; this is config
 - **Verify:** the "Continue with GitHub/Discord" buttons go from "Coming soon" to live and complete an OAuth round-trip. See [§9](#9-authentication). *(Do the Supabase step before flipping the flag, or the button errors on click.)*
 
 ### Task 3 — Replace the placeholder score model *(core product code)* ✅ **shipped**
-The biggest product win, now done. `blend(prev, suggestion, opts)` in `lib/scoring.js` is a difficulty- and confidence-weighted **Elo-style** update (a step toward an IRT/Elo model): the grader's `newScoreSuggestion` sets the target/direction, and a bounded learning rate `alpha` (anchored at the legacy `0.35`) is scaled by the per-attempt `reasoningScore` (confidence) and an Elo *surprise* term over the question's `difficulty` band. It stays backward-compatible with the legacy 65/35 two-arg call and preserves `clampScore`/null-safety. The validated `difficulty` band is also threaded through `/api/grade` so the grader calibrates `reasoningScore`/`newScoreSuggestion` to the item's level. See [§11](#11-scoring-model). Covered by 20 new tests (17 in `test/scoring.test.js` for the weighted blend, 3 in `test/api-grade.test.js` for difficulty-band threading); 103 total, all green.
+The biggest product win, now done. `blend(prev, suggestion, opts)` in `lib/scoring.js` is a difficulty- and confidence-weighted **Elo-style** update (a step toward an IRT/Elo model): the grader's `newScoreSuggestion` sets the target/direction, and a bounded learning rate `alpha` (anchored at the legacy `0.35`) is scaled by the per-attempt `reasoningScore` (confidence) and an Elo *surprise* term over the question's `difficulty` band. It stays backward-compatible with the legacy 65/35 two-arg call and preserves `clampScore`/null-safety. The validated `difficulty` band is also threaded through `/api/grade` so the grader calibrates `reasoningScore`/`newScoreSuggestion` to the item's level. See [§11](#11-scoring-model-libscoringjs). Covered by 20 new tests (17 in `test/scoring.test.js` for the weighted blend, 3 in `test/api-grade.test.js` for difficulty-band threading); 103 total, all green.
 - **Follow-ups:** replace fixed band midpoints with per-item difficulty ratings (true IRT/Elo); tune `ELO_SCALE` / the confidence range / the `alpha` cap against logged attempt data.
 
 > Smaller good-first-issues if you want to warm up: surface a "Learn this" shortcut from the practice feedback's "Concept you're missing" card; make the Profile tab's by-subject rows clickable into Learn; add a strict CSP (see §14).
@@ -172,7 +172,7 @@ Everything lives at the **repo root** (the app was flattened out of a nested fol
 app/
   layout.js            Root layout; <SpeedInsights/>; <html>/<body>
   page.js              Renders <Noobtopro/>
-  error.js             App Router error boundary (no white-screen on crashes)
+  error.jsx            App Router error boundary (no white-screen on crashes)
   globals.css          All styles + design tokens (the .np-* system)
   api/
     generate/route.js  POST: diagnostic (3 Qs) or practice (1 Q) question generation
@@ -244,7 +244,7 @@ To stand up the database from scratch (or reproduce it), **run `db/schema.sql` i
 
 ### Tables
 - **`scores`** — `(user_id uuid, subject text check(math|physics|chemistry), score int, weak_concepts text[], comment text, updated_at)`, PK `(user_id, subject)`.
-- **`attempts`** — `(id bigint identity PK, user_id, created_at, type text 'baseline'|'attempt', subject, reasoning_score, delta, new_score, total_after, phd_after)`. Indexed `(user_id, created_at, id)`.
+- **`attempts`** — `(id bigint identity PK, user_id, created_at, type text check('baseline'|'attempt'), subject, reasoning_score, delta, new_score, total_after, phd_after)`. Indexed `(user_id, created_at, id)`.
 - **`concept_guides`** *(internal cache)* — `(subject, concept_key, concept, content jsonb, created_at)`, PK `(subject, concept_key)`. **RLS enabled with NO policies** → only the service role (server) can touch it; no end-user can read or pollute it.
 
 `scores`/`attempts` have RLS: `for all to authenticated using ((select auth.uid()) = user_id) with check (...)` — each user only ever sees/writes their own rows.
@@ -252,12 +252,14 @@ To stand up the database from scratch (or reproduce it), **run `db/schema.sql` i
 ### RPCs (Postgres functions, in `db/schema.sql`)
 - **`migrate_guest_data(p_scores jsonb, p_attempts jsonb)`** — atomic, idempotent, advisory-locked per user; migrates guest progress into an **empty** account in one transaction (first-writer-wins; never overwrites). Called on first sign-in. (Service-invoker → RLS applies.)
 - **`delete_user_data()`** — atomic delete of the caller's scores + attempts (Profile → "Reset my progress").
+- **`save_progress(p_scores jsonb, p_attempt jsonb)`** — atomic per-update write: upserts the caller's scores **and** appends the matching attempt in **one transaction** (capturing `auth.uid()` once), so a partial failure can't persist a score without its attempt. Values are clamped / type-allow-listed / guard-cast (PG16+ `pg_input_is_valid`) like the migration RPC. (Service-invoker → RLS applies.) Drives `saveProgress` for the diagnostic baseline and every practice attempt.
 - *(The concept cache is written/read by the server directly using the service role, not via RPC.)*
 
 ### `lib/store.js` — the dual-mode data layer
 The UI only ever calls these; they transparently use Supabase when signed in, else `localStorage` (`key "noobtopro:v1"`):
 - `loadState()` — returns `{ scores, history }` (or `{ error }` on a DB failure, so the UI doesn't mistake an error for "new user").
-- `saveScores(scores)` / `recordAttempt(evt)` — persist (error-checked; they throw so callers surface a banner).
+- `saveProgress(scores, evt)` — **the write path** for the diagnostic + practice flows: one atomic `save_progress` RPC (signed-in) or a single `localStorage` write (guest) that persists the score change and its attempt **together**, then returns the refreshed `{ history }`. Throws on failure so callers surface a banner.
+- `saveScores(scores)` / `recordAttempt(evt)` — the lower-level single-table primitives (the app's write path now goes through `saveProgress`; these remain for completeness and tests).
 - `migrateGuestToAccount()` — single-flight wrapper around the `migrate_guest_data` RPC; sends a clamped payload; clears the guest copy on success.
 - `deleteAllUserData()` — calls the `delete_user_data` RPC.
 - `resetAll()` — clears the local guest view only.
@@ -333,20 +335,21 @@ Components: **SignIn** (provider buttons), **ProfileTab** (identity + stats + co
 
 ## 13. Testing
 
-**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **103 tests across 10 files**, all passing.
+**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **120 tests across 11 files**, all passing.
 
 | File | Covers |
 |---|---|
 | `test/scoring.test.js` | clampScore/band/blend (legacy + weighted Elo path)/totalPoints/phdIndex incl. regressions |
-| `test/groq.test.js` | JSON extraction (fences, prose, braces-in-strings), fallback retry, errors |
+| `test/groq.test.js` | JSON extraction (fences, prose, braces-in-strings), fallback retry **gating (no retry on hard HTTP errors)**, per-call `max_tokens`, errors |
 | `test/rateLimit.test.js` | window limit, reset, per-key, memory bound (enforceCap) |
 | `test/api-generate.test.js` | validation/400s, prototype-key rejection, non-leaking 500, weakConcepts cap |
 | `test/api-grade.test.js` | validation, MIME/base64, score/rubric normalization, difficulty-band threading, non-leaking 500 |
-| `test/api-learn.test.js` | validation, normalization, **cache hit/miss/write-fail/key-normalization** |
-| `test/store.test.js` | migration payload clamping, no-op paths, delete RPC (mocked Supabase) |
+| `test/api-learn.test.js` | validation, normalization, **cache hit/miss/write-fail/key-normalization** (filter-aware mock) |
+| `test/store.test.js` | migration clamping, delete RPC, signed-in load/save/record paths + data-wipe guard, **atomic `saveProgress`** (mocked Supabase) |
+| `test/error.test.jsx` | error-boundary logs the caught error + `reset()` on "Try again" |
 | `test/signin.test.jsx` | provider buttons, OAuth-only (no password field), enabled-provider |
 | `test/profile.test.jsx` | identity, empty state, stats, confirm-guarded reset |
-| `test/learn.test.jsx` | empty state, concept select, loading, guidance render |
+| `test/learn.test.jsx` | empty state, concept select, loading/error **live regions**, guidance render |
 
 **Mocking patterns:** Groq calls are mocked by stubbing global `fetch`; Supabase is mocked via `vi.mock("@/lib/...")` with `vi.hoisted`; components use `@testing-library/react`. No network or real keys are needed.
 
@@ -409,7 +412,7 @@ History of what's shipped is in `git log` (PRs #2–#15): flatten-for-Vercel, au
 **Hardening / infra (deferred, documented):**
 - **Durable rate limiter** (e.g. `@upstash/ratelimit`) + per-account limits to replace the in-memory one — do before monetizing / before heavy public traffic.
 - **Server-side auth enforcement** on the API routes (today they're rate-limited + RLS-scoped, but not per-user authenticated).
-- **Atomicity:** practice `saveScores` + `recordAttempt` aren't a single transaction; `activeUserId` has a small TOCTOU window; diagnostic grading is all-or-nothing (one failed grade discards the others) — all known/low-severity.
+- **Atomicity:** the score + attempt write is now one transaction via the `save_progress` RPC (resolving identity once, server-side) — fixed. Remaining: diagnostic grading is all-or-nothing (one failed grade discards the others) — known/low-severity.
 - **Strict CSP**; CI lint enforcement (ESLint isn't configured yet); guest-localStorage-full signalling.
 
 ---
