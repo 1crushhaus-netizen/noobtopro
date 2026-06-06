@@ -16,13 +16,23 @@ import { _resetRateLimits } from "@/lib/rateLimit";
 // random-row select(order/range/maybeSingle), and the atomic try_add_diagnostic
 // RPC for self-fill (captured).
 function fakeAdmin({ count = 0, row = null } = {}) {
-  const calls = { rpcs: [] };
+  const calls = { rpcs: [], order: null, range: null };
   return {
     calls,
     from: () => ({
       select: (cols, opts) => {
         if (opts && opts.head) return Promise.resolve({ count, error: null });
-        return { order: () => ({ range: () => ({ maybeSingle: async () => ({ data: row, error: null }) }) }) };
+        return {
+          order: (col, o) => {
+            calls.order = { col, o };
+            return {
+              range: (from, to) => {
+                calls.range = { from, to };
+                return { maybeSingle: async () => ({ data: row, error: null }) };
+              },
+            };
+          },
+        };
       },
     }),
     rpc: async (fn, args) => {
@@ -162,6 +172,43 @@ describe("POST /api/generate — diagnostic pool", () => {
     expect(json.pooled).toBe(true);
     expect(json.questions).toHaveLength(3);
     expect(failFetch).not.toHaveBeenCalled(); // zero generation tokens
+  });
+
+  it("serves at the threshold (count === DIAG_POOL_TARGET) but generates one below it", async () => {
+    // count === target (12): pool is warm, must serve without Groq.
+    const failFetch = vi.fn(() => { throw new Error("Groq must not be called at the threshold"); });
+    vi.stubGlobal("fetch", failFetch);
+    adminMock.getAdmin.mockReturnValue(fakeAdmin({ count: 12, row: { content: VALID_DIAG } }));
+    let res = await POST(req({ kind: "diagnostic" }));
+    expect((await res.json()).pooled).toBe(true);
+    expect(failFetch).not.toHaveBeenCalled();
+
+    // count === target - 1 (11): still BELOW target, must generate (pins the
+    // `>= DIAG_POOL_TARGET` boundary — a loosened `>= 11`/off-by-one would fail).
+    vi.unstubAllGlobals();
+    const fetchMock = mockGroqReturning(VALID_DIAG);
+    const admin = fakeAdmin({ count: 11, row: { content: VALID_DIAG } });
+    adminMock.getAdmin.mockReturnValue(admin);
+    res = await POST(req({ kind: "diagnostic" }));
+    const json = await res.json();
+    expect(json.pooled).toBeUndefined(); // below target → not served
+    expect(fetchMock).toHaveBeenCalled(); // generated fresh
+    expect(admin.calls.range).toBe(null); // never even drew a row from the pool
+  });
+
+  it("draws exactly one pool row at a random in-range offset, ordered by id", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.5); // offset = floor(0.5 * 12) = 6
+    const failFetch = vi.fn(() => { throw new Error("Groq must not be called on a pool hit"); });
+    vi.stubGlobal("fetch", failFetch);
+    const admin = fakeAdmin({ count: 12, row: { content: VALID_DIAG } });
+    adminMock.getAdmin.mockReturnValue(admin);
+    const res = await POST(req({ kind: "diagnostic" }));
+    expect((await res.json()).pooled).toBe(true);
+    // range(offset, offset) selects exactly ONE row (an off-by-one like
+    // range(offset, offset+1) would return two rows and break maybeSingle()).
+    expect(admin.calls.range).toEqual({ from: 6, to: 6 });
+    // ordered by id so the random offset maps to a stable row.
+    expect(admin.calls.order).toEqual({ col: "id", o: { ascending: true } });
   });
 
   it("generates fresh and self-fills the pool when below target", async () => {

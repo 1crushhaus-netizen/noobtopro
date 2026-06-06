@@ -238,6 +238,20 @@ export default function Noobtopro() {
   // concept the user has since clicked.
   const learnRun = useRef(0);
 
+  // Monotonic token so an in-flight diagnostic grade (a multi-second Promise.all
+  // over /api/grade) can't land a stale write after the user abandons the flow
+  // — sign-out (SIGNED_OUT) or "Restart" (reset()) bump this so the resolving
+  // submitDiagnostic bails instead of re-persisting the baseline and bouncing
+  // the freshly-reset UI back onto the dashboard.
+  const diagRun = useRef(0);
+
+  // Monotonic token so a slow in-flight startPractice generation can't land its
+  // question after the user has moved to a different practice question/subject —
+  // e.g. via the Learn tab's "Practice this problem" (startPracticeWithQuestion) —
+  // which would otherwise grade the wrong concept and update the wrong subject's
+  // score. Bumped by startPractice (per call) and by startPracticeWithQuestion.
+  const practiceRun = useRef(0);
+
   // Per-session memo of fetched concept guides, keyed "subject::concept". Concept
   // guides are deterministic + standardized, so once fetched we render instantly
   // on a revisit with NO server round-trip (and the server's shared cache means
@@ -324,6 +338,7 @@ export default function Noobtopro() {
         // guest already has scores).
         Object.values(answersRef.current || {}).forEach((a) => revokePreview(a && a.img));
         revokePreview(pImgRef.current);
+        diagRun.current++; // supersede any in-flight diagnostic grade so it can't land a stale write
         setAnswers({});
         setQuestions([]);
         setQi(0);
@@ -341,6 +356,7 @@ export default function Noobtopro() {
   }, []);
 
   async function reset() {
+    diagRun.current++; // supersede any in-flight diagnostic grade so it can't land a stale write
     await resetAll();
     // Release any outstanding image previews before clearing state.
     Object.values(answers).forEach((a) => revokePreview(a && a.img));
@@ -452,6 +468,7 @@ export default function Noobtopro() {
   }
 
   async function submitDiagnostic() {
+    const myRun = ++diagRun.current;
     setError("");
     setStage("scoring");
     try {
@@ -468,16 +485,22 @@ export default function Noobtopro() {
           return [q.subject, { score: r.score, weakConcepts: r.weakConcepts || [], comment: r.comment || "" }];
         })
       );
+      // The user abandoned this diagnostic mid-grade (signed out / hit Restart):
+      // bail BEFORE persisting so we don't re-write the abandoned baseline to the
+      // store or stomp the freshly-reset intro state with a stale dashboard.
+      if (myRun !== diagRun.current) return;
       const obj = {};
       results.forEach(([k, v]) => (obj[k] = v));
       // Atomic: persist the baseline scores AND the baseline attempt together.
       const st = await saveProgress(obj, { type: "baseline", t: now(), totalAfter: totalPoints(obj), phdAfter: phdIndex(obj) });
+      if (myRun !== diagRun.current) return; // abandoned during the save round-trip
       if (st && st.history) setHistory(st.history); // null = couldn't refresh; keep current
       setScores(obj);
       setStage("dashboard");
       // Guest just finished the diagnostic — prompt them to sign in to keep it.
       if (!user && isSupabaseConfigured) setShowSaveModal(true);
     } catch (e) {
+      if (myRun !== diagRun.current) return; // abandoned — don't surface a stale error or stage
       setError(e.message || "Grading failed.");
       setStage("diagnostic");
     }
@@ -555,7 +578,13 @@ export default function Noobtopro() {
       if (!data || typeof data.question !== "string" || !data.question.trim()) {
         throw new Error("Could not generate a question. Please try again.");
       }
-      setLearnQuestion({ question: data.question, targetConcept: data.targetConcept || concept, difficulty: data.difficulty });
+      // Normalize the generator's difficulty to a known band (default "intermediate"),
+      // matching the server's normalizeTryThisQuestion, so an off-band string can't
+      // flow to /api/grade and the score model as an unrecognized difficulty.
+      const BANDS = new Set(["beginner", "foundational", "intermediate", "advanced", "phd"]);
+      const d = typeof data.difficulty === "string" ? data.difficulty.trim().toLowerCase() : "";
+      const difficulty = BANDS.has(d) ? d : "intermediate";
+      setLearnQuestion({ question: data.question, targetConcept: data.targetConcept || concept, difficulty });
     } catch (e) {
       if (myRun !== learnRun.current) return; // don't surface a stale error on a newer concept
       setLearnError(e.message || "Could not regenerate the question.");
@@ -566,6 +595,7 @@ export default function Noobtopro() {
 
   /* --- practice --- */
   async function startPractice(subject) {
+    const myRun = ++practiceRun.current;
     setError("");
     setPSubject(subject);
     setFeedback(null);
@@ -584,15 +614,20 @@ export default function Noobtopro() {
         score: s.score,
         weakConcepts: s.weakConcepts || [],
       });
+      // A newer practice (another startPractice, or "Practice this problem" from
+      // Learn) started while this generation was in flight — drop this stale
+      // question so submitPractice can't grade it against the wrong subject/concept.
+      if (myRun !== practiceRun.current) return;
       // Guard against malformed model output so we don't render an empty prompt.
       if (!data || typeof data.question !== "string" || !data.question.trim()) {
         throw new Error("Could not generate a question. Please try again.");
       }
       setPQuestion(data);
     } catch (e) {
+      if (myRun !== practiceRun.current) return; // superseded — don't surface a stale error
       setError(e.message || "Could not generate a question.");
     } finally {
-      setBusy(false);
+      if (myRun === practiceRun.current) setBusy(false);
     }
   }
 
@@ -601,6 +636,7 @@ export default function Noobtopro() {
   // so practicing a concept costs zero generation tokens. Grading is unchanged.
   function startPracticeWithQuestion(subject, questionObj) {
     if (!questionObj || !questionObj.question) return;
+    practiceRun.current++; // supersede any in-flight startPractice generation
     setError("");
     setView("practice");
     setPSubject(subject);
@@ -660,8 +696,12 @@ export default function Noobtopro() {
       };
       // Atomic: persist the updated score AND its attempt in one transaction, so a
       // partial failure can't leave the score saved but the attempt lost (which a
-      // retry would then re-grade and overwrite).
-      const st = await saveProgress(updatedScores, {
+      // retry would then re-grade and overwrite). Send ONLY the changed subject:
+      // save_progress upserts every subject in the map, so passing the full map
+      // would rewrite the two UNCHANGED subjects with this tab's (possibly stale)
+      // hydrated copy and clobber a concurrent same-user session's progress on them.
+      // (totalAfter/phdAfter still use the full map — they're the attempt snapshot.)
+      const st = await saveProgress({ [pSubject]: updatedScores[pSubject] }, {
         type: "attempt",
         t: now(),
         subject: pSubject,
