@@ -328,7 +328,7 @@ Components: **SignIn** (provider buttons), **ProfileTab** (identity + stats + co
 
 ## 13. Testing
 
-**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **145 tests across 13 files**, all passing.
+**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **148 tests across 14 files**, all passing.
 
 | File | Covers |
 |---|---|
@@ -341,6 +341,7 @@ Components: **SignIn** (provider buttons), **ProfileTab** (identity + stats + co
 | `test/store.test.js` | migration clamping + **single-flight dedup + >5000-attempt cap**, delete RPC, signed-in load/save paths + **user_id scoping** + data-wipe guard, **atomic `saveProgress`** incl. **guest quota-failure surfacing** (mocked Supabase) |
 | `test/noobtopro.test.jsx` | the state machine: **diagnostic image-preview revoke on completion** + **`submitPractice` run-token guard** (stale grade after Restart doesn't persist or repopulate) |
 | `test/progress.test.jsx` | ProgressDashboard stat summary + **SVG chart accessible names** + empty states |
+| `test/headers.test.js` | `next.config.js` security headers: **baseline CSP directives + allow-listed origins**, `X-Frame-Options: DENY` (matches `frame-ancestors`), nosniff/HSTS |
 | `test/error.test.jsx` | error-boundary logs the caught error + `reset()` on "Try again" |
 | `test/signin.test.jsx` | provider buttons, OAuth-only (no password field), enabled-provider, **env-flag (`NEXT_PUBLIC_ENABLE_*`) gating** |
 | `test/profile.test.jsx` | identity, empty state, stats, confirm-guarded reset |

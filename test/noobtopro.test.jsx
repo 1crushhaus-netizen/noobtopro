@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor, act } from "@testing-library/react";
 
 // Mock the data layer + Supabase so the component runs in deterministic guest mode
 // with no network/DB. We drive the LLM via a stubbed global fetch.
@@ -90,6 +90,10 @@ describe("Noobtopro — diagnostic image previews are revoked on completion (lea
     // Lands on the dashboard once grading completes.
     await screen.findByText("Where you stand");
 
+    // Each subject ring is self-describing for screen readers (subject in the label).
+    expect(screen.getByRole("img", { name: /Mathematics: Score \d+ of 100/ })).toBeTruthy();
+    expect(screen.getByRole("img", { name: /Chemistry: Score \d+ of 100/ })).toBeTruthy();
+
     // Three previews were created; all three must be revoked on completion (no leak).
     expect(URL.createObjectURL).toHaveBeenCalledTimes(3);
     expect(URL.revokeObjectURL).toHaveBeenCalledTimes(3);
@@ -141,12 +145,21 @@ describe("Noobtopro — submitPractice run-token guard (stale grade after Restar
     fireEvent.click(screen.getByTitle("Restart"));
     await screen.findByRole("button", { name: /begin diagnostic/i }); // back at intro
 
-    // Now let the stale grade resolve — the guard must drop it.
-    resolveGrade();
-    await Promise.resolve();
-    await Promise.resolve();
+    // Now let the stale grade resolve — the guard must drop it. Flush with a
+    // macrotask (setTimeout 0): all queued microtasks — submitPractice's full
+    // await chain (fetch → json → return → the guard, then saveProgress/setState
+    // if the guard were ABSENT) — drain before the timer fires, so the assertions
+    // below run AFTER submitPractice has finished. (Two `await Promise.resolve()`
+    // would not reach that far, making the assertions pass trivially.)
+    await act(async () => {
+      resolveGrade();
+      await new Promise((r) => setTimeout(r, 0));
+    });
 
-    // The abandoned grade neither persisted nor repopulated the reset UI.
+    // The abandoned grade neither persisted nor repopulated the reset UI. (If the
+    // run-token guard were removed, saveProgress WOULD have been called by now and
+    // the feedback panel would render — so these assertions actually exercise it.)
+    expect(global.fetch).toHaveBeenCalledWith("/api/grade", expect.anything()); // the grade DID run + resolve
     expect(store.saveProgress).not.toHaveBeenCalled();
     expect(screen.queryByText(/reasoning quality this attempt/i)).toBe(null);
     expect(screen.getByRole("button", { name: /begin diagnostic/i })).toBeTruthy();

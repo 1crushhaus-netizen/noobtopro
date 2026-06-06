@@ -92,7 +92,7 @@ function revokePreview(img) {
 }
 
 /* ----------------------------- small ui ----------------------------- */
-function Ring({ value, color, size = 96, stroke = 9 }) {
+function Ring({ value, color, size = 96, stroke = 9, label }) {
   const r = (size - stroke) / 2;
   const circ = 2 * Math.PI * r;
   const off = circ * (1 - Math.max(0, Math.min(100, value)) / 100);
@@ -102,7 +102,7 @@ function Ring({ value, color, size = 96, stroke = 9 }) {
       height={size}
       viewBox={`0 0 ${size} ${size}`}
       role="img"
-      aria-label={`Score ${Math.round(Math.max(0, Math.min(100, value)))} of 100`}
+      aria-label={`${label ? `${label}: ` : ""}Score ${Math.round(Math.max(0, Math.min(100, value)))} of 100`}
     >
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,.09)" strokeWidth={stroke} />
       <circle
@@ -1008,7 +1008,7 @@ export default function Noobtopro() {
                           <span style={{ color: SUBJECTS[k].color, fontFamily: "var(--mono)", fontSize: 20 }}>{SUBJECTS[k].glyph}</span>
                           <span className="np-scorelabel">{SUBJECTS[k].label}</span>
                         </div>
-                        <Ring value={s.score} color={SUBJECTS[k].color} />
+                        <Ring value={s.score} color={SUBJECTS[k].color} label={SUBJECTS[k].label} />
                         <div className="np-bandtag" style={{ color: SUBJECTS[k].color }}>{band(s.score)}</div>
                         {s.comment && <div className="np-comment">{s.comment}</div>}
                         {s.weakConcepts && s.weakConcepts.length > 0 && (

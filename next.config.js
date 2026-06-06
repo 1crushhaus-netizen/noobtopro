@@ -28,7 +28,11 @@ const csp = [
 const securityHeaders = [
   { key: "Content-Security-Policy", value: csp },
   { key: "X-Content-Type-Options", value: "nosniff" },
-  { key: "X-Frame-Options", value: "SAMEORIGIN" },
+  // DENY (not SAMEORIGIN) to match the CSP's `frame-ancestors 'none'` on every
+  // browser: the app is never framed (OAuth is a full-page redirect, no self-frames),
+  // so a modern browser honoring frame-ancestors and a legacy browser honoring only
+  // X-Frame-Options should agree on "no framing at all".
+  { key: "X-Frame-Options", value: "DENY" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
