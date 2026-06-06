@@ -137,6 +137,7 @@ export async function POST(req) {
         system: DIAG_GRADE_SYS,
         user: `Subject: ${subject}\nQuestion: ${safeQuestion}\n\nLearner's reasoning:\n"""${work}"""`,
         image: img.image,
+        grade: true, // route to the cheaper grading model
       });
       // Clamp the model's score before it reaches the client/UI.
       const clamped = clampScore(data?.score);
@@ -159,6 +160,7 @@ export async function POST(req) {
         `Learner's current level: ${safeScore}/100\n\n` +
         `Learner's reasoning:\n"""${work}"""`,
       image: img.image,
+      grade: true, // route to the cheaper grading model
     });
     // Normalize every score the UI renders so malformed model output can't show
     // NaN or out-of-range values. reasoningScore -> /100 display; rubric -> 0–4

@@ -243,6 +243,10 @@ export default function Noobtopro() {
   // on a revisit with NO server round-trip (and the server's shared cache means
   // the LLM only ever generates each guide once across all users).
   const learnCacheRef = useRef({});
+  // In-flight /api/learn promises by key, so concurrent opens of the SAME concept
+  // (double-click, or open-A → leave → reopen-A before it lands) share ONE billable
+  // request instead of firing a second Groq generation.
+  const learnInflightRef = useRef(new Map());
   function openSignIn() {
     if (stage === "signin") return; // don't overwrite the return target with "signin"
     signinReturn.current = { stage, view };
@@ -503,9 +507,20 @@ export default function Noobtopro() {
     setLearnContent(null);
     setLearnBusy(true);
     try {
-      const data = await api("/api/learn", { subject, concept });
-      if (myRun !== learnRun.current) return; // a newer concept was selected
-      learnCacheRef.current[key] = data; // memo for instant revisits this session
+      // Reuse an in-flight request for this concept if one exists, so a duplicate
+      // open can't trigger a second Groq generation (the costliest call shape).
+      let req = learnInflightRef.current.get(key);
+      if (!req) {
+        req = api("/api/learn", { subject, concept });
+        learnInflightRef.current.set(key, req);
+        req.finally(() => learnInflightRef.current.delete(key)).catch(() => {});
+      }
+      const data = await req;
+      // Warm the memo even if this open was superseded, so revisiting the concept
+      // is served from cache instead of re-generating. (A failed request rejects
+      // above and never reaches here, so the memo is never poisoned.)
+      learnCacheRef.current[key] = data;
+      if (myRun !== learnRun.current) return; // a newer concept is active — don't touch UI state
       setLearnContent(data);
       setLearnQuestion(data.tryThisQuestion || null);
     } catch (e) {

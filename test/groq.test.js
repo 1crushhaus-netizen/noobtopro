@@ -146,4 +146,22 @@ describe("groqJSON", () => {
     await groqJSON({ system: "s", user: "u" });
     expect(JSON.parse(fetchMock.mock.calls[0][1].body).max_tokens).toBe(1200);
   });
+
+  it("routes grade:true to the (cheaper) GRADE_MODEL with reasoning_effort low", async () => {
+    const fetchMock = vi.fn(async () => reply('{"reasoningScore":50}'));
+    vi.stubGlobal("fetch", fetchMock);
+    await groqJSON({ system: "s", user: "u", grade: true });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.model).toMatch(/gpt-oss/); // GRADE_MODEL defaults to openai/gpt-oss-120b
+    expect(body.reasoning_effort).toBe("low"); // pin reasoning low so it stays cheap
+  });
+
+  it("uses the default text model with NO reasoning_effort for non-grade calls", async () => {
+    const fetchMock = vi.fn(async () => reply('{"ok":true}'));
+    vi.stubGlobal("fetch", fetchMock);
+    await groqJSON({ system: "s", user: "u" });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.model).toBe("llama-3.3-70b-versatile");
+    expect(body.reasoning_effort).toBeUndefined();
+  });
 });

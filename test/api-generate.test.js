@@ -1,6 +1,44 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+
+// Mock the admin client so we can drive the diagnostic_pool read-through/self-fill.
+// Default returns null (no service-role key) → the route always generates fresh,
+// which keeps every existing test exercising the original behavior.
+const adminMock = vi.hoisted(() => ({ getAdmin: vi.fn(() => null) }));
+vi.mock("@/lib/supabaseAdmin", () => ({
+  getSupabaseAdmin: () => adminMock.getAdmin(),
+  conceptKey: (c) => String(c || "").trim().toLowerCase(),
+}));
+
 import { POST } from "@/app/api/generate/route";
 import { _resetRateLimits } from "@/lib/rateLimit";
+
+// Fake admin matching the route's diagnostic_pool access: a count head-query, a
+// random-row select(order/range/maybeSingle), and insert (captured).
+function fakeAdmin({ count = 0, row = null, insertThrows } = {}) {
+  const calls = { inserts: [] };
+  return {
+    calls,
+    from: () => ({
+      select: (cols, opts) => {
+        if (opts && opts.head) return Promise.resolve({ count, error: null });
+        return { order: () => ({ range: () => ({ maybeSingle: async () => ({ data: row, error: null }) }) }) };
+      },
+      insert: async (r) => {
+        if (insertThrows) throw new Error("insert blew up");
+        calls.inserts.push(r);
+        return { error: null };
+      },
+    }),
+  };
+}
+
+const VALID_DIAG = {
+  questions: [
+    { subject: "math", topic: "t", question: "pooled q1" },
+    { subject: "physics", topic: "t", question: "pooled q2" },
+    { subject: "chemistry", topic: "t", question: "pooled q3" },
+  ],
+};
 
 function req(bodyObjOrString) {
   const body =
@@ -25,6 +63,7 @@ function mockGroqReturning(payload) {
 beforeEach(() => {
   process.env.GROQ_API_KEY = "test-key";
   _resetRateLimits();
+  adminMock.getAdmin.mockReturnValue(null); // default: no pool (generate fresh)
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -109,5 +148,44 @@ describe("POST /api/generate — happy paths", () => {
     // 10 concepts × 200 chars max + small prompt overhead — far below the raw input.
     const sentBody = fetchMock.mock.calls[0][1].body;
     expect(sentBody.length).toBeLessThan(5000);
+  });
+});
+
+describe("POST /api/generate — diagnostic pool", () => {
+  it("serves a diagnostic from the warm pool WITHOUT calling Groq", async () => {
+    const failFetch = vi.fn(() => { throw new Error("Groq must not be called on a pool hit"); });
+    vi.stubGlobal("fetch", failFetch);
+    adminMock.getAdmin.mockReturnValue(fakeAdmin({ count: 12, row: { content: VALID_DIAG } }));
+    const res = await POST(req({ kind: "diagnostic" }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.pooled).toBe(true);
+    expect(json.questions).toHaveLength(3);
+    expect(failFetch).not.toHaveBeenCalled(); // zero generation tokens
+  });
+
+  it("generates fresh and self-fills the pool when below target", async () => {
+    const fetchMock = mockGroqReturning(VALID_DIAG);
+    const admin = fakeAdmin({ count: 0 });
+    adminMock.getAdmin.mockReturnValue(admin);
+    const res = await POST(req({ kind: "diagnostic" }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.questions).toHaveLength(3);
+    expect(fetchMock).toHaveBeenCalled(); // generated on a cold pool
+    expect(admin.calls.inserts).toHaveLength(1); // and stored it for reuse
+    expect(admin.calls.inserts[0].content.questions).toHaveLength(3);
+  });
+
+  it("does NOT serve an invalid (incomplete) pooled diagnostic — falls back to generation", async () => {
+    const fetchMock = mockGroqReturning(VALID_DIAG);
+    // Warm pool but the drawn row is missing chemistry → must not be served.
+    const badRow = { content: { questions: [{ subject: "math", question: "q" }, { subject: "physics", question: "q" }] } };
+    adminMock.getAdmin.mockReturnValue(fakeAdmin({ count: 12, row: badRow }));
+    const res = await POST(req({ kind: "diagnostic" }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.pooled).toBeUndefined(); // fell through to a fresh generation
+    expect(fetchMock).toHaveBeenCalled();
   });
 });

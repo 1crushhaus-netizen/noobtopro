@@ -226,3 +226,17 @@ create table if not exists public.concept_guides (
 alter table public.concept_guides enable row level security;
 -- (No policies on purpose — service-role-only access. Writes use first-writer-
 -- wins: insert ... on conflict do nothing, so a guide is generated once and frozen.)
+
+-- ---- shared diagnostic pool ------------------------------------------------
+-- The diagnostic is a static, level-neutral baseline (no per-user input), so it
+-- is safe to standardize across users — same philosophy as concept_guides. We
+-- pool a handful of full 3-subject sets, then /api/generate serves them at random
+-- with NO Groq call; below DIAG_POOL_TARGET the pool self-fills. INTERNAL table:
+-- RLS on, NO policies (service-role only). If SUPABASE_SERVICE_ROLE_KEY is unset,
+-- pooling is skipped and the diagnostic is generated fresh each time (still works).
+create table if not exists public.diagnostic_pool (
+  id bigint generated always as identity primary key,
+  content jsonb not null,                 -- a full {questions:[{subject,topic,question}x3]} set
+  created_at timestamptz not null default now()
+);
+alter table public.diagnostic_pool enable row level security;
