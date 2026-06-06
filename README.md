@@ -293,8 +293,8 @@ All three routes are `POST`, `dynamic = "force-dynamic"`, **rate-limited per IP*
 
 ### `POST /api/learn`
 - `{ subject, concept }` (a `score` field is accepted but **ignored** — guides are level-neutral and standardized).
-- **Read-through shared cache:** normalizes the concept to a key (`conceptKey`: lowercase/trim/collapse-space/strip-quotes); on a hit returns the stored guide (`cached:true`) **without calling Groq**; on a miss generates via Groq, normalizes, and stores first-writer-wins (`cached:false`). Cache only active when `SUPABASE_SERVICE_ROLE_KEY` is set.
-- **Response:** `{ subject, concept, overview, keyIdeas[], socraticQuestions[], pitfalls[], tryThis, cached }`.
+- **Read-through shared cache:** normalizes the concept to a key (`conceptKey`: lowercase/trim/collapse-space/strip-quotes); on a hit returns the stored guide (`cached:true`) **without calling Groq**; on a miss generates via Groq, normalizes, and stores first-writer-wins (`cached:false`). Cache only active when `SUPABASE_SERVICE_ROLE_KEY` is set — **this is the platform's single biggest token saver: each guide (and its bundled practice question) is generated once and reused for every user, forever.**
+- **Response:** `{ subject, concept, overview, keyIdeas[], socraticQuestions[], pitfalls[], tryThis, tryThisQuestion, cached }`. `tryThisQuestion` is a practice-ready `{ question, targetConcept, difficulty }` (or `null`) — a concrete "try this" problem **cached with the guide**, so the Learn tab can start a practice attempt from it with **no `/api/generate` call**.
 
 ### The Groq client (`lib/groq.js`)
 - Models: text `llama-3.3-70b-versatile`, vision `meta-llama/llama-4-scout-17b-16e-instruct` (overridable via env).
@@ -325,7 +325,7 @@ The render switch resolves in this order: `stage === "signin"` (sign-in menu, fu
 Key flows / handlers:
 - `beginDiagnostic()` → `/api/generate` (diagnostic) → answer each → `submitDiagnostic()` grades all three in parallel → dashboard. As a guest, finishing pops the **"save your progress" modal** (dimmed `inert` background, scroll-lock, focus trap, Escape/backdrop close).
 - `startPractice(subject)` / `submitPractice()` → `/api/generate` + `/api/grade`; blends the new score; renders the rubric + Socratic hint + micro-lesson (no answer).
-- `openLearn(subject, concept)` → switches to the Learn tab and fetches `/api/learn` (guarded by a monotonic `learnRun` token so rapid clicks can't show a stale guide).
+- `openLearn(subject, concept)` → switches to the Learn tab and fetches `/api/learn` (guarded by a monotonic `learnRun` token so rapid clicks can't show a stale guide). **Memoized per session** in `learnCacheRef` (`"subject::concept"` → guide), so revisiting a concept renders instantly with **no server round-trip**. Each guide carries a cached **"try this" question**: `startPracticeWithQuestion(subject, q)` enters practice using it directly (no generation), and `regenerateLearnQuestion()` fetches a fresh, level-calibrated one on demand (session-only — the shared cached guide is untouched).
 - The dashboard's **"Work on" weak-concept tags are buttons** → they call `openLearn`.
 - `hydrate()` (run-token guarded) loads state on mount + on `SIGNED_IN`/`SIGNED_OUT`; image previews use `URL.createObjectURL` and are revoked to avoid leaks.
 
@@ -335,7 +335,7 @@ Components: **SignIn** (provider buttons), **ProfileTab** (identity + stats + co
 
 ## 13. Testing
 
-**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **120 tests across 11 files**, all passing.
+**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **126 tests across 11 files**, all passing.
 
 | File | Covers |
 |---|---|
@@ -344,12 +344,12 @@ Components: **SignIn** (provider buttons), **ProfileTab** (identity + stats + co
 | `test/rateLimit.test.js` | window limit, reset, per-key, memory bound (enforceCap) |
 | `test/api-generate.test.js` | validation/400s, prototype-key rejection, non-leaking 500, weakConcepts cap |
 | `test/api-grade.test.js` | validation, MIME/base64, score/rubric normalization, difficulty-band threading, non-leaking 500 |
-| `test/api-learn.test.js` | validation, normalization, **cache hit/miss/write-fail/key-normalization** (filter-aware mock) |
+| `test/api-learn.test.js` | validation, normalization, **cache hit/miss/write-fail/key-normalization** (filter-aware mock), tryThisQuestion shaping |
 | `test/store.test.js` | migration clamping, delete RPC, signed-in load/save/record paths + data-wipe guard, **atomic `saveProgress`** (mocked Supabase) |
 | `test/error.test.jsx` | error-boundary logs the caught error + `reset()` on "Try again" |
 | `test/signin.test.jsx` | provider buttons, OAuth-only (no password field), enabled-provider |
 | `test/profile.test.jsx` | identity, empty state, stats, confirm-guarded reset |
-| `test/learn.test.jsx` | empty state, concept select, loading/error **live regions**, guidance render |
+| `test/learn.test.jsx` | empty state, concept select, loading/error **live regions**, guidance render, **try-this question: practice-reuse / regenerate / fallback** |
 
 **Mocking patterns:** Groq calls are mocked by stubbing global `fetch`; Supabase is mocked via `vi.mock("@/lib/...")` with `vi.hoisted`; components use `@testing-library/react`. No network or real keys are needed.
 

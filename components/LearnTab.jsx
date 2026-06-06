@@ -16,7 +16,7 @@ function Bullets({ items, color, label }) {
 /**
  * The Learn tab: pick a weak concept and get a Socratic, answer-free explanation.
  */
-export default function LearnTab({ scores, active, content, busy, error, onSelect, onPractice }) {
+export default function LearnTab({ scores, active, content, busy, error, question, regenerating, onSelect, onPractice, onPracticeQuestion, onRegenerate }) {
   // Flatten the learner's weak concepts, grouped by subject.
   const groups = ORDER.map((k) => ({
     subject: k,
@@ -114,20 +114,41 @@ export default function LearnTab({ scores, active, content, busy, error, onSelec
 
           {content.tryThis && (
             <div className="np-card np-lesson">
-              <div className="np-cardicon" style={{ color: activeColor }}>Try this</div>
+              <div className="np-cardicon" style={{ color: activeColor }}>How to approach it</div>
               <div className="np-lessontext">{content.tryThis}</div>
             </div>
           )}
 
-          <div className="np-feedactions">
-            <button
-              className="np-btn np-primary"
-              style={{ borderColor: activeColor }}
-              onClick={() => onPractice && onPractice(active.subject)}
-            >
-              Practice {SUBJECTS[active.subject]?.label}
-            </button>
-          </div>
+          {question && question.question ? (
+            <div className="np-card np-question" style={{ borderColor: activeColor }}>
+              <div className="np-cardicon" style={{ color: activeColor, marginBottom: 8 }}>
+                Try this problem{question.difficulty ? ` · ${String(question.difficulty).toUpperCase()}` : ""}
+              </div>
+              <div style={{ fontSize: 16, lineHeight: 1.5 }}>{question.question}</div>
+              <div className="np-feedactions" style={{ marginTop: 16 }}>
+                <button
+                  className="np-btn np-primary"
+                  style={{ borderColor: activeColor }}
+                  onClick={() => onPracticeQuestion && onPracticeQuestion(active.subject, question)}
+                >
+                  Practice this problem
+                </button>
+                <button className="np-ghost" onClick={() => onRegenerate && onRegenerate()} disabled={regenerating}>
+                  {regenerating ? "Generating a new one…" : "Regenerate question"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="np-feedactions">
+              <button
+                className="np-btn np-primary"
+                style={{ borderColor: activeColor }}
+                onClick={() => onPractice && onPractice(active.subject)}
+              >
+                Practice {SUBJECTS[active.subject]?.label}
+              </button>
+            </div>
+          )}
         </div>
       )}
 

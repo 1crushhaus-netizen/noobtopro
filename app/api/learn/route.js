@@ -12,10 +12,30 @@ const capArr = (a, n, len) =>
     ? a.filter((x) => typeof x === "string" && x.trim()).slice(0, n).map((x) => x.slice(0, len))
     : [];
 
+// Difficulty bands the practice UI / score model understand (matches PRACTICE_GEN_SYS
+// in lib/groq.js and DIFFICULTY_ANCHORS in lib/scoring.js).
+const DIFFICULTY_BANDS = new Set(["beginner", "foundational", "intermediate", "advanced", "phd"]);
+
+// Normalize the cached "try this" practice question into the exact shape the
+// practice UI consumes ({question, targetConcept, difficulty}), so the Learn tab
+// can drop it straight into a practice attempt with NO /api/generate call. Returns
+// null when the guide has no usable question (older cached rows degrade gracefully).
+function normalizeTryThisQuestion(raw, concept) {
+  const question = cap(raw?.question, 1000).trim();
+  if (!question) return null;
+  const d = typeof raw?.difficulty === "string" ? raw.difficulty.trim().toLowerCase() : "";
+  return {
+    question,
+    targetConcept: cap(concept, 200),
+    difficulty: DIFFICULTY_BANDS.has(d) ? d : "intermediate",
+  };
+}
+
 // Build the safe, normalized guide shape. Used for BOTH the Groq result and a
 // cache hit, so the client always receives well-typed fields (string overview /
-// tryThis, array keyIdeas/socraticQuestions/pitfalls) regardless of what is
-// stored — defends against any future writer or schema drift.
+// tryThis, array keyIdeas/socraticQuestions/pitfalls, and a practice-ready
+// tryThisQuestion) regardless of what is stored — defends against any future
+// writer or schema drift.
 function normalizeGuide(subject, concept, raw) {
   return {
     subject,
@@ -25,6 +45,7 @@ function normalizeGuide(subject, concept, raw) {
     socraticQuestions: capArr(raw?.socraticQuestions, 5, 500),
     pitfalls: capArr(raw?.pitfalls, 5, 500),
     tryThis: cap(raw?.tryThis, 800),
+    tryThisQuestion: normalizeTryThisQuestion(raw?.tryThisQuestion, concept),
   };
 }
 
