@@ -68,6 +68,11 @@ body {
 .np-outline { background: transparent; border: 1px solid var(--line); width: 100%; justify-content: center; }
 .np-outline:hover { background: rgba(255, 255, 255, .04); }
 .np-big { font-size: 17px; padding: 14px 24px; margin-top: 6px; }
+/* Intro primary-action row: the big "Prove it" CTA + (guest) a normal-size,
+   secondary Sign in beside it. The row owns the top margin; cancel the CTA's own
+   margin-top (from .np-big) so the two buttons line up. */
+.np-introcta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
+.np-introcta .np-big { margin-top: 0; }
 .np-ghost { display: inline-flex; align-items: center; gap: 6px; background: none; border: none; color: var(--muted); font-family: var(--ui); font-size: 14px; cursor: pointer; padding: 4px 2px; }
 .np-ghost:hover { color: var(--text); }
 .np-iconbtn { background: none; border: none; color: var(--muted); cursor: pointer; display: inline-flex; padding: 4px; border-radius: 6px; }

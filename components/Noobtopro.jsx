@@ -820,22 +820,26 @@ export default function Noobtopro() {
         <button className="np-brand" onClick={reset} title="Restart">
           noob<span className="np-arrow">→</span>topro
         </button>
-        <span className="np-tag">prove what you know · climb from noob to pro</span>
+        <span className="np-tag">prove what you know</span>
         <div className="np-signin">
-          {isSupabaseConfigured ? (
-            user ? (
-              <button className="np-signinbtn" onClick={() => signOutUser()} title={user.email || ""}>
-                <Icon name="google" size={16} /> Sign out
-              </button>
-            ) : (
-              <button className="np-signinbtn" onClick={openSignIn}>
-                <Icon name="google" size={16} /> Sign in
-              </button>
-            )
-          ) : (
-            <button className="np-signinbtn" onClick={() => setShowAuthNote(true)}>
-              <Icon name="google" size={16} /> Sign in
+          {user ? (
+            <button className="np-signinbtn" onClick={() => signOutUser()} title={user.email || ""}>
+              <Icon name="google" size={16} /> Sign out
             </button>
+          ) : (
+            // Guests on the intro see Sign in beside the primary CTA instead, so the
+            // top-right button is hidden there to avoid two sign-in buttons.
+            stage !== "intro" && (
+              isSupabaseConfigured ? (
+                <button className="np-signinbtn" onClick={openSignIn}>
+                  <Icon name="google" size={16} /> Sign in
+                </button>
+              ) : (
+                <button className="np-signinbtn" onClick={() => setShowAuthNote(true)}>
+                  <Icon name="google" size={16} /> Sign in
+                </button>
+              )
+            )
           )}
         </div>
       </header>
@@ -918,16 +922,17 @@ export default function Noobtopro() {
             {/* INTRO */}
             {stage === "intro" && (
               <div className="fade-up">
-                <h1 className="np-h1">No lessons. No spoon-feeding.<br />Just your own thinking, measured.</h1>
+                <h1 className="np-h1">Stop memorizing.<br />Start thinking. Climb.</h1>
                 <p className="np-lede">
-                  noobtopro doesn't teach you and then test you. It hands you problems, reads <em>how you reason</em>, and
-                  scores each subject from 0 (absolute beginner) to 100 (PhD-level). When you're stuck, it won't give the
-                  answer — it nudges with a question and teaches only the concept you're missing.
+                  School makes you memorize. Most apps make you chase streaks. noobtopro does neither: it hands you real
+                  problems, reads <em>how you reason</em>, and scores each subject 0–100. Stuck? It won't hand over the
+                  answer — it asks the right question and teaches the one concept you're missing. For students and
+                  self-learners who'd rather understand than cram.
                 </p>
                 <div className="np-steps">
                   {[
-                    ["01", "Diagnose", "Three open problems — one each in math, physics, chemistry. Solve them and explain every step."],
-                    ["02", "Get placed", "Your reasoning is graded on a 5-part rubric and mapped to a 0–100 score per subject."],
+                    ["01", "Prove it", "Three open problems — one each in math, physics, chemistry. Solve them and explain every step."],
+                    ["02", "Get ranked", "Your reasoning is graded on a 5-part rubric and mapped to a 0–100 rank per subject."],
                     ["03", "Climb", "Pick a subject. Get calibrated problems. Sound reasoning moves your score — even when the answer's wrong."],
                   ].map(([n, t, d]) => (
                     <div key={n} className="np-card np-step">
@@ -944,9 +949,21 @@ export default function Noobtopro() {
                     </span>
                   ))}
                 </div>
-                <button className="np-btn np-primary np-big" onClick={beginDiagnostic} disabled={busy}>
-                  {busy ? "Preparing your diagnostic…" : "Begin diagnostic"} {!busy && <Icon name="arrow" size={18} />}
-                </button>
+                <div className="np-introcta">
+                  <button className="np-btn np-primary np-big" onClick={beginDiagnostic} disabled={busy}>
+                    {busy ? "Setting up your problems…" : "Prove it"} {!busy && <Icon name="arrow" size={18} />}
+                  </button>
+                  {/* Guests get Sign in right next to the primary action (the header
+                      button is hidden on the intro). */}
+                  {!user && (
+                    <button
+                      className="np-signinbtn"
+                      onClick={() => (isSupabaseConfigured ? openSignIn() : setShowAuthNote(true))}
+                    >
+                      <Icon name="google" size={16} /> Sign in
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
@@ -961,7 +978,7 @@ export default function Noobtopro() {
                 <div className="np-qmeta">
                   <span style={{ color: SUBJECTS[curSubject].color }}>{SUBJECTS[curSubject].glyph}</span>
                   <span style={{ fontFamily: "var(--mono)", letterSpacing: 1 }}>
-                    {SUBJECTS[curSubject].label.toUpperCase()} · DIAGNOSTIC {qi + 1}/{questions.length}
+                    {SUBJECTS[curSubject].label.toUpperCase()} · PROVE IT {qi + 1}/{questions.length}
                   </span>
                   {questions[qi].topic && <span className="np-topic">{questions[qi].topic}</span>}
                 </div>
@@ -973,7 +990,7 @@ export default function Noobtopro() {
                   onAttach={attachCur}
                   onRemoveImg={removeCurImg}
                   onSubmit={nextDiagnostic}
-                  submitLabel={qi < questions.length - 1 ? "Next question" : "Submit for scoring"}
+                  submitLabel={qi < questions.length - 1 ? "Next question" : "Get ranked"}
                   loading={false}
                 />
                 <p className="np-hint">noobtopro grades your <em>thinking</em>, so explain your full approach — or attach a photo of your worked notes.</p>
