@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { groqJSON, DIAG_GEN_SYS, PRACTICE_GEN_SYS } from "@/lib/groq";
 import { ORDER, clampScore } from "@/lib/scoring";
 import { rateLimit, clientKey } from "@/lib/rateLimit";
+import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +25,14 @@ function isValidDiagnostic(content) {
 }
 
 export async function POST(req) {
+  // Block forced cross-site requests (CSRF-style cost/quota DoS) and non-JSON bodies.
+  if (isCrossSiteRequest(req)) {
+    return NextResponse.json({ error: "Cross-site requests are not allowed." }, { status: 403 });
+  }
+  if (isWrongContentType(req)) {
+    return NextResponse.json({ error: "Content-Type must be application/json." }, { status: 415 });
+  }
+
   const rl = rateLimit(clientKey(req));
   if (!rl.ok) {
     return NextResponse.json(

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { groqJSON, LEARN_SYS } from "@/lib/groq";
 import { ORDER } from "@/lib/scoring";
 import { rateLimit, clientKey } from "@/lib/rateLimit";
+import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
 import { getSupabaseAdmin, conceptKey } from "@/lib/supabaseAdmin";
 import { normalizeTopic, topicSlugsFor } from "@/lib/taxonomy";
 import { isConceptSafe } from "@/lib/contentSafety";
@@ -54,7 +55,16 @@ function normalizeGuide(subject, concept, raw) {
 
 // Teach a concept the learner is weak on — Socratically, without giving answers.
 export async function POST(req) {
-  const rl = rateLimit(clientKey(req));
+  if (isCrossSiteRequest(req)) {
+    return NextResponse.json({ error: "Cross-site requests are not allowed." }, { status: 403 });
+  }
+  if (isWrongContentType(req)) {
+    return NextResponse.json({ error: "Content-Type must be application/json." }, { status: 415 });
+  }
+
+  // Generation is the most expensive route (a fresh concept = a full Groq guide
+  // call). Apply a tighter per-IP budget than the default.
+  const rl = rateLimit(clientKey(req), { max: 15 });
   if (!rl.ok) {
     return NextResponse.json(
       { error: "Too many requests. Please slow down and try again shortly." },
@@ -129,7 +139,12 @@ export async function POST(req) {
   // (hidden) until vetted. Never overwrites an existing ready guide (first-writer-
   // wins is enforced inside the RPC). conceptKey/_concept_key parity means a
   // grader-registered stub collides on the same key and is promoted, not duplicated.
-  if (sb && guide.overview) {
+  // Only PERSIST guides for concepts that pass the safety gate: an unsafe concept
+  // (URL/email/markup/blocklist/symbol-heavy) is still generated and returned to the
+  // opener, but is NEVER written to the shared cache, so it can't be served to
+  // anyone else. Stored guides are always hidden (curation-only) and never publicly
+  // browsable — the public hub shows only curated rows (see promote_or_insert_guide).
+  if (sb && guide.overview && isConceptSafe(safeConcept)) {
     try {
       await sb.rpc("promote_or_insert_guide", {
         p_subject: subject,
@@ -137,7 +152,7 @@ export async function POST(req) {
         p_content: guide,
         p_topic: guide.topic,
         p_level: guide.tryThisQuestion ? guide.tryThisQuestion.difficulty : null,
-        p_safe: isConceptSafe(safeConcept),
+        p_safe: true,
       });
     } catch (e) {
       console.error("[/api/learn] cache write", e); // non-fatal

@@ -259,26 +259,47 @@ describe("POST /api/grade — difficulty band threading (practice)", () => {
   });
 });
 
-describe("POST /api/grade — valid image is accepted and forwarded to the vision model", () => {
-  it("accepts a valid base64 image and sends it as a data: URL on the multimodal model", async () => {
+describe("POST /api/grade — image validation + vision forwarding", () => {
+  // base64 of the 8-byte PNG magic signature (89 50 4E 47 0D 0A 1A 0A).
+  const PNG_B64 = "iVBORw0KGgo=";
+
+  it("accepts a real image (magic bytes match) and sends it as a data: URL on the multimodal model", async () => {
     const fetchMock = mockGroqReturning({ subject: "math", score: 70, weakConcepts: [], comment: "ok" });
     const res = await POST(
-      req({
-        kind: "diagnostic",
-        subject: "math",
-        question: "Q",
-        reasoning: "see my photo",
-        image: { mime: "image/png", data: "aGVsbG8=" }, // valid base64 ("hello")
-      })
+      req({ kind: "diagnostic", subject: "math", question: "Q", reasoning: "see my photo", image: { mime: "image/png", data: PNG_B64 } })
     );
     expect(res.status).toBe(200);
     const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
-    // Photo grading must route to the vision model regardless of the grade flag.
     expect(sent.model).toBe("meta-llama/llama-4-scout-17b-16e-instruct");
-    // The user message is multimodal: a text part + an image_url with the data: URL.
     const userMsg = sent.messages.find((m) => m.role === "user");
-    expect(Array.isArray(userMsg.content)).toBe(true);
     const imgPart = userMsg.content.find((p) => p.type === "image_url");
-    expect(imgPart.image_url.url).toBe("data:image/png;base64,aGVsbG8=");
+    expect(imgPart.image_url.url).toBe(`data:image/png;base64,${PNG_B64}`);
+  });
+
+  it("rejects arbitrary base64 bytes that are not a real image (magic-byte sniff)", async () => {
+    const failFetch = vi.fn(() => { throw new Error("Groq must not be called for a non-image"); });
+    vi.stubGlobal("fetch", failFetch);
+    const res = await POST(
+      req({ kind: "diagnostic", subject: "math", question: "Q", image: { mime: "image/png", data: "aGVsbG8=" } }) // "hello", not an image
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/not a supported image/i);
+    expect(failFetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects a forged MIME (declared type != actual bytes)", async () => {
+    const res = await POST(
+      req({ kind: "diagnostic", subject: "math", question: "Q", image: { mime: "image/jpeg", data: PNG_B64 } }) // PNG bytes, claims JPEG
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/do not match/i);
+  });
+});
+
+describe("POST /api/grade — hostile input handling", () => {
+  it("treats a non-string `reasoning` as empty instead of throwing a 500", async () => {
+    mockGroqReturning({ subject: "math", score: 50, weakConcepts: [], comment: "" });
+    const res = await POST(req({ kind: "diagnostic", subject: "math", question: "Q", reasoning: { evil: true } }));
+    expect(res.status).toBe(200); // previously `reasoning.trim()` threw before validation
   });
 });

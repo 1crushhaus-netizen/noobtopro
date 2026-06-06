@@ -137,6 +137,26 @@ describe("groqJSON", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("on an image PARSE failure, falls back to ONE text-only call — never re-calls the vision model (cost cap)", async () => {
+    // Cost-amplification regression: the old chain retried the vision model a second
+    // time with the full image on a parse failure (up to 2 multi-MB vision calls).
+    // Now an image makes at most ONE vision call, then a single text-only fallback.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(reply("not json — vision model rambled")) // 1st = vision, unparseable
+      .mockResolvedValueOnce(reply('{"reasoningScore":60}')); // 2nd = text fallback
+    vi.stubGlobal("fetch", fetchMock);
+    const out = await groqJSON({ system: "s", user: "u", image: { data: "abc", mime: "image/png" } });
+    expect(out).toEqual({ reasoningScore: 60 });
+    expect(fetchMock).toHaveBeenCalledTimes(2); // exactly one retry, not a 2nd vision call
+    const firstBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(firstBody.model).toBe("meta-llama/llama-4-scout-17b-16e-instruct"); // VISION
+    expect(Array.isArray(firstBody.messages[1].content)).toBe(true); // 1st carried the image
+    expect(secondBody.model).toBe("llama-3.3-70b-versatile"); // TEXT_MODEL
+    expect(typeof secondBody.messages[1].content).toBe("string"); // 2nd is text-only (no image)
+  });
+
   it("threads a per-call maxTokens into the request body, defaulting to 1200", async () => {
     const fetchMock = vi.fn(async () => reply('{"ok":true}'));
     vi.stubGlobal("fetch", fetchMock);

@@ -254,15 +254,15 @@ describe("POST /api/learn — shared cache", () => {
     expect(admin.calls.rpc.args.p_topic).toBe("general_math");
   });
 
-  it("marks an unsafe concept as not-public (p_safe false) but still returns the guide", async () => {
+  it("does NOT persist an unsafe concept to the shared cache, but still returns the guide to the opener", async () => {
     const admin = fakeAdmin({ hitContent: null });
     mocks.getAdmin.mockReturnValue(admin);
     mockGroqReturning({ topic: "algebra", overview: "x", keyIdeas: [], socraticQuestions: [], pitfalls: [], tryThis: "" });
     const res = await POST(req({ subject: "math", concept: "buy cheap stuff at evil.com" }));
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.overview).toBe("x"); // opener still gets the guide
-    expect(admin.calls.rpc.args.p_safe).toBe(false); // but it won't be surfaced publicly
+    expect(json.overview).toBe("x"); // opener still gets the guide (ephemeral)
+    expect(admin.calls.rpc).toBe(null); // never written -> can't be served to anyone else
   });
 
   it("re-normalizes a malformed cached row before serving it", async () => {

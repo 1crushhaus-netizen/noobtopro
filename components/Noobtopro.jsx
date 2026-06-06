@@ -356,6 +356,9 @@ export default function Noobtopro() {
         setFeedback(null);
         setStage("intro");
         setView("practice");
+        // Clear the local guest blob on sign-out so the prior user's scores/weak
+        // concepts aren't exposed to the next person on a shared device.
+        resetAll();
         hydrate();
       }
     });

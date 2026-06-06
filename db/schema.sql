@@ -114,7 +114,7 @@ begin
          case when pg_input_is_valid(a->>'new_score', 'numeric') then round((a->>'new_score')::numeric)::int end,
          case when pg_input_is_valid(a->>'total_after', 'numeric') then round((a->>'total_after')::numeric)::int end,
          case when pg_input_is_valid(a->>'phd_after', 'numeric') then round((a->>'phd_after')::numeric)::int end,
-         coalesce(case when pg_input_is_valid(a->>'created_at', 'timestamptz') then (a->>'created_at')::timestamptz end, now())
+         least(coalesce(case when pg_input_is_valid(a->>'created_at', 'timestamptz') then (a->>'created_at')::timestamptz end, now()), now())
   from jsonb_array_elements(coalesce(p_attempts, '[]'::jsonb)) as a
   where (a->>'subject' is null or a->>'subject' in ('math', 'physics', 'chemistry'))
     and coalesce(a->>'type', 'attempt') in ('baseline', 'attempt');
@@ -217,7 +217,7 @@ begin
             case when pg_input_is_valid(p_attempt->>'new_score', 'numeric') then round((p_attempt->>'new_score')::numeric)::int end,
             case when pg_input_is_valid(p_attempt->>'total_after', 'numeric') then round((p_attempt->>'total_after')::numeric)::int end,
             case when pg_input_is_valid(p_attempt->>'phd_after', 'numeric') then round((p_attempt->>'phd_after')::numeric)::int end,
-            coalesce(case when pg_input_is_valid(p_attempt->>'created_at', 'timestamptz') then (p_attempt->>'created_at')::timestamptz end, now()));
+            least(coalesce(case when pg_input_is_valid(p_attempt->>'created_at', 'timestamptz') then (p_attempt->>'created_at')::timestamptz end, now()), now()));
   end if;
 end;
 $$;
@@ -352,9 +352,14 @@ $$;
 revoke all on function public.register_concepts(text, jsonb) from public, anon, authenticated;
 grant execute on function public.register_concepts(text, jsonb) to service_role;
 
--- On a /api/learn generation: promote a pending stub to ready (public iff the
--- concept passed the safety check), else insert a fresh USER-originated guide kept
--- PRIVATE (hidden) until vetted, and never overwrite an existing ready guide.
+-- On a /api/learn generation: promote a pending stub to ready, or insert a fresh
+-- user-originated guide. CURATION-ONLY MODEL (security): auto-grown guides are
+-- ALWAYS stored visibility='hidden' — they are cached + servable to a direct opener
+-- but are NEVER publicly browsable. Only curated rows (the seed / explicit approval,
+-- source='curated', visibility='public') reach the public hub, so attacker-influenced
+-- concept labels/content can never be broadcast to all users via the public read
+-- policy. `p_safe` is retained for compatibility but no longer grants public
+-- visibility. Never overwrites an existing ready guide (first-writer-wins).
 create or replace function public.promote_or_insert_guide(
   p_subject text, p_concept text, p_content jsonb, p_topic text, p_level text, p_safe boolean
 ) returns void language plpgsql security definer set search_path = public as $$
@@ -367,7 +372,7 @@ begin
   if p_subject not in ('math','physics','chemistry') or k = '' or p_content is null then return; end if;
   update public.concept_guides
      set content = p_content, topic = t, level_band = lv, status = 'ready',
-         visibility = case when p_safe then 'public' else 'hidden' end, updated_at = now()
+         visibility = 'hidden', updated_at = now()
    where subject = p_subject and concept_key = k and status = 'pending';
   if found then return; end if;
   insert into public.concept_guides (subject, concept_key, concept, content, topic, level_band, status, source, visibility)
