@@ -123,6 +123,39 @@ describe("POST /api/learn — guidance", () => {
     expect(json.tryThis).toMatch(/Sketch/);
   });
 
+  it("normalizes the cached tryThisQuestion into a practice-ready {question,targetConcept,difficulty}", async () => {
+    mockGroqReturning({
+      overview: "x",
+      keyIdeas: [],
+      socraticQuestions: [],
+      pitfalls: [],
+      tryThis: "approach",
+      tryThisQuestion: { question: "A 2kg block slides down a frictionless ramp — trace the energy.", difficulty: "Advanced " },
+    });
+    const res = await POST(req({ subject: "physics", concept: "energy transformation" }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.tryThisQuestion).toMatchObject({
+      question: expect.stringMatching(/2kg block/),
+      targetConcept: "energy transformation", // concept threaded in so it slots into the practice UI
+      difficulty: "advanced", // case/space-normalized
+    });
+  });
+
+  it("defaults an unknown tryThisQuestion difficulty to intermediate", async () => {
+    mockGroqReturning({ overview: "x", tryThisQuestion: { question: "Q?", difficulty: "impossible" } });
+    const res = await POST(req({ subject: "math", concept: "limits" }));
+    const json = await res.json();
+    expect(json.tryThisQuestion.difficulty).toBe("intermediate");
+  });
+
+  it("nulls tryThisQuestion when the guide has no usable question (older rows degrade gracefully)", async () => {
+    mockGroqReturning({ overview: "x", tryThisQuestion: { difficulty: "phd" } });
+    const res = await POST(req({ subject: "math", concept: "limits" }));
+    const json = await res.json();
+    expect(json.tryThisQuestion).toBe(null);
+  });
+
   it("tolerates malformed model output (arrays default to [])", async () => {
     mockGroqReturning({ overview: "x", keyIdeas: "not-an-array" });
     const res = await POST(req({ subject: "physics", concept: "work-energy" }));

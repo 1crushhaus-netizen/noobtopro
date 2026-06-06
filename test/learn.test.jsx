@@ -59,4 +59,46 @@ describe("LearnTab", () => {
     fireEvent.click(screen.getByRole("button", { name: /practice mathematics/i }));
     expect(onPractice).toHaveBeenCalledWith("math");
   });
+
+  const guide = { subject: "physics", concept: "energy transformation", overview: "o", keyIdeas: [], socraticQuestions: [], pitfalls: [], tryThis: "think about conservation" };
+
+  it("shows the cached 'try this' problem and practices it WITHOUT generating a new question", () => {
+    const onPracticeQuestion = vi.fn();
+    const onPractice = vi.fn();
+    const q = { question: "A 2kg block slides down a ramp — trace the energy flow.", targetConcept: "energy transformation", difficulty: "advanced" };
+    render(
+      <LearnTab scores={scores} active={{ subject: "physics", concept: "energy transformation" }} content={guide} busy={false} error=""
+        question={q} onSelect={() => {}} onPractice={onPractice} onPracticeQuestion={onPracticeQuestion} onRegenerate={() => {}} />
+    );
+    expect(screen.getByText(/2kg block slides/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /practice this problem/i }));
+    expect(onPracticeQuestion).toHaveBeenCalledWith("physics", q);
+    expect(onPractice).not.toHaveBeenCalled(); // reused the cached question — no fresh generation
+  });
+
+  it("regenerate calls onRegenerate, and the button is disabled while regenerating", () => {
+    const onRegenerate = vi.fn();
+    const q = { question: "Q?", targetConcept: "energy transformation", difficulty: "intermediate" };
+    const { rerender } = render(
+      <LearnTab scores={scores} active={{ subject: "physics", concept: "energy transformation" }} content={guide} busy={false} error=""
+        question={q} regenerating={false} onSelect={() => {}} onRegenerate={onRegenerate} onPracticeQuestion={() => {}} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /regenerate question/i }));
+    expect(onRegenerate).toHaveBeenCalled();
+    rerender(
+      <LearnTab scores={scores} active={{ subject: "physics", concept: "energy transformation" }} content={guide} busy={false} error=""
+        question={q} regenerating={true} onSelect={() => {}} onRegenerate={onRegenerate} onPracticeQuestion={() => {}} />
+    );
+    expect(screen.getByRole("button", { name: /generating a new one/i }).disabled).toBe(true);
+  });
+
+  it("falls back to a fresh 'Practice <subject>' button when a guide has no cached question", () => {
+    const onPractice = vi.fn();
+    render(
+      <LearnTab scores={scores} active={{ subject: "math", concept: "limits" }} content={{ subject: "math", concept: "limits", overview: "o", keyIdeas: [], socraticQuestions: [], pitfalls: [], tryThis: "" }} busy={false} error=""
+        question={null} onSelect={() => {}} onPractice={onPractice} onPracticeQuestion={() => {}} onRegenerate={() => {}} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /practice mathematics/i }));
+    expect(onPractice).toHaveBeenCalledWith("math");
+  });
 });

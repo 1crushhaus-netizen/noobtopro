@@ -216,6 +216,11 @@ export default function Noobtopro() {
   const [learnContent, setLearnContent] = useState(null);
   const [learnBusy, setLearnBusy] = useState(false);
   const [learnError, setLearnError] = useState("");
+  // The active "try this" practice question for the open concept ({question,
+  // targetConcept, difficulty}) — seeded from the cached guide, replaceable via
+  // "Regenerate" (session-only). And a flag for that regenerate request.
+  const [learnQuestion, setLearnQuestion] = useState(null);
+  const [learnRegen, setLearnRegen] = useState(false);
 
   // Monotonic token so overlapping hydrate() calls (mount + onAuthStateChange
   // both fire on load) can't clobber each other: only the newest result wins.
@@ -232,6 +237,12 @@ export default function Noobtopro() {
   // Monotonic token so a slow /api/learn response can't overwrite a newer
   // concept the user has since clicked.
   const learnRun = useRef(0);
+
+  // Per-session memo of fetched concept guides, keyed "subject::concept". Concept
+  // guides are deterministic + standardized, so once fetched we render instantly
+  // on a revisit with NO server round-trip (and the server's shared cache means
+  // the LLM only ever generates each guide once across all users).
+  const learnCacheRef = useRef({});
   function openSignIn() {
     if (stage === "signin") return; // don't overwrite the return target with "signin"
     signinReturn.current = { stage, view };
@@ -334,6 +345,7 @@ export default function Noobtopro() {
     setLearnConcept(null);
     setLearnContent(null);
     setLearnError("");
+    setLearnQuestion(null);
     setStage("intro");
     setView("practice");
     setQuestions([]);
@@ -359,6 +371,7 @@ export default function Noobtopro() {
       setLearnConcept(null);
       setLearnContent(null);
       setLearnError("");
+      setLearnQuestion(null);
       setView("practice");
       setStage("intro");
       setError("");
@@ -467,23 +480,64 @@ export default function Noobtopro() {
   }
 
   /* --- learn --- */
-  // Open the Learn tab on a concept and fetch a Socratic, answer-free guide.
+  // Open the Learn tab on a concept and show a Socratic, answer-free guide. Served
+  // from the per-session memo when already fetched (instant, no server call); the
+  // server's shared cache means the LLM generates each guide at most once, ever.
   async function openLearn(subject, concept) {
     const myRun = ++learnRun.current;
     setView("learn");
     setLearnConcept({ subject, concept });
-    setLearnContent(null);
     setLearnError("");
+    setLearnQuestion(null);
+
+    const key = `${subject}::${concept}`;
+    const cached = learnCacheRef.current[key];
+    if (cached) {
+      setLearnContent(cached);
+      setLearnQuestion(cached.tryThisQuestion || null);
+      setLearnBusy(false);
+      return;
+    }
+
+    setLearnContent(null);
     setLearnBusy(true);
     try {
-      const data = await api("/api/learn", { subject, concept, score: scores?.[subject]?.score ?? 0 });
+      const data = await api("/api/learn", { subject, concept });
       if (myRun !== learnRun.current) return; // a newer concept was selected
+      learnCacheRef.current[key] = data; // memo for instant revisits this session
       setLearnContent(data);
+      setLearnQuestion(data.tryThisQuestion || null);
     } catch (e) {
       if (myRun !== learnRun.current) return;
       setLearnError(e.message || "Could not load the concept guide.");
     } finally {
       if (myRun === learnRun.current) setLearnBusy(false);
+    }
+  }
+
+  // Regenerate the "try this" question for the open concept — a fresh, level-
+  // calibrated problem (this DOES call the LLM, only on explicit request) shown
+  // for the session only; the shared cached guide/question is left untouched.
+  async function regenerateLearnQuestion() {
+    if (!learnConcept) return;
+    const { subject, concept } = learnConcept;
+    setLearnError("");
+    setLearnRegen(true);
+    try {
+      const data = await api("/api/generate", {
+        kind: "practice",
+        subject,
+        score: scores?.[subject]?.score ?? 0,
+        weakConcepts: [concept],
+      });
+      if (!data || typeof data.question !== "string" || !data.question.trim()) {
+        throw new Error("Could not generate a question. Please try again.");
+      }
+      setLearnQuestion({ question: data.question, targetConcept: data.targetConcept || concept, difficulty: data.difficulty });
+    } catch (e) {
+      setLearnError(e.message || "Could not regenerate the question.");
+    } finally {
+      setLearnRegen(false);
     }
   }
 
@@ -517,6 +571,24 @@ export default function Noobtopro() {
     } finally {
       setBusy(false);
     }
+  }
+
+  // Enter the practice flow with an ALREADY-KNOWN question (the cached "try this"
+  // problem from a concept guide, or a regenerated one) — no /api/generate call,
+  // so practicing a concept costs zero generation tokens. Grading is unchanged.
+  function startPracticeWithQuestion(subject, questionObj) {
+    if (!questionObj || !questionObj.question) return;
+    setError("");
+    setView("practice");
+    setPSubject(subject);
+    setFeedback(null);
+    setScoreDelta(null);
+    setPText("");
+    revokePreview(pImg);
+    setPImg(null);
+    setBusy(false);
+    setStage("practice");
+    setPQuestion(questionObj); // use the supplied question directly
   }
 
   async function attachP(file) {
@@ -735,7 +807,11 @@ export default function Noobtopro() {
             content={learnContent}
             busy={learnBusy}
             error={learnError}
+            question={learnQuestion}
+            regenerating={learnRegen}
             onSelect={openLearn}
+            onPracticeQuestion={startPracticeWithQuestion}
+            onRegenerate={regenerateLearnQuestion}
             onPractice={(s) => { setView("practice"); startPractice(s); }}
           />
         ) : view === "progress" && scores ? (
