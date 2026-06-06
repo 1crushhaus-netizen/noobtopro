@@ -132,7 +132,7 @@ The sign-in menu is already provider-agnostic and env-toggleable; this is config
 - **Verify:** the "Continue with GitHub/Discord" buttons go from "Coming soon" to live and complete an OAuth round-trip. See [§9](#9-authentication). *(Do the Supabase step before flipping the flag, or the button errors on click.)*
 
 ### Task 3 — Replace the placeholder score model *(core product code)* ✅ **shipped**
-The biggest product win, now done. `blend(prev, suggestion, opts)` in `lib/scoring.js` is a difficulty- and confidence-weighted **Elo-style** update (a step toward an IRT/Elo model): the grader's `newScoreSuggestion` sets the target/direction, and a bounded learning rate `alpha` (anchored at the legacy `0.35`) is scaled by the per-attempt `reasoningScore` (confidence) and an Elo *surprise* term over the question's `difficulty` band. It stays backward-compatible with the legacy 65/35 two-arg call and preserves `clampScore`/null-safety. The validated `difficulty` band is also threaded through `/api/grade` so the grader calibrates `reasoningScore`/`newScoreSuggestion` to the item's level. See [§11](#11-scoring-model). Covered by 17 new tests in `test/scoring.test.js` (103 total, all green).
+The biggest product win, now done. `blend(prev, suggestion, opts)` in `lib/scoring.js` is a difficulty- and confidence-weighted **Elo-style** update (a step toward an IRT/Elo model): the grader's `newScoreSuggestion` sets the target/direction, and a bounded learning rate `alpha` (anchored at the legacy `0.35`) is scaled by the per-attempt `reasoningScore` (confidence) and an Elo *surprise* term over the question's `difficulty` band. It stays backward-compatible with the legacy 65/35 two-arg call and preserves `clampScore`/null-safety. The validated `difficulty` band is also threaded through `/api/grade` so the grader calibrates `reasoningScore`/`newScoreSuggestion` to the item's level. See [§11](#11-scoring-model). Covered by 20 new tests (17 in `test/scoring.test.js` for the weighted blend, 3 in `test/api-grade.test.js` for difficulty-band threading); 103 total, all green.
 - **Follow-ups:** replace fixed band midpoints with per-item difficulty ratings (true IRT/Elo); tune `ELO_SCALE` / the confidence range / the `alpha` cap against logged attempt data.
 
 > Smaller good-first-issues if you want to warm up: surface a "Learn this" shortcut from the practice feedback's "Concept you're missing" card; make the Profile tab's by-subject rows clickable into Learn; add a strict CSP (see §14).
@@ -333,15 +333,15 @@ Components: **SignIn** (provider buttons), **ProfileTab** (identity + stats + co
 
 ## 13. Testing
 
-**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **~83 tests across 10 files**, all passing.
+**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **103 tests across 10 files**, all passing.
 
 | File | Covers |
 |---|---|
-| `test/scoring.test.js` | clampScore/band/blend/totalPoints/phdIndex incl. regressions |
+| `test/scoring.test.js` | clampScore/band/blend (legacy + weighted Elo path)/totalPoints/phdIndex incl. regressions |
 | `test/groq.test.js` | JSON extraction (fences, prose, braces-in-strings), fallback retry, errors |
 | `test/rateLimit.test.js` | window limit, reset, per-key, memory bound (enforceCap) |
 | `test/api-generate.test.js` | validation/400s, prototype-key rejection, non-leaking 500, weakConcepts cap |
-| `test/api-grade.test.js` | validation, MIME/base64, score/rubric normalization, non-leaking 500 |
+| `test/api-grade.test.js` | validation, MIME/base64, score/rubric normalization, difficulty-band threading, non-leaking 500 |
 | `test/api-learn.test.js` | validation, normalization, **cache hit/miss/write-fail/key-normalization** |
 | `test/store.test.js` | migration payload clamping, no-op paths, delete RPC (mocked Supabase) |
 | `test/signin.test.jsx` | provider buttons, OAuth-only (no password field), enabled-provider |
