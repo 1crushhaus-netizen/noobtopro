@@ -489,6 +489,7 @@ export default function Noobtopro() {
     setLearnConcept({ subject, concept });
     setLearnError("");
     setLearnQuestion(null);
+    setLearnRegen(false); // clear any "Generating…" inherited from a prior concept's in-flight regenerate
 
     const key = `${subject}::${concept}`;
     const cached = learnCacheRef.current[key];
@@ -521,6 +522,11 @@ export default function Noobtopro() {
   async function regenerateLearnQuestion() {
     if (!learnConcept) return;
     const { subject, concept } = learnConcept;
+    // Capture the concept's run token (openLearn bumps it on every switch) so a slow
+    // regenerate can't land a stale question on a concept the user has since moved
+    // away from — which would otherwise mis-grade the attempt under the wrong
+    // concept/subject. No increment: regenerate stays on the current concept.
+    const myRun = learnRun.current;
     setLearnError("");
     setLearnRegen(true);
     try {
@@ -530,14 +536,16 @@ export default function Noobtopro() {
         score: scores?.[subject]?.score ?? 0,
         weakConcepts: [concept],
       });
+      if (myRun !== learnRun.current) return; // a newer concept was selected
       if (!data || typeof data.question !== "string" || !data.question.trim()) {
         throw new Error("Could not generate a question. Please try again.");
       }
       setLearnQuestion({ question: data.question, targetConcept: data.targetConcept || concept, difficulty: data.difficulty });
     } catch (e) {
+      if (myRun !== learnRun.current) return; // don't surface a stale error on a newer concept
       setLearnError(e.message || "Could not regenerate the question.");
     } finally {
-      setLearnRegen(false);
+      if (myRun === learnRun.current) setLearnRegen(false);
     }
   }
 
