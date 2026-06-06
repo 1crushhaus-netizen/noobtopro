@@ -189,4 +189,29 @@ describe("POST /api/generate — diagnostic pool", () => {
     expect(json.pooled).toBeUndefined(); // fell through to a fresh generation
     expect(fetchMock).toHaveBeenCalled();
   });
+
+  it("does NOT store an invalid (partial) GENERATED set in the shared pool", async () => {
+    // Cold pool, but the model returns a 2-subject set → must not poison the pool.
+    const fetchMock = mockGroqReturning({ questions: [{ subject: "math", topic: "t", question: "q1" }, { subject: "physics", topic: "t", question: "q2" }] });
+    const admin = fakeAdmin({ count: 0 });
+    adminMock.getAdmin.mockReturnValue(admin);
+    const res = await POST(req({ kind: "diagnostic" }));
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalled();
+    expect(admin.calls.rpcs).toHaveLength(0); // invalid set never written to the pool
+  });
+
+  it("falls through to generation (200, not 500) when the pool read throws", async () => {
+    const fetchMock = mockGroqReturning(VALID_DIAG);
+    adminMock.getAdmin.mockReturnValue({
+      from: () => ({ select: () => { throw new Error("pool unreachable"); } }),
+      rpc: async () => ({ error: null }),
+    });
+    const res = await POST(req({ kind: "diagnostic" }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.questions).toHaveLength(3);
+    expect(json.pooled).toBeUndefined(); // read failed → generated fresh
+    expect(fetchMock).toHaveBeenCalled();
+  });
 });

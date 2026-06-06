@@ -232,7 +232,7 @@ NEXT_PUBLIC_* values are **inlined into the client bundle at build time** (a cha
 | `GROQ_VISION_MODEL` | no | no | Override vision model for photo grading. Default `meta-llama/llama-4-scout-17b-16e-instruct`. |
 | `NEXT_PUBLIC_SUPABASE_URL` | no (public) | For auth/persistence | Supabase API URL. Without it + the anon key, the app runs guest-only. |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | no (public, RLS-protected) | For auth/persistence | Supabase anon key. Public by design; RLS scopes rows to their owner. |
-| `SUPABASE_SERVICE_ROLE_KEY` | **Yes** (mark Sensitive) | no | Enables the shared concept-guide cache in `/api/learn`. Server-only secret (Supabase → Settings → API → `service_role`). Unset = no cache (still works). |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Yes** (mark Sensitive) | no | Enables **both** shared read-through caches — the concept-guide cache (`/api/learn`) **and** the diagnostic pool (`/api/generate`). Server-only secret (Supabase → Settings → API → `service_role`). Unset = neither cache active (both features still work, regenerating each time). |
 | `NEXT_PUBLIC_ENABLE_GITHUB` | no (public) | no | `"true"` shows the GitHub sign-in button. Set **only after** configuring GitHub in Supabase, else it errors on click. |
 | `NEXT_PUBLIC_ENABLE_DISCORD` | no (public) | no | Same, for Discord. |
 
@@ -337,14 +337,14 @@ Components: **SignIn** (provider buttons), **ProfileTab** (identity + stats + co
 
 ## 13. Testing
 
-**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **131 tests across 11 files**, all passing.
+**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **133 tests across 11 files**, all passing.
 
 | File | Covers |
 |---|---|
 | `test/scoring.test.js` | clampScore/band/blend (legacy + weighted Elo path)/totalPoints/phdIndex incl. regressions |
-| `test/groq.test.js` | JSON extraction (fences, prose, braces-in-strings), fallback retry **gating (no retry on hard HTTP errors)**, per-call `max_tokens`, errors |
+| `test/groq.test.js` | JSON extraction (fences, prose, braces-in-strings), fallback retry **gating (no retry on hard HTTP errors)**, per-call `max_tokens`, **grade-model routing (gpt-oss + `reasoning_effort` low)**, errors |
 | `test/rateLimit.test.js` | window limit, reset, per-key, memory bound (enforceCap) |
-| `test/api-generate.test.js` | validation/400s, prototype-key rejection, non-leaking 500, weakConcepts cap |
+| `test/api-generate.test.js` | validation/400s, prototype-key rejection, non-leaking 500, weakConcepts cap, **diagnostic pool (warm-serve / cold self-fill via RPC / invalid-row + invalid-generated guards / read-error fall-through)** |
 | `test/api-grade.test.js` | validation, MIME/base64, score/rubric normalization, difficulty-band threading, non-leaking 500 |
 | `test/api-learn.test.js` | validation, normalization, **cache hit/miss/write-fail/key-normalization** (filter-aware mock), tryThisQuestion shaping |
 | `test/store.test.js` | migration clamping, delete RPC, signed-in load/save/record paths + data-wipe guard, **atomic `saveProgress`** (mocked Supabase) |
