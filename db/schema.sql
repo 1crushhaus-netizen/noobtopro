@@ -92,7 +92,10 @@ begin
          s->>'subject',
          greatest(0, least(100, coalesce(case when pg_input_is_valid(s->>'score', 'numeric') then round((s->>'score')::numeric) end, 0)))::int,
          coalesce(
-           (select array_agg(left(value, 200)) from jsonb_array_elements_text(s->'weak_concepts') as value),
+           (select array_agg(v order by ord)
+              from (select left(value, 200) as v, ord
+                      from jsonb_array_elements_text(s->'weak_concepts') with ordinality as e(value, ord)
+                     order by ord limit 64) sub),
            '{}'::text[]
          ),
          left(coalesce(s->>'comment', ''), 2000),
@@ -109,12 +112,12 @@ begin
   select uid,
          coalesce(a->>'type', 'attempt'),
          a->>'subject',
-         case when pg_input_is_valid(a->>'reasoning_score', 'numeric') then round((a->>'reasoning_score')::numeric)::int end,
-         case when pg_input_is_valid(a->>'delta', 'numeric') then round((a->>'delta')::numeric)::int end,
-         case when pg_input_is_valid(a->>'new_score', 'numeric') then round((a->>'new_score')::numeric)::int end,
-         case when pg_input_is_valid(a->>'total_after', 'numeric') then round((a->>'total_after')::numeric)::int end,
-         case when pg_input_is_valid(a->>'phd_after', 'numeric') then round((a->>'phd_after')::numeric)::int end,
-         coalesce(case when pg_input_is_valid(a->>'created_at', 'timestamptz') then (a->>'created_at')::timestamptz end, now())
+         case when pg_input_is_valid(a->>'reasoning_score', 'numeric') then greatest(-2147483648, least(2147483647, round((a->>'reasoning_score')::numeric)))::int end,
+         case when pg_input_is_valid(a->>'delta', 'numeric') then greatest(-2147483648, least(2147483647, round((a->>'delta')::numeric)))::int end,
+         case when pg_input_is_valid(a->>'new_score', 'numeric') then greatest(-2147483648, least(2147483647, round((a->>'new_score')::numeric)))::int end,
+         case when pg_input_is_valid(a->>'total_after', 'numeric') then greatest(-2147483648, least(2147483647, round((a->>'total_after')::numeric)))::int end,
+         case when pg_input_is_valid(a->>'phd_after', 'numeric') then greatest(-2147483648, least(2147483647, round((a->>'phd_after')::numeric)))::int end,
+         least(coalesce(case when pg_input_is_valid(a->>'created_at', 'timestamptz') then (a->>'created_at')::timestamptz end, now()), now())
   from jsonb_array_elements(coalesce(p_attempts, '[]'::jsonb)) as a
   where (a->>'subject' is null or a->>'subject' in ('math', 'physics', 'chemistry'))
     and coalesce(a->>'type', 'attempt') in ('baseline', 'attempt');
@@ -183,7 +186,10 @@ begin
          s->>'subject',
          greatest(0, least(100, coalesce(case when pg_input_is_valid(s->>'score', 'numeric') then round((s->>'score')::numeric) end, 0)))::int,
          coalesce(
-           (select array_agg(left(value, 200)) from jsonb_array_elements_text(s->'weak_concepts') as value),
+           (select array_agg(v order by ord)
+              from (select left(value, 200) as v, ord
+                      from jsonb_array_elements_text(s->'weak_concepts') with ordinality as e(value, ord)
+                     order by ord limit 64) sub),
            '{}'::text[]
          ),
          left(coalesce(s->>'comment', ''), 2000),
@@ -212,12 +218,12 @@ begin
     values (uid,
             coalesce(p_attempt->>'type', 'attempt'),
             p_attempt->>'subject',
-            case when pg_input_is_valid(p_attempt->>'reasoning_score', 'numeric') then round((p_attempt->>'reasoning_score')::numeric)::int end,
-            case when pg_input_is_valid(p_attempt->>'delta', 'numeric') then round((p_attempt->>'delta')::numeric)::int end,
-            case when pg_input_is_valid(p_attempt->>'new_score', 'numeric') then round((p_attempt->>'new_score')::numeric)::int end,
-            case when pg_input_is_valid(p_attempt->>'total_after', 'numeric') then round((p_attempt->>'total_after')::numeric)::int end,
-            case when pg_input_is_valid(p_attempt->>'phd_after', 'numeric') then round((p_attempt->>'phd_after')::numeric)::int end,
-            coalesce(case when pg_input_is_valid(p_attempt->>'created_at', 'timestamptz') then (p_attempt->>'created_at')::timestamptz end, now()));
+            case when pg_input_is_valid(p_attempt->>'reasoning_score', 'numeric') then greatest(-2147483648, least(2147483647, round((p_attempt->>'reasoning_score')::numeric)))::int end,
+            case when pg_input_is_valid(p_attempt->>'delta', 'numeric') then greatest(-2147483648, least(2147483647, round((p_attempt->>'delta')::numeric)))::int end,
+            case when pg_input_is_valid(p_attempt->>'new_score', 'numeric') then greatest(-2147483648, least(2147483647, round((p_attempt->>'new_score')::numeric)))::int end,
+            case when pg_input_is_valid(p_attempt->>'total_after', 'numeric') then greatest(-2147483648, least(2147483647, round((p_attempt->>'total_after')::numeric)))::int end,
+            case when pg_input_is_valid(p_attempt->>'phd_after', 'numeric') then greatest(-2147483648, least(2147483647, round((p_attempt->>'phd_after')::numeric)))::int end,
+            least(coalesce(case when pg_input_is_valid(p_attempt->>'created_at', 'timestamptz') then (p_attempt->>'created_at')::timestamptz end, now()), now()));
   end if;
 end;
 $$;
@@ -225,24 +231,174 @@ $$;
 revoke all on function public.save_progress(jsonb, jsonb) from public, anon;
 grant execute on function public.save_progress(jsonb, jsonb) to authenticated;
 
--- ---- shared concept-guide cache --------------------------------------------
--- /api/learn generates a Socratic guide per concept ONCE, then reuses it for
--- every account (standardized + saves Groq calls). This table is INTERNAL:
--- RLS is enabled with NO policies, so no end user (anon or authenticated) can
--- read or write it. The API route accesses it server-side with the
--- SUPABASE_SERVICE_ROLE_KEY (which bypasses RLS). If that key is unset, caching
--- is simply skipped — the app still works, generating a guide each time.
+-- ---- concept hub: taxonomy reference + guide catalog ------------------------
+-- The Learn tab is a UNIVERSAL, browsable concept hub. concept_guides is the
+-- catalog: each guide is generated ONCE by Groq and reused for every account.
+-- It is PUBLICLY READABLE (read-only) so the browser can browse/search it via
+-- PostgREST with no Groq call; all WRITES stay service-role-only (no write
+-- policy -> only the admin client, which bypasses RLS, can write). The public
+-- read policy is intentionally scoped to visibility='public' AND status='ready'
+-- so pending stubs and hidden/moderated rows never leak.
+--
+-- IMPORTANT: this table is now a public object. NEVER add a PII / per-user
+-- column here (the public SELECT exposes every column) — keep such data in the
+-- RLS-scoped scores/attempts tables instead.
+
+-- concept_topics: the curated, fixed Subject->Topic taxonomy (mirrors
+-- lib/taxonomy.js). Public-readable so the hub renders labels/ordering.
+create table if not exists public.concept_topics (
+  subject text not null check (subject in ('math','physics','chemistry')),
+  slug    text not null,                  -- stable/immutable identifier (in URLs + FK)
+  label   text not null,                  -- display name
+  sort    smallint not null default 0,
+  primary key (subject, slug)
+);
+alter table public.concept_topics enable row level security;
+drop policy if exists "concept topics are public" on public.concept_topics;
+create policy "concept topics are public"
+  on public.concept_topics for select to anon, authenticated using (true);
+-- Seed the 36 topics (3 subjects x 12, incl. a general_<subject> fallback). Keep
+-- in sync with lib/taxonomy.js TOPICS.
+insert into public.concept_topics (subject, slug, label, sort) values
+  ('math','arithmetic_number','Arithmetic & Number Theory',0),
+  ('math','algebra','Algebra',1),
+  ('math','functions_precalc','Functions & Precalculus',2),
+  ('math','geometry','Geometry',3),
+  ('math','trigonometry','Trigonometry',4),
+  ('math','calculus_analysis','Calculus & Analysis',5),
+  ('math','linear_algebra','Linear Algebra',6),
+  ('math','differential_equations','Differential Equations',7),
+  ('math','probability_statistics','Probability & Statistics',8),
+  ('math','discrete_logic','Discrete Math & Logic',9),
+  ('math','proof_reasoning','Proof & Mathematical Reasoning',10),
+  ('math','general_math','General / Other',11),
+  ('physics','kinematics_dynamics','Kinematics & Dynamics',0),
+  ('physics','energy_momentum','Energy & Momentum',1),
+  ('physics','gravitation_orbits','Gravitation & Orbits',2),
+  ('physics','oscillations_waves','Oscillations & Waves',3),
+  ('physics','fluids_continuum','Fluids & Continuum Mechanics',4),
+  ('physics','thermodynamics_statmech','Thermodynamics & Statistical Mechanics',5),
+  ('physics','electromagnetism','Electricity & Magnetism',6),
+  ('physics','optics','Optics',7),
+  ('physics','modern_quantum','Modern & Quantum Physics',8),
+  ('physics','relativity','Relativity',9),
+  ('physics','nuclear_particle','Nuclear & Particle Physics',10),
+  ('physics','general_physics','General / Other',11),
+  ('chemistry','atomic_structure','Atomic Structure & Periodicity',0),
+  ('chemistry','bonding_molecular','Bonding & Molecular Structure',1),
+  ('chemistry','stoichiometry','Stoichiometry & Reactions',2),
+  ('chemistry','states_intermolecular','States of Matter & Intermolecular Forces',3),
+  ('chemistry','thermochemistry','Thermochemistry & Energetics',4),
+  ('chemistry','equilibrium','Equilibrium',5),
+  ('chemistry','acids_bases','Acids, Bases & Salts',6),
+  ('chemistry','kinetics','Reaction Kinetics',7),
+  ('chemistry','electrochemistry','Electrochemistry',8),
+  ('chemistry','organic','Organic Chemistry',9),
+  ('chemistry','analytical_spectroscopy','Analytical Chemistry & Spectroscopy',10),
+  ('chemistry','general_chemistry','General / Other',11)
+on conflict (subject, slug) do update set label = excluded.label, sort = excluded.sort;
+
 create table if not exists public.concept_guides (
   subject text not null check (subject in ('math','physics','chemistry')),
-  concept_key text not null,             -- normalized: lower(trim(collapse ws))
+  concept_key text not null,             -- normalized key (see _concept_key / conceptKey)
   concept text not null,                 -- canonical display phrasing
-  content jsonb not null,                -- the full normalized guide
+  topic text not null default 'general_math',  -- FK below; set per-row by app/backfill
+  content jsonb,                         -- the full normalized guide; NULL for a 'pending' stub
+  status text not null default 'pending' check (status in ('ready','pending')),
+  visibility text not null default 'public' check (visibility in ('public','hidden')),
+  source text not null default 'curated' check (source in ('grader','curated','user')),
+  level_band text check (level_band is null or level_band in ('beginner','foundational','intermediate','advanced','phd')),
+  times_opened bigint not null default 0,
   created_at timestamptz not null default now(),
-  primary key (subject, concept_key)
+  updated_at timestamptz not null default now(),
+  primary key (subject, concept_key),
+  -- ready <=> content present; pending <=> content null
+  constraint concept_guides_content_status_chk
+    check ((status='ready' and content is not null) or (status='pending' and content is null)),
+  foreign key (subject, topic) references public.concept_topics(subject, slug)
 );
 alter table public.concept_guides enable row level security;
--- (No policies on purpose — service-role-only access. Writes use first-writer-
--- wins: insert ... on conflict do nothing, so a guide is generated once and frozen.)
+-- Public read of ONLY vetted, ready guides; writes remain service-role-only.
+drop policy if exists "public read ready guides" on public.concept_guides;
+create policy "public read ready guides"
+  on public.concept_guides for select to anon, authenticated
+  using (visibility = 'public' and status = 'ready');
+
+-- Byte-for-byte parity with conceptKey() in lib/supabaseAdmin.js, verified on the
+-- live DB against the JS golden vectors (test/conceptKey.test.js). Steps:
+--   1. strip control/format chars (C0, DEL+C1, zero-width, BOM) — the chars where
+--      JS \s / String.trim() and Postgres \s disagree — so the two cannot diverge;
+--   2. trim -> lower -> strip leading/trailing quote runs -> collapse whitespace;
+--   3. left(...,200) truncates by CHARACTER, matching JS Array.from(s).slice(0,200).
+-- A drift would leave grader-registered keys that generation never lands on.
+create or replace function public._concept_key(p text)
+returns text language sql immutable set search_path = '' as $$
+  select left(
+           regexp_replace(
+             regexp_replace(
+               lower(regexp_replace(
+                 regexp_replace(coalesce(p, ''), '[\x00-\x1F\x7F-\x9F\x200b-\x200d\xfeff]', '', 'g'),
+                 '^\s+|\s+$', '', 'g'
+               )),
+               '^["''`]+|["''`]+$', '', 'g'
+             ),
+             '\s+', ' ', 'g'
+           ),
+           200
+         );
+$$;
+
+-- Auto-grow: register grader-recommended weak concepts as PENDING stubs (hidden
+-- from the public hub until generated). service-role only; never disturbs an
+-- existing pending/ready row.
+create or replace function public.register_concepts(p_subject text, p_concepts jsonb)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if p_subject not in ('math','physics','chemistry') then return; end if;
+  -- Best-effort global cap on auto-grown PENDING stubs so steered grader traffic
+  -- can't grow concept_guides without bound (no TTL/cleanup yet); curated/ready rows
+  -- are unaffected. A small overshoot under concurrency is fine for this P3 guard.
+  if (select count(*) from public.concept_guides where status = 'pending') >= 50000 then return; end if;
+  insert into public.concept_guides (subject, concept_key, concept, topic, status, content, visibility, source)
+  select p_subject, _concept_key(val), left(val, 200), 'general_' || p_subject, 'pending', null, 'public', 'grader'
+  from jsonb_array_elements_text(coalesce(p_concepts, '[]'::jsonb)) as val
+  where coalesce(btrim(val), '') <> '' and _concept_key(val) <> ''
+  on conflict (subject, concept_key) do nothing;
+end;
+$$;
+revoke all on function public.register_concepts(text, jsonb) from public, anon, authenticated;
+grant execute on function public.register_concepts(text, jsonb) to service_role;
+
+-- On a /api/learn generation: promote a pending stub to ready, or insert a fresh
+-- user-originated guide. CURATION-ONLY MODEL (security): auto-grown guides are
+-- ALWAYS stored visibility='hidden' — they are cached + servable to a direct opener
+-- but are NEVER publicly browsable. Only curated rows (the seed / explicit approval,
+-- source='curated', visibility='public') reach the public hub, so attacker-influenced
+-- concept labels/content can never be broadcast to all users via the public read
+-- policy. `p_safe` is retained for compatibility but no longer grants public
+-- visibility. Never overwrites an existing ready guide (first-writer-wins).
+create or replace function public.promote_or_insert_guide(
+  p_subject text, p_concept text, p_content jsonb, p_topic text, p_level text, p_safe boolean
+) returns void language plpgsql security definer set search_path = public as $$
+declare
+  k  text := _concept_key(p_concept);
+  t  text := case when exists (select 1 from public.concept_topics where subject = p_subject and slug = p_topic)
+                  then p_topic else 'general_' || p_subject end;
+  lv text := case when p_level in ('beginner','foundational','intermediate','advanced','phd') then p_level else null end;
+begin
+  if p_subject not in ('math','physics','chemistry') or k = '' or p_content is null then return; end if;
+  update public.concept_guides
+     set content = p_content, topic = t, level_band = lv, status = 'ready',
+         visibility = 'hidden', updated_at = now()
+   where subject = p_subject and concept_key = k and status = 'pending';
+  if found then return; end if;
+  insert into public.concept_guides (subject, concept_key, concept, content, topic, level_band, status, source, visibility)
+  values (p_subject, k, left(p_concept, 200), p_content, t, lv, 'ready', 'user', 'hidden')
+  on conflict (subject, concept_key) do nothing;
+end;
+$$;
+revoke all on function public.promote_or_insert_guide(text, text, jsonb, text, text, boolean) from public, anon, authenticated;
+grant execute on function public.promote_or_insert_guide(text, text, jsonb, text, text, boolean) to service_role;
 
 -- ---- shared diagnostic pool ------------------------------------------------
 -- The diagnostic is a static, level-neutral baseline (no per-user input), so it

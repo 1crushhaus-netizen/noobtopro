@@ -190,6 +190,45 @@ describe("signed-in data layer (Supabase paths)", () => {
   });
 });
 
+describe("loadState (guest blob sanitization)", () => {
+  it("clamps a corrupt guest blob: weakConcepts-as-string -> [], garbage/out-of-range score -> clamped", async () => {
+    // A structurally-valid-but-wrong-typed blob must NOT flow into React state
+    // verbatim — a string weakConcepts would crash rendering (.slice/.filter/.map),
+    // and a garbage/out-of-range score must degrade safely.
+    mocks.session = guest;
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        scores: {
+          math: { score: "wat", weakConcepts: "vectors", comment: "x" }, // string wc, garbage score
+          physics: { score: 150, weakConcepts: ["a", 5, "b", null], comment: 42 }, // over-range, mixed wc, non-string comment
+          chemistry: "bogus", // non-object subject -> dropped
+        },
+        history: "nope", // non-array -> []
+      })
+    );
+    const st = await loadState();
+    expect(st.scores.math).toEqual({ score: 0, weakConcepts: [], comment: "x" }); // "wat" -> 0, "vectors" -> []
+    expect(st.scores.physics).toEqual({ score: 100, weakConcepts: ["a", "b"], comment: "" }); // 150 -> 100, non-strings dropped, bad comment -> ""
+    expect(st.scores.chemistry).toBeUndefined(); // non-object subject dropped
+    expect(st.history).toEqual([]); // non-array history -> []
+  });
+
+  it("caps a corrupt guest blob's weakConcepts to <=64 on read", async () => {
+    mocks.session = guest;
+    const wc = Array.from({ length: 100 }, (_, i) => `c${i}`);
+    window.localStorage.setItem(KEY, JSON.stringify({ scores: { math: { score: 50, weakConcepts: wc, comment: "" } }, history: [] }));
+    const st = await loadState();
+    expect(st.scores.math.weakConcepts).toHaveLength(64);
+  });
+
+  it("returns a safe empty shape when the guest blob is null", async () => {
+    mocks.session = guest;
+    const st = await loadState();
+    expect(st).toEqual({ scores: null, history: [] });
+  });
+});
+
 describe("saveProgress (atomic score + attempt write)", () => {
   const scores = { math: { score: 62, weakConcepts: ["x"], comment: "c" } };
   const evt = { type: "attempt", t: "t1", subject: "math", reasoningScore: 70, delta: 2, newScore: 62, totalAfter: 62, phdAfter: 21 };
@@ -203,6 +242,15 @@ describe("saveProgress (atomic score + attempt write)", () => {
     expect(args.p_scores).toEqual([{ subject: "math", score: 62, weak_concepts: ["x"], comment: "c" }]);
     expect(args.p_attempt).toMatchObject({ type: "attempt", subject: "math", reasoning_score: 70, new_score: 62, created_at: "t1" });
     expect(res.history[0]).toMatchObject({ type: "attempt", newScore: 62, reasoningScore: 70 });
+  });
+
+  it("signed-in: caps weak_concepts to <=64 elements in the save_progress payload (client-side defense)", async () => {
+    const wc = Array.from({ length: 100 }, (_, i) => `c${i}`);
+    mocks.db = { attemptsSelect: { data: [], error: null } };
+    await saveProgress({ math: { score: 62, weakConcepts: wc, comment: "c" } }, evt);
+    const [, args] = mocks.rpc.mock.calls[0];
+    expect(args.p_scores[0].weak_concepts).toHaveLength(64);
+    expect(args.p_scores[0].weak_concepts[0]).toBe("c0"); // kept the leading slice
   });
 
   it("signed-in: throws when the RPC fails and does NOT fall back to a separate score write (atomicity)", async () => {

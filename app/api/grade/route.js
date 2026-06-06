@@ -1,9 +1,33 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { groqJSON, DIAG_GRADE_SYS, PRACTICE_GRADE_SYS } from "@/lib/groq";
 import { clampScore, ORDER } from "@/lib/scoring";
 import { rateLimit, clientKey } from "@/lib/rateLimit";
+import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const dynamic = "force-dynamic";
+
+// Auto-grow the concept hub: register the grader's (server-normalized, capped)
+// weak concepts as PENDING catalog stubs, AFTER the response so grading latency
+// is untouched. Runs only when the service-role key is set; falls back to
+// fire-and-forget outside a request scope (e.g. unit tests) so it never throws
+// into the grade path.
+function registerWeakConcepts(subject, weakConcepts) {
+  if (!ORDER.includes(subject) || !Array.isArray(weakConcepts) || weakConcepts.length === 0) return;
+  const task = async () => {
+    try {
+      const sb = getSupabaseAdmin();
+      if (sb) await sb.rpc("register_concepts", { p_subject: subject, p_concepts: weakConcepts });
+    } catch (e) {
+      console.error("[/api/grade] register_concepts", e); // best-effort; self-heals next grade
+    }
+  };
+  try {
+    after(task);
+  } catch {
+    void task();
+  }
+}
 
 // Cap the base64 image at ~3 MB decoded. Kept under Vercel's ~4.5 MB request
 // body limit so this check is actually reachable (the platform would otherwise
@@ -21,6 +45,30 @@ const capText = (s) => (typeof s === "string" ? s.slice(0, MAX_TEXT_CHARS) : "")
 // Image formats the Groq vision model accepts. Anything else is rejected so an
 // arbitrary MIME string can never reach the upstream call.
 const ALLOWED_IMAGE_MIME = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+
+// Sniff the real image type from the decoded leading bytes (magic numbers), so a
+// client cannot pass arbitrary bytes under a forged MIME. Returns the detected MIME
+// or null if it is not a supported image. Decodes only a short prefix (cheap).
+function sniffImageMime(b64) {
+  let buf;
+  try {
+    buf = Buffer.from(b64.slice(0, 32), "base64");
+  } catch {
+    return null;
+  }
+  if (buf.length < 4) return null;
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return "image/png";
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x38) return "image/gif"; // GIF8
+  if (
+    buf.length >= 12 &&
+    buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 && // RIFF
+    buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50 // WEBP
+  ) {
+    return "image/webp";
+  }
+  return null;
+}
 
 // The five rubric dimensions the practice grader scores 0–4 each.
 const RUBRIC_KEYS = [
@@ -62,13 +110,22 @@ function normalizeImage(image) {
   if (!BASE64_RE.test(image.data)) {
     return { ok: false, error: "Attached image is not valid base64 data." };
   }
-  // A missing mime is fine (the Groq client defaults it); a present one must be
-  // on the allowlist so an arbitrary string never reaches the upstream call.
+  // A present mime must be on the allowlist...
   const { mime } = image;
   if (mime != null && !ALLOWED_IMAGE_MIME.has(mime)) {
     return { ok: false, error: "Unsupported image type. Use JPEG, PNG, WebP, or GIF." };
   }
-  return { ok: true, image: { mime: mime || undefined, data: image.data } };
+  // ...and the actual bytes must be a real image whose signature matches the
+  // declared mime (defeats arbitrary-bytes / forged-MIME payloads to the vision
+  // model). The DETECTED mime is what we forward upstream.
+  const detected = sniffImageMime(image.data);
+  if (!detected) {
+    return { ok: false, error: "Attached file is not a supported image (JPEG, PNG, WebP, or GIF)." };
+  }
+  if (mime != null && mime !== detected) {
+    return { ok: false, error: "Image contents do not match the declared type." };
+  }
+  return { ok: true, image: { mime: detected, data: image.data } };
 }
 
 // Clamp each rubric dimension to an integer in [0, 4]; default missing ones to 0.
@@ -89,6 +146,13 @@ function normalizeWeakConcepts(arr) {
 }
 
 export async function POST(req) {
+  if (isCrossSiteRequest(req)) {
+    return NextResponse.json({ error: "Cross-site requests are not allowed." }, { status: 403 });
+  }
+  if (isWrongContentType(req)) {
+    return NextResponse.json({ error: "Content-Type must be application/json." }, { status: 415 });
+  }
+
   const rl = rateLimit(clientKey(req));
   if (!rl.ok) {
     return NextResponse.json(
@@ -105,7 +169,9 @@ export async function POST(req) {
   }
 
   const { kind, subject, question, targetConcept, score, reasoning, image, difficulty } = body || {};
-  const work = reasoning && reasoning.trim() ? capText(reasoning.trim()) : "(no written reasoning provided)";
+  // typeof guard: a non-string `reasoning` (object/number) would throw on .trim()
+  // before validation and 500 the route.
+  const work = typeof reasoning === "string" && reasoning.trim() ? capText(reasoning.trim()) : "(no written reasoning provided)";
   const safeQuestion = capText(question);
   const safeConcept = capText(targetConcept) || "(unspecified)";
   const safeDifficulty = normalizeDifficulty(difficulty);
@@ -131,6 +197,19 @@ export async function POST(req) {
   const img = normalizeImage(image);
   if (!img.ok) return NextResponse.json({ error: img.error }, { status: 400 });
 
+  // Image (vision-model) grades are far more expensive than text grades — a single
+  // request can fan out to multiple multimodal calls each carrying ~3 MB. Apply a
+  // separate, stricter per-IP budget on top of the general limit.
+  if (img.image) {
+    const imgRl = rateLimit(`${clientKey(req)}:img`, { max: 10 });
+    if (!imgRl.ok) {
+      return NextResponse.json(
+        { error: "Too many image grades. Please slow down and try again shortly." },
+        { status: 429, headers: { "Retry-After": String(imgRl.retryAfter) } }
+      );
+    }
+  }
+
   try {
     if (kind === "diagnostic") {
       const data = await groqJSON({
@@ -141,10 +220,12 @@ export async function POST(req) {
       });
       // Clamp the model's score before it reaches the client/UI.
       const clamped = clampScore(data?.score);
+      const weakConcepts = normalizeWeakConcepts(data?.weakConcepts);
+      registerWeakConcepts(subject, weakConcepts); // auto-grow the hub (non-blocking)
       return NextResponse.json({
         ...data,
         score: clamped ?? 0,
-        weakConcepts: normalizeWeakConcepts(data?.weakConcepts),
+        weakConcepts,
       });
     }
 
@@ -165,12 +246,14 @@ export async function POST(req) {
     // Normalize every score the UI renders so malformed model output can't show
     // NaN or out-of-range values. reasoningScore -> /100 display; rubric -> 0–4
     // bars; newScoreSuggestion -> blend() (null is handled there as "no change").
+    const weakConcepts = normalizeWeakConcepts(data?.weakConcepts);
+    registerWeakConcepts(subject, weakConcepts); // auto-grow the hub (non-blocking)
     return NextResponse.json({
       ...data,
       reasoningScore: clampScore(data?.reasoningScore) ?? 0,
       newScoreSuggestion: clampScore(data?.newScoreSuggestion),
       rubric: normalizeRubric(data?.rubric),
-      weakConcepts: normalizeWeakConcepts(data?.weakConcepts),
+      weakConcepts,
     });
   } catch (e) {
     // Log server-side; return a generic message so upstream Groq status/body

@@ -297,4 +297,50 @@ describe("totalPoints / phdIndex", () => {
     expect(totalPoints({ math: { score: 50 } })).toBe(50);
     expect(ORDER).toEqual(["math", "physics", "chemistry"]);
   });
+
+  it("coerces a numeric-string subject score to a number (no string concat)", () => {
+    // Regression: a hand-edited guest localStorage blob can carry a string score;
+    // "60" + 30 + 10 would string-concatenate without clampScore coercion.
+    const v = totalPoints({
+      math: { score: "60" },
+      physics: { score: 30 },
+      chemistry: { score: 10 },
+    });
+    expect(v).toBe(100);
+    expect(typeof v).toBe("number");
+  });
+
+  it("clamps out-of-range subject scores into [0, 100] before summing", () => {
+    // -50 -> 0, 250 -> 100, 50 stays 50 => 150.
+    expect(
+      totalPoints({
+        math: { score: -50 },
+        physics: { score: 250 },
+        chemistry: { score: 50 },
+      })
+    ).toBe(150);
+  });
+
+  it("treats a NaN/undefined subject score as 0", () => {
+    expect(
+      totalPoints({
+        math: { score: NaN },
+        physics: { score: undefined },
+        chemistry: { score: 40 },
+      })
+    ).toBe(40);
+  });
+
+  it("phdIndex stays a clean integer in [0, 100] for malformed inputs", () => {
+    const v = phdIndex({
+      math: { score: "60" },
+      physics: { score: 250 },
+      chemistry: { score: -10 },
+    });
+    // (60 + 100 + 0) / 3 = 53.33 -> 53.
+    expect(v).toBe(53);
+    expect(Number.isInteger(v)).toBe(true);
+    expect(v).toBeGreaterThanOrEqual(0);
+    expect(v).toBeLessThanOrEqual(100);
+  });
 });

@@ -22,7 +22,9 @@ const store = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/store", () => store);
 
-const supa = vi.hoisted(() => ({ user: null }));
+// `supa.authCb` captures the onAuthStateChange listener so a test can fire a
+// SIGNED_OUT event and assert the component's reaction.
+const supa = vi.hoisted(() => ({ user: null, authCb: null }));
 vi.mock("@/lib/supabase", () => ({
   isSupabaseConfigured: true,
   getSupabase: () =>
@@ -31,7 +33,10 @@ vi.mock("@/lib/supabase", () => ({
           auth: {
             getUser: async () => ({ data: { user: supa.user } }),
             getSession: async () => ({ data: { session: { user: supa.user } } }),
-            onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
+            onAuthStateChange: (cb) => {
+              supa.authCb = cb;
+              return { data: { subscription: { unsubscribe() {} } } };
+            },
             signOut: async () => {},
           },
         }
@@ -51,6 +56,7 @@ beforeEach(() => {
   store.resetAll.mockResolvedValue(undefined);
   store.migrateGuestToAccount.mockResolvedValue({ migrated: false });
   store.deleteAllUserData.mockResolvedValue({ ok: true });
+  supa.authCb = null;
 });
 afterEach(() => {
   cleanup();
@@ -104,6 +110,36 @@ describe("Restart logo (reset)", () => {
 
     // Local session cleared and returned to the intro; the dashboard is gone.
     expect(store.resetAll).toHaveBeenCalled();
+    expect(screen.queryByText("Where you stand")).toBe(null);
+  });
+});
+
+describe("Sign-out (shared-device safety)", () => {
+  it("clears the prior user's in-memory scores synchronously, before the async re-hydrate", async () => {
+    supa.user = USER;
+    render(<Noobtopro />);
+
+    // Signed-in mount hydrates the account's scores → dashboard.
+    await screen.findByText("Where you stand");
+
+    // The next person on the device signs out. Make the post-sign-out re-hydrate
+    // resolve to NO data, but DELAY it — so if the synchronous in-memory clear were
+    // missing, "Where you stand" (gated on scores && stage==="dashboard") would still
+    // be on screen during this gap. Firing SIGNED_OUT must blank scores immediately.
+    let releaseHydrate;
+    store.loadState.mockReturnValueOnce(new Promise((res) => { releaseHydrate = res; }));
+
+    await act(async () => {
+      supa.authCb && supa.authCb("SIGNED_OUT", null);
+    });
+
+    // The dashboard is gone even though the re-hydrate hasn't resolved yet: scores
+    // were dropped from memory synchronously (stage also reset to "intro").
+    expect(screen.queryByText("Where you stand")).toBe(null);
+
+    // Let the (empty) re-hydrate settle; still no stale dashboard.
+    await act(async () => { releaseHydrate({ scores: null, history: [] }); });
+    await flush();
     expect(screen.queryByText("Where you stand")).toBe(null);
   });
 });

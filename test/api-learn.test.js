@@ -11,12 +11,15 @@ vi.mock("@/lib/supabaseAdmin", async (importActual) => {
 });
 
 // Build a fake admin client matching the route's from().select().eq().eq()
-// .maybeSingle() reads and from().upsert() writes. Captures the table + filters
-// so a column/value regression on the cache-read path is catchable.
-function fakeAdmin({ hitContent = null, onUpsert, upsertThrows, expectSubject = null, expectKey = null } = {}) {
+// .maybeSingle() reads and its rpc("promote_or_insert_guide", ...) write. Captures
+// the table + filters so a column/value regression on the cache-read path is
+// catchable, and the last rpc call so the write payload can be asserted.
+function fakeAdmin({ hitContent = null, onRpc, rpcThrows, expectSubject = null, expectKey = null } = {}) {
   const filters = {};
+  const calls = { rpc: null };
   const client = {
     filters,
+    calls,
     from: (table) => {
       filters.table = table;
       return {
@@ -42,12 +45,13 @@ function fakeAdmin({ hitContent = null, onUpsert, upsertThrows, expectSubject = 
             };
           },
         }),
-        upsert: async (row) => {
-          if (upsertThrows) throw new Error("write blew up");
-          onUpsert?.(row);
-          return { error: null };
-        },
       };
+    },
+    rpc: async (fn, args) => {
+      calls.rpc = { fn, args };
+      if (rpcThrows) throw new Error("write blew up");
+      onRpc?.(fn, args);
+      return { error: null };
     },
   };
   return client;
@@ -83,6 +87,42 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+describe("POST /api/learn — request guard (CSRF / content-type)", () => {
+  const raw = (headers) =>
+    new Request("http://test.local/api/learn", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ subject: "math", concept: "limits" }),
+    });
+
+  it("blocks a forced cross-site request with 403 (no Groq call)", async () => {
+    const failFetch = vi.fn(() => { throw new Error("must not call Groq on a blocked request"); });
+    vi.stubGlobal("fetch", failFetch);
+    const admin = fakeAdmin({ hitContent: null });
+    mocks.getAdmin.mockReturnValue(admin);
+    const res = await POST(raw({ "Content-Type": "application/json", "Sec-Fetch-Site": "cross-site" }));
+    expect(res.status).toBe(403);
+    expect(failFetch).not.toHaveBeenCalled();
+    expect(admin.calls.rpc).toBe(null); // no RPC issued
+  });
+
+  it("rejects a non-JSON content-type with 415 (no Groq call)", async () => {
+    const failFetch = vi.fn(() => { throw new Error("must not call Groq on a blocked request"); });
+    vi.stubGlobal("fetch", failFetch);
+    const res = await POST(raw({ "Content-Type": "text/plain" }));
+    expect(res.status).toBe(415);
+    expect(failFetch).not.toHaveBeenCalled();
+  });
+
+  it("allows a same-origin JSON request through to normal handling", async () => {
+    mockGroqReturning({ overview: "guarded but allowed", keyIdeas: [], socraticQuestions: [], pitfalls: [], tryThis: "" });
+    const res = await POST(raw({ "Content-Type": "application/json", "Sec-Fetch-Site": "same-origin" }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.overview).toBe("guarded but allowed");
+  });
 });
 
 describe("POST /api/learn — validation", () => {
@@ -220,21 +260,48 @@ describe("POST /api/learn — shared cache", () => {
     expect(admin.filters.concept_key).toBe("limits"); // quotes stripped by real conceptKey
   });
 
-  it("on a miss, generates with Groq and writes the guide to the cache", async () => {
-    let written = null;
-    mocks.getAdmin.mockReturnValue(fakeAdmin({ hitContent: null, onUpsert: (row) => { written = row; } }));
-    mockGroqReturning({ overview: "fresh", keyIdeas: ["x"], socraticQuestions: ["q"], pitfalls: [], tryThis: "t" });
+  it("on a miss, generates with Groq and writes via promote_or_insert_guide", async () => {
+    const admin = fakeAdmin({ hitContent: null });
+    mocks.getAdmin.mockReturnValue(admin);
+    mockGroqReturning({ topic: "energy_momentum", overview: "fresh", keyIdeas: ["x"], socraticQuestions: ["q"], pitfalls: [], tryThis: "t" });
 
     const res = await POST(req({ subject: "physics", concept: "energy", score: 10 }));
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.cached).toBe(false);
     expect(json.overview).toBe("fresh");
-    // wrote to the shared cache
-    expect(written).toBeTruthy();
-    expect(written.subject).toBe("physics");
-    expect(written.concept_key).toBe("energy");
-    expect(written.content.overview).toBe("fresh");
+    // wrote to the shared cache via the promotion RPC
+    expect(admin.calls.rpc).toBeTruthy();
+    expect(admin.calls.rpc.fn).toBe("promote_or_insert_guide");
+    expect(admin.calls.rpc.args.p_subject).toBe("physics");
+    expect(admin.calls.rpc.args.p_concept).toBe("energy");
+    expect(admin.calls.rpc.args.p_content.overview).toBe("fresh");
+    expect(admin.calls.rpc.args.p_topic).toBe("energy_momentum"); // valid LLM topic kept
+    // p_safe is sent for backward-compat, but promote_or_insert_guide always stores
+    // the guide visibility='hidden' (curation-only) — only manually-curated rows are
+    // ever public. See db/schema.sql promote_or_insert_guide.
+    expect(admin.calls.rpc.args.p_safe).toBe(true);
+  });
+
+  it("coerces an out-of-taxonomy LLM topic to general_<subject>", async () => {
+    const admin = fakeAdmin({ hitContent: null });
+    mocks.getAdmin.mockReturnValue(admin);
+    mockGroqReturning({ topic: "not_a_real_topic", overview: "x", keyIdeas: [], socraticQuestions: [], pitfalls: [], tryThis: "" });
+    const res = await POST(req({ subject: "math", concept: "some new concept" }));
+    const json = await res.json();
+    expect(json.topic).toBe("general_math");
+    expect(admin.calls.rpc.args.p_topic).toBe("general_math");
+  });
+
+  it("does NOT persist an unsafe concept to the shared cache, but still returns the guide to the opener", async () => {
+    const admin = fakeAdmin({ hitContent: null });
+    mocks.getAdmin.mockReturnValue(admin);
+    mockGroqReturning({ topic: "algebra", overview: "x", keyIdeas: [], socraticQuestions: [], pitfalls: [], tryThis: "" });
+    const res = await POST(req({ subject: "math", concept: "buy cheap stuff at evil.com" }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.overview).toBe("x"); // opener still gets the guide (ephemeral)
+    expect(admin.calls.rpc).toBe(null); // never written -> can't be served to anyone else
   });
 
   it("re-normalizes a malformed cached row before serving it", async () => {
@@ -254,7 +321,7 @@ describe("POST /api/learn — shared cache", () => {
   });
 
   it("still returns the guide if the cache write fails", async () => {
-    mocks.getAdmin.mockReturnValue(fakeAdmin({ hitContent: null, upsertThrows: true }));
+    mocks.getAdmin.mockReturnValue(fakeAdmin({ hitContent: null, rpcThrows: true }));
     mockGroqReturning({ overview: "fresh2", keyIdeas: [], socraticQuestions: [], pitfalls: [], tryThis: "" });
     const res = await POST(req({ subject: "math", concept: "derivatives" }));
     expect(res.status).toBe(200);

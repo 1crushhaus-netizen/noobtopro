@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { groqJSON, LEARN_SYS } from "@/lib/groq";
 import { ORDER } from "@/lib/scoring";
 import { rateLimit, clientKey } from "@/lib/rateLimit";
+import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
 import { getSupabaseAdmin, conceptKey } from "@/lib/supabaseAdmin";
+import { normalizeTopic, topicSlugsFor } from "@/lib/taxonomy";
+import { isConceptSafe } from "@/lib/contentSafety";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +43,7 @@ function normalizeGuide(subject, concept, raw) {
   return {
     subject,
     concept,
+    topic: normalizeTopic(subject, raw?.topic), // curated taxonomy slug (validated)
     overview: cap(raw?.overview, 1500),
     keyIdeas: capArr(raw?.keyIdeas, 6, 500),
     socraticQuestions: capArr(raw?.socraticQuestions, 5, 500),
@@ -51,7 +55,16 @@ function normalizeGuide(subject, concept, raw) {
 
 // Teach a concept the learner is weak on — Socratically, without giving answers.
 export async function POST(req) {
-  const rl = rateLimit(clientKey(req));
+  if (isCrossSiteRequest(req)) {
+    return NextResponse.json({ error: "Cross-site requests are not allowed." }, { status: 403 });
+  }
+  if (isWrongContentType(req)) {
+    return NextResponse.json({ error: "Content-Type must be application/json." }, { status: 415 });
+  }
+
+  // Generation is the most expensive route (a fresh concept = a full Groq guide
+  // call). Apply a tighter per-IP budget than the default.
+  const rl = rateLimit(clientKey(req), { max: 15 });
   if (!rl.ok) {
     return NextResponse.json(
       { error: "Too many requests. Please slow down and try again shortly." },
@@ -103,7 +116,8 @@ export async function POST(req) {
       system: LEARN_SYS,
       user:
         `Subject: ${subject}\n` +
-        `Concept to teach: ${safeConcept}\n\n` +
+        `Concept to teach: ${safeConcept}\n` +
+        `Allowed topics (pick exactly one slug for the "topic" field): ${topicSlugsFor(subject)}\n\n` +
         `Write the one standard, level-neutral guide for this concept now — teach, don't solve.`,
       // A full concept guide (overview + key ideas + Socratic questions + pitfalls
       // + try-this) is the longest response we ask Groq for; give it more room than
@@ -119,16 +133,27 @@ export async function POST(req) {
     );
   }
 
-  // 3) Store for everyone (best-effort, first-writer-wins). Only worth caching a
-  // guide with real content.
-  if (sb && guide.overview) {
+  // 3) Store for everyone (best-effort). Promote a pending (grader-registered)
+  // stub into a ready, browsable guide — made PUBLIC only if the concept passes
+  // the safety gate — or insert a fresh user-originated guide kept PRIVATE
+  // (hidden) until vetted. Never overwrites an existing ready guide (first-writer-
+  // wins is enforced inside the RPC). conceptKey/_concept_key parity means a
+  // grader-registered stub collides on the same key and is promoted, not duplicated.
+  // Only PERSIST guides for concepts that pass the safety gate: an unsafe concept
+  // (URL/email/markup/blocklist/symbol-heavy) is still generated and returned to the
+  // opener, but is NEVER written to the shared cache, so it can't be served to
+  // anyone else. Stored guides are always hidden (curation-only) and never publicly
+  // browsable — the public hub shows only curated rows (see promote_or_insert_guide).
+  if (sb && guide.overview && isConceptSafe(safeConcept)) {
     try {
-      await sb
-        .from("concept_guides")
-        .upsert(
-          { subject, concept_key: key, concept: safeConcept, content: guide },
-          { onConflict: "subject,concept_key", ignoreDuplicates: true }
-        );
+      await sb.rpc("promote_or_insert_guide", {
+        p_subject: subject,
+        p_concept: safeConcept,
+        p_content: guide,
+        p_topic: guide.topic,
+        p_level: guide.tryThisQuestion ? guide.tryThisQuestion.difficulty : null,
+        p_safe: true,
+      });
     } catch (e) {
       console.error("[/api/learn] cache write", e); // non-fatal
     }
