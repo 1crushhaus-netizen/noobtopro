@@ -13,9 +13,10 @@ import { POST } from "@/app/api/generate/route";
 import { _resetRateLimits } from "@/lib/rateLimit";
 
 // Fake admin matching the route's diagnostic_pool access: a count head-query, a
-// random-row select(order/range/maybeSingle), and insert (captured).
-function fakeAdmin({ count = 0, row = null, insertThrows } = {}) {
-  const calls = { inserts: [] };
+// random-row select(order/range/maybeSingle), and the atomic try_add_diagnostic
+// RPC for self-fill (captured).
+function fakeAdmin({ count = 0, row = null } = {}) {
+  const calls = { rpcs: [] };
   return {
     calls,
     from: () => ({
@@ -23,12 +24,11 @@ function fakeAdmin({ count = 0, row = null, insertThrows } = {}) {
         if (opts && opts.head) return Promise.resolve({ count, error: null });
         return { order: () => ({ range: () => ({ maybeSingle: async () => ({ data: row, error: null }) }) }) };
       },
-      insert: async (r) => {
-        if (insertThrows) throw new Error("insert blew up");
-        calls.inserts.push(r);
-        return { error: null };
-      },
     }),
+    rpc: async (fn, args) => {
+      calls.rpcs.push({ fn, args });
+      return { error: null };
+    },
   };
 }
 
@@ -173,8 +173,9 @@ describe("POST /api/generate — diagnostic pool", () => {
     const json = await res.json();
     expect(json.questions).toHaveLength(3);
     expect(fetchMock).toHaveBeenCalled(); // generated on a cold pool
-    expect(admin.calls.inserts).toHaveLength(1); // and stored it for reuse
-    expect(admin.calls.inserts[0].content.questions).toHaveLength(3);
+    expect(admin.calls.rpcs).toHaveLength(1); // and stored it via the atomic pool-fill RPC
+    expect(admin.calls.rpcs[0].fn).toBe("try_add_diagnostic");
+    expect(admin.calls.rpcs[0].args.p_content.questions).toHaveLength(3);
   });
 
   it("does NOT serve an invalid (incomplete) pooled diagnostic — falls back to generation", async () => {

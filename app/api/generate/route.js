@@ -72,14 +72,13 @@ export async function POST(req) {
         user: "Generate the three diagnostic questions now.",
       });
 
-      // 3) Self-fill the pool (best-effort) — only valid full 3-subject sets, and
-      //    only until it reaches the target, so spend stops after warm-up.
+      // 3) Self-fill the pool (best-effort) via an atomic, advisory-locked,
+      //    count-gated insert (try_add_diagnostic) — only valid full 3-subject
+      //    sets, and concurrent cold-start fills can't overshoot DIAG_POOL_TARGET
+      //    (the cap is enforced inside one serialized DB statement).
       if (sb && isValidDiagnostic(data)) {
         try {
-          const { count } = await sb.from("diagnostic_pool").select("id", { count: "exact", head: true });
-          if (typeof count !== "number" || count < DIAG_POOL_TARGET) {
-            await sb.from("diagnostic_pool").insert({ content: data });
-          }
+          await sb.rpc("try_add_diagnostic", { p_content: data, p_target: DIAG_POOL_TARGET });
         } catch (e) {
           console.error("[/api/generate] pool write", e); // non-fatal
         }
