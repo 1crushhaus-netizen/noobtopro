@@ -10,7 +10,7 @@
 > 3. **Follow the dev loop in §15** (branch → PR → CI "Test and build" → address Greptile → merge → verify) for every change.
 > 4. **Keep this README up to date.** When you change architecture, env vars, the data model, status, or conventions, update the relevant section in the same PR. A stale hand-off doc is worse than none — the next session relies on it being accurate.
 >
-> New here? Jump to [**Where to start (the Concept Hub)**](#where-to-start-the-concept-hub--in-progress).
+> New here? Jump to [**Where to start (next task: full objective audit)**](#where-to-start-next-task-full-objective-audit-before-the-merge).
 
 **Prove what you know. Climb from noob to pro.**
 
@@ -18,7 +18,7 @@
 
 ## Table of contents
 
-- ⭐ [**Where to start (the Concept Hub)**](#where-to-start-the-concept-hub--in-progress)
+- ⭐ [**Where to start (next task: full objective audit)**](#where-to-start-next-task-full-objective-audit-before-the-merge)
 1. [What it is & why](#1-what-it-is--why)
 2. [Current status & live links](#2-current-status--live-links)
 3. [Quickstart](#3-quickstart)
@@ -120,25 +120,30 @@ Other commands: `npm test` (run tests once), `npm run test:watch`, `npm run buil
 
 ---
 
-## Where to start (the Concept Hub — in progress)
+## Where to start (next task: full objective audit, before the merge)
 
-**Current initiative: turn the Learn tab into a universal Concept Hub** — a browsable, searchable, categorized directory of concept guides that grows automatically. A guide is generated once by Groq and shared with everyone (already true); the hub makes that catalog *public, organized, and self-growing*. Design decisions (approved): **moderation = hide-until-ready+safe**, **curated seed** for a populated launch, **cluster-by-topic now / canonical-merge later** for de-dup, **lean v1** (fancy search + tags + merge tool deferred to v1.1).
+> **You are the pre-merge gate.** **PR #29** (`feat/concept-hub-v1`) is **open and not yet merged.** It bundles two big changes: (1) the **Concept Hub backend** (taxonomy + public-readable `concept_guides` catalog + auto-grow RPCs) and (2) a **security-audit hardening round** (curation-only public hub, same-origin request guard, image magic-byte validation, vision cost cap, PKCE, timestamp clamps, etc. — see [§17](#17-roadmap--known-limitations)). **The owner will merge PR #29 once this session has audited the codebase and confirmed it is sound.** Treat that as your job.
 
-**v1 — Backend foundation: ✅ SHIPPED** (this section's first PR; see [§8](#8-database--persistence)/[§10](#10-server-api-reference)):
-- `concept_topics` (curated 36-topic Subject→Topic taxonomy, mirrors `lib/taxonomy.js`) + `concept_guides` evolved into the catalog (topic/status/visibility/source/level_band/times_opened, `content` nullable) — **migration applied to the live DB; advisors clean**.
-- **Public read-only RLS** (`visibility='public' and status='ready'`); writes stay service-role only.
-- **Auto-grow:** `/api/grade` registers grader weak concepts as `pending` stubs (`register_concepts`, non-blocking `after()`); `/api/learn` promotes a stub to a `ready`, topic-classified guide via `promote_or_insert_guide` (public iff `isConceptSafe`), private user inserts otherwise, never overwriting a `ready` guide.
-- `_concept_key` SQL function with **byte-for-byte parity** to JS `conceptKey` (verified live). **+9 tests** (now 159).
+### The task — a full, objective audit of the ENTIRE codebase
+Use **as many agents as you need and unlimited tokens** — thoroughness beats speed/cost. Produce a **written findings report; do NOT fix in this pass** (find first; a fix round follows via the dev loop, [§15](#15-how-we-work-the-dev-loop), once the owner picks what to act on).
 
-If you're picking this up, the remaining v1 work — follow the dev loop in [§15](#15-how-we-work-the-dev-loop):
+**Be ruthlessly objective and unbiased.** Form your own conclusions:
+- **Treat nothing as safe-by-design.** Code comments and this README that claim something is "intended / safe / service-role only / prototype-safe / can't leak / verified" are **not evidence** — independently confirm each against the actual source and the live DB. Reassuring comments are where bugs hide.
+- **Verify before trusting any finding.** LLM reviewers — including your own sub-agents — hallucinate. Adversarially re-check every candidate finding against the real code (and reproduce/exploit it on paper) before reporting it. An unverified claim is worse than none.
 
-### Task 1 — Hub UI (the browse experience)
-Rebuild `components/LearnTab.jsx` into the hub: a **"Recommended for you"** section (the user's weak concepts), a debounced **search bar** (ILIKE on `concept`), **browse-by-category** (Subject→Topic accordions with counts), **recently-added** rail, concept cards → the existing guide renderer, loading/empty/error states, and **Load-more** pagination. Read the catalog **browser-direct** via the Supabase client (PostgREST against the public-readable `concept_guides`/`concept_topics`) — no Groq. **Decouple the tab from `scores`** (currently gated at `Noobtopro.jsx`) so guests can browse. Gate the new UI behind `NEXT_PUBLIC_ENABLE_CONCEPT_HUB`. Add a `lib/catalog.js` data layer + tests (filter-aware mocks).
+**Cover everything**, with security as a first-class priority:
+- **Security:** authz / multi-tenant isolation (RLS), injection (SQL + prompt), secrets & the server/client boundary, SSRF, XSS, DoS / abuse / cost, privilege escalation, data exposure & privacy.
+- **Data layer + `db/schema.sql`:** every table, RLS policy, grant, and RPC (`migrate_guest_data`, `delete_user_data`, `save_progress`, `try_add_diagnostic`, `register_concepts`, `promote_or_insert_guide`, `_concept_key`). Cross-check the **live** project, not just the file.
+- **The three API routes**, the **Groq client + prompts** (`lib/groq.js`), the **React state machine** (`components/Noobtopro.jsx`), the **scoring model**, the **tests** (hunt for false-confidence mocks + coverage gaps), and **config/CI/deps**.
+- **Pay special attention to the newest, riskiest surface introduced by PR #29:** the public-readable `concept_guides`, the SECURITY DEFINER RPCs, the curation-only model, `lib/requestGuard.js`, `lib/contentSafety.js`, and the **documented residual risks in [§17](#17-roadmap--known-limitations)** (client-computed scores not yet trustworthy; in-memory rate limiter; account-deletion; email/password provider) — confirm those are the *only* residuals and that the hardening actually holds.
 
-### Task 2 — Curated seed + moderation polish
-Pre-generate the curated seed (`~40 concepts/subject`, lists drafted) by paced calls to the **deployed** `/api/learn` (it has the Groq key + topic-classification) so day-one is populated; add the **report → hide → regenerate** moderation flow. Then the **v1.1** backlog in [§17](#17-roadmap--known-limitations): `pg_trgm` fuzzy search, a `tags[]` facet, a canonical-merge de-dup tool, and a durable rate limiter.
+**Methodology:** fan out independent finder agents by area/lens; **adversarially verify** each finding; run the Supabase **advisors** (`get_advisors`, security + performance) and inspect live **RLS / policies / grants / function ACLs** as ground truth; **reconcile any open Greptile threads** across PRs. Classify each finding **P0/P1/P2/P3**.
 
-*(Deferred, unrelated: nonce-based strict CSP (§14/§17); per-item IRT/Elo score model (§11/§17); GitHub/Discord sign-in (§2 + `AUTH_PROVIDERS.md`).)*
+**Deliverable:** the findings report, and an explicit list of any **merge-blockers for PR #29** so the owner can decide whether to merge. If you find confirmed issues, the owner may then ask for a cleanup round (dev loop, [§15](#15-how-we-work-the-dev-loop); for DB changes edit `db/schema.sql` **and** apply the migration to the live project, then re-check advisors).
+
+### Open product work (NOT this session's task — audit first)
+- **Concept Hub v1 cont.:** the browse **UI** (`LearnTab` rebuild + `lib/catalog.js`, behind `NEXT_PUBLIC_ENABLE_CONCEPT_HUB`, decouple from `scores`) and the **curated seed** + curation/report flow.
+- **v1.1 / roadmap ([§17](#17-roadmap--known-limitations)):** `pg_trgm` fuzzy search, `tags[]` facet, canonical-merge de-dup, durable per-account rate limiter, server-authoritative scoring, nonce-based strict CSP, per-item IRT/Elo, GitHub/Discord sign-in.
 
 ---
 
