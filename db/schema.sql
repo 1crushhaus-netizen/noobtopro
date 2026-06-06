@@ -26,7 +26,7 @@ create table if not exists public.attempts (
   id bigint generated always as identity primary key,
   user_id uuid not null references auth.users on delete cascade,
   created_at timestamptz not null default now(),
-  type text not null,                 -- 'baseline' | 'attempt'
+  type text not null check (type in ('baseline','attempt')),
   subject text,
   reasoning_score int,
   delta int,
@@ -99,18 +99,23 @@ begin
   where s->>'subject' in ('math', 'physics', 'chemistry')
   on conflict (user_id, subject) do nothing;
 
+  -- Guarded casts (pg_input_is_valid, PG16+): a single malformed numeric/timestamp
+  -- in the guest blob must not abort the whole migration — coerce it to NULL/now()
+  -- instead of raising. The type is allow-listed so a client-supplied value can't
+  -- land an out-of-domain string in attempts.type (which now has a CHECK).
   insert into public.attempts (user_id, type, subject, reasoning_score, delta, new_score, total_after, phd_after, created_at)
   select uid,
          coalesce(a->>'type', 'attempt'),
          a->>'subject',
-         (a->>'reasoning_score')::int,
-         (a->>'delta')::int,
-         (a->>'new_score')::int,
-         (a->>'total_after')::int,
-         (a->>'phd_after')::int,
-         coalesce((a->>'created_at')::timestamptz, now())
+         case when pg_input_is_valid(a->>'reasoning_score', 'numeric') then round((a->>'reasoning_score')::numeric)::int end,
+         case when pg_input_is_valid(a->>'delta', 'numeric') then round((a->>'delta')::numeric)::int end,
+         case when pg_input_is_valid(a->>'new_score', 'numeric') then round((a->>'new_score')::numeric)::int end,
+         case when pg_input_is_valid(a->>'total_after', 'numeric') then round((a->>'total_after')::numeric)::int end,
+         case when pg_input_is_valid(a->>'phd_after', 'numeric') then round((a->>'phd_after')::numeric)::int end,
+         coalesce(case when pg_input_is_valid(a->>'created_at', 'timestamptz') then (a->>'created_at')::timestamptz end, now())
   from jsonb_array_elements(coalesce(p_attempts, '[]'::jsonb)) as a
-  where a->>'subject' is null or a->>'subject' in ('math', 'physics', 'chemistry');
+  where (a->>'subject' is null or a->>'subject' in ('math', 'physics', 'chemistry'))
+    and coalesce(a->>'type', 'attempt') in ('baseline', 'attempt');
 
   return true;
 end;
@@ -137,6 +142,71 @@ end;
 $$;
 
 grant execute on function public.delete_user_data() to authenticated;
+
+-- ---- RPC: atomic save of a score update + its matching attempt --------------
+-- The practice/diagnostic flow persists a subject-score change AND appends an
+-- attempt-history row. Done as two separate client writes, a partial failure can
+-- persist the score but lose the attempt (and the client re-resolves identity
+-- twice). This RPC does BOTH in one transaction, capturing auth.uid() once.
+-- SECURITY INVOKER so RLS still applies. p_scores is the full scores map as a
+-- jsonb array of {subject,score,weak_concepts,comment}; p_attempt is the single
+-- attempt to append (snake_case, matching lib/store.js). Values are clamped /
+-- allow-listed / guard-cast exactly like migrate_guest_data so malformed input
+-- can't violate a CHECK or abort the write.
+create or replace function public.save_progress(p_scores jsonb, p_attempt jsonb)
+returns void
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  uid uuid := auth.uid();
+begin
+  if uid is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if coalesce(jsonb_array_length(coalesce(p_scores, '[]'::jsonb)), 0) > 3 then
+    raise exception 'too many score rows';
+  end if;
+
+  insert into public.scores (user_id, subject, score, weak_concepts, comment, updated_at)
+  select uid,
+         s->>'subject',
+         greatest(0, least(100, coalesce(case when pg_input_is_valid(s->>'score', 'numeric') then round((s->>'score')::numeric) end, 0)))::int,
+         coalesce(
+           (select array_agg(left(value, 200)) from jsonb_array_elements_text(s->'weak_concepts') as value),
+           '{}'::text[]
+         ),
+         left(coalesce(s->>'comment', ''), 2000),
+         now()
+  from jsonb_array_elements(coalesce(p_scores, '[]'::jsonb)) as s
+  where s->>'subject' in ('math', 'physics', 'chemistry')
+  on conflict (user_id, subject) do update
+    set score = excluded.score,
+        weak_concepts = excluded.weak_concepts,
+        comment = excluded.comment,
+        updated_at = excluded.updated_at;
+
+  -- Append the attempt (skip if no usable attempt was supplied).
+  if p_attempt is not null and jsonb_typeof(p_attempt) = 'object' then
+    insert into public.attempts (user_id, type, subject, reasoning_score, delta, new_score, total_after, phd_after, created_at)
+    select uid,
+           coalesce(p_attempt->>'type', 'attempt'),
+           p_attempt->>'subject',
+           case when pg_input_is_valid(p_attempt->>'reasoning_score', 'numeric') then round((p_attempt->>'reasoning_score')::numeric)::int end,
+           case when pg_input_is_valid(p_attempt->>'delta', 'numeric') then round((p_attempt->>'delta')::numeric)::int end,
+           case when pg_input_is_valid(p_attempt->>'new_score', 'numeric') then round((p_attempt->>'new_score')::numeric)::int end,
+           case when pg_input_is_valid(p_attempt->>'total_after', 'numeric') then round((p_attempt->>'total_after')::numeric)::int end,
+           case when pg_input_is_valid(p_attempt->>'phd_after', 'numeric') then round((p_attempt->>'phd_after')::numeric)::int end,
+           coalesce(case when pg_input_is_valid(p_attempt->>'created_at', 'timestamptz') then (p_attempt->>'created_at')::timestamptz end, now())
+    where coalesce(p_attempt->>'type', 'attempt') in ('baseline', 'attempt')
+      and (p_attempt->>'subject' is null or p_attempt->>'subject' in ('math', 'physics', 'chemistry'));
+  end if;
+end;
+$$;
+
+grant execute on function public.save_progress(jsonb, jsonb) to authenticated;
 
 -- ---- shared concept-guide cache --------------------------------------------
 -- /api/learn generates a Socratic guide per concept ONCE, then reuses it for

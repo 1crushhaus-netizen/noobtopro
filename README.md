@@ -29,7 +29,7 @@
 8. [Database & persistence](#8-database--persistence)
 9. [Authentication](#9-authentication)
 10. [Server API reference](#10-server-api-reference)
-11. [Scoring model](#11-scoring-model)
+11. [Scoring model](#11-scoring-model-libscoringjs)
 12. [Frontend (the state machine)](#12-frontend-the-state-machine)
 13. [Testing](#13-testing)
 14. [Build, CI & deploy](#14-build-ci--deploy)
@@ -132,7 +132,7 @@ The sign-in menu is already provider-agnostic and env-toggleable; this is config
 - **Verify:** the "Continue with GitHub/Discord" buttons go from "Coming soon" to live and complete an OAuth round-trip. See [§9](#9-authentication). *(Do the Supabase step before flipping the flag, or the button errors on click.)*
 
 ### Task 3 — Replace the placeholder score model *(core product code)* ✅ **shipped**
-The biggest product win, now done. `blend(prev, suggestion, opts)` in `lib/scoring.js` is a difficulty- and confidence-weighted **Elo-style** update (a step toward an IRT/Elo model): the grader's `newScoreSuggestion` sets the target/direction, and a bounded learning rate `alpha` (anchored at the legacy `0.35`) is scaled by the per-attempt `reasoningScore` (confidence) and an Elo *surprise* term over the question's `difficulty` band. It stays backward-compatible with the legacy 65/35 two-arg call and preserves `clampScore`/null-safety. The validated `difficulty` band is also threaded through `/api/grade` so the grader calibrates `reasoningScore`/`newScoreSuggestion` to the item's level. See [§11](#11-scoring-model). Covered by 20 new tests (17 in `test/scoring.test.js` for the weighted blend, 3 in `test/api-grade.test.js` for difficulty-band threading); 103 total, all green.
+The biggest product win, now done. `blend(prev, suggestion, opts)` in `lib/scoring.js` is a difficulty- and confidence-weighted **Elo-style** update (a step toward an IRT/Elo model): the grader's `newScoreSuggestion` sets the target/direction, and a bounded learning rate `alpha` (anchored at the legacy `0.35`) is scaled by the per-attempt `reasoningScore` (confidence) and an Elo *surprise* term over the question's `difficulty` band. It stays backward-compatible with the legacy 65/35 two-arg call and preserves `clampScore`/null-safety. The validated `difficulty` band is also threaded through `/api/grade` so the grader calibrates `reasoningScore`/`newScoreSuggestion` to the item's level. See [§11](#11-scoring-model-libscoringjs). Covered by 20 new tests (17 in `test/scoring.test.js` for the weighted blend, 3 in `test/api-grade.test.js` for difficulty-band threading); 103 total, all green.
 - **Follow-ups:** replace fixed band midpoints with per-item difficulty ratings (true IRT/Elo); tune `ELO_SCALE` / the confidence range / the `alpha` cap against logged attempt data.
 
 > Smaller good-first-issues if you want to warm up: surface a "Learn this" shortcut from the practice feedback's "Concept you're missing" card; make the Profile tab's by-subject rows clickable into Learn; add a strict CSP (see §14).

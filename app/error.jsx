@@ -1,8 +1,17 @@
 "use client";
 
+import { useEffect } from "react";
+
 // App Router error boundary: catches uncaught render/runtime errors in the tree
 // so the user sees a recoverable message instead of a white screen.
 export default function Error({ error, reset }) {
+  // Log the caught error so production crashes leave a breadcrumb (console →
+  // Vercel runtime logs) instead of vanishing. error.digest correlates a hashed
+  // server error to its server-side log entry.
+  useEffect(() => {
+    console.error("[error boundary]", error);
+  }, [error]);
+
   return (
     <div
       style={{
