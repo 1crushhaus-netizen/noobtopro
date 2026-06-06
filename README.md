@@ -172,7 +172,7 @@ Everything lives at the **repo root** (the app was flattened out of a nested fol
 app/
   layout.js            Root layout; <SpeedInsights/>; <html>/<body>
   page.js              Renders <Noobtopro/>
-  error.js             App Router error boundary (no white-screen on crashes)
+  error.jsx            App Router error boundary (no white-screen on crashes)
   globals.css          All styles + design tokens (the .np-* system)
   api/
     generate/route.js  POST: diagnostic (3 Qs) or practice (1 Q) question generation
@@ -335,7 +335,7 @@ Components: **SignIn** (provider buttons), **ProfileTab** (identity + stats + co
 
 ## 13. Testing
 
-**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **118 tests across 11 files**, all passing.
+**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **120 tests across 11 files**, all passing.
 
 | File | Covers |
 |---|---|
