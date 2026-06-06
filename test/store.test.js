@@ -186,4 +186,28 @@ describe("saveProgress (atomic score + attempt write)", () => {
     expect(local.history[1]).toMatchObject({ type: "attempt", subject: "math" });
     expect(res.history).toHaveLength(2);
   });
+
+  it("guest: a single-subject save MERGES, preserving the other subjects (no data loss)", async () => {
+    // Regression: submitPractice sends only the changed subject; the guest branch
+    // must merge it over the stored map, not replace — else the other two subjects
+    // are silently wiped from localStorage (and lost on reload / sign-in migration).
+    mocks.session = guest;
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        scores: {
+          math: { score: 40, weakConcepts: ["a"], comment: "" },
+          physics: { score: 55, weakConcepts: ["b"], comment: "" },
+          chemistry: { score: 30, weakConcepts: [], comment: "" },
+        },
+        history: [],
+      })
+    );
+    await saveProgress({ physics: { score: 60, weakConcepts: ["b2"], comment: "" } }, { type: "attempt", subject: "physics" });
+    const local = JSON.parse(window.localStorage.getItem(KEY));
+    expect(local.scores.physics.score).toBe(60); // updated subject
+    expect(local.scores.math.score).toBe(40); // preserved — not wiped
+    expect(local.scores.chemistry.score).toBe(30); // preserved
+    expect(Object.keys(local.scores).sort()).toEqual(["chemistry", "math", "physics"]);
+  });
 });

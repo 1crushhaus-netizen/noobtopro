@@ -188,20 +188,28 @@ begin
         comment = excluded.comment,
         updated_at = excluded.updated_at;
 
-  -- Append the attempt (skip if no usable attempt was supplied).
+  -- Append the attempt (skip if no usable attempt was supplied). Validate type +
+  -- subject BEFORE inserting and RAISE on an out-of-domain value, so the whole
+  -- transaction aborts (rolling back the score upsert too) rather than silently
+  -- committing the score and dropping the attempt via a WHERE filter — preserving
+  -- this RPC's all-or-nothing guarantee even against a buggy/typo'd future caller.
   if p_attempt is not null and jsonb_typeof(p_attempt) = 'object' then
+    if coalesce(p_attempt->>'type', 'attempt') not in ('baseline', 'attempt') then
+      raise exception 'invalid attempt type: %', coalesce(p_attempt->>'type', 'attempt');
+    end if;
+    if p_attempt->>'subject' is not null and p_attempt->>'subject' not in ('math', 'physics', 'chemistry') then
+      raise exception 'invalid attempt subject: %', p_attempt->>'subject';
+    end if;
     insert into public.attempts (user_id, type, subject, reasoning_score, delta, new_score, total_after, phd_after, created_at)
-    select uid,
-           coalesce(p_attempt->>'type', 'attempt'),
-           p_attempt->>'subject',
-           case when pg_input_is_valid(p_attempt->>'reasoning_score', 'numeric') then round((p_attempt->>'reasoning_score')::numeric)::int end,
-           case when pg_input_is_valid(p_attempt->>'delta', 'numeric') then round((p_attempt->>'delta')::numeric)::int end,
-           case when pg_input_is_valid(p_attempt->>'new_score', 'numeric') then round((p_attempt->>'new_score')::numeric)::int end,
-           case when pg_input_is_valid(p_attempt->>'total_after', 'numeric') then round((p_attempt->>'total_after')::numeric)::int end,
-           case when pg_input_is_valid(p_attempt->>'phd_after', 'numeric') then round((p_attempt->>'phd_after')::numeric)::int end,
-           coalesce(case when pg_input_is_valid(p_attempt->>'created_at', 'timestamptz') then (p_attempt->>'created_at')::timestamptz end, now())
-    where coalesce(p_attempt->>'type', 'attempt') in ('baseline', 'attempt')
-      and (p_attempt->>'subject' is null or p_attempt->>'subject' in ('math', 'physics', 'chemistry'));
+    values (uid,
+            coalesce(p_attempt->>'type', 'attempt'),
+            p_attempt->>'subject',
+            case when pg_input_is_valid(p_attempt->>'reasoning_score', 'numeric') then round((p_attempt->>'reasoning_score')::numeric)::int end,
+            case when pg_input_is_valid(p_attempt->>'delta', 'numeric') then round((p_attempt->>'delta')::numeric)::int end,
+            case when pg_input_is_valid(p_attempt->>'new_score', 'numeric') then round((p_attempt->>'new_score')::numeric)::int end,
+            case when pg_input_is_valid(p_attempt->>'total_after', 'numeric') then round((p_attempt->>'total_after')::numeric)::int end,
+            case when pg_input_is_valid(p_attempt->>'phd_after', 'numeric') then round((p_attempt->>'phd_after')::numeric)::int end,
+            coalesce(case when pg_input_is_valid(p_attempt->>'created_at', 'timestamptz') then (p_attempt->>'created_at')::timestamptz end, now()));
   end if;
 end;
 $$;
