@@ -10,7 +10,7 @@
 > 3. **Follow the dev loop in §15** (branch → PR → CI "Test and build" → address Greptile → merge → verify) for every change.
 > 4. **Keep this README up to date.** When you change architecture, env vars, the data model, status, or conventions, update the relevant section in the same PR. A stale hand-off doc is worse than none — the next session relies on it being accurate.
 >
-> New here? Jump to [**Where to start (next two tasks)**](#where-to-start-next-two-tasks).
+> New here? Jump to [**Where to start (the Concept Hub)**](#where-to-start-the-concept-hub--in-progress).
 
 **Prove what you know. Climb from noob to pro.**
 
@@ -18,7 +18,7 @@
 
 ## Table of contents
 
-- ⭐ [**Where to start (next two tasks)**](#where-to-start-next-two-tasks)
+- ⭐ [**Where to start (the Concept Hub)**](#where-to-start-the-concept-hub--in-progress)
 1. [What it is & why](#1-what-it-is--why)
 2. [Current status & live links](#2-current-status--live-links)
 3. [Quickstart](#3-quickstart)
@@ -88,6 +88,9 @@ Score bands (global scale): **0–20** Absolute beginner · **20–40** Foundati
 - ✅ Per-IP rate limiting; security headers incl. a **baseline CSP**; error boundary; service-role RPCs locked to `authenticated` (PUBLIC/anon revoked).
 - ✅ **Shared caches active** (`SUPABASE_SERVICE_ROLE_KEY` set): the concept-guide cache (each guide generated once, with a bundled "try this" question) and the baseline-diagnostic pool — both reused across users to cut Groq spend. Grading runs on the cheaper `openai/gpt-oss-120b` (`GROQ_GRADE_MODEL`).
 
+**In progress:**
+- 🛠️ **Concept Hub** — the universal, categorized, auto-growing concept directory (see "Where to start"). **Backend shipped** (taxonomy + public read-only catalog + grader auto-grow + safety-gated promotion; live DB migrated, advisors clean). The browse UI + curated seed are next, behind `NEXT_PUBLIC_ENABLE_CONCEPT_HUB`.
+
 **Built but not yet activated (config only):**
 - ⏳ **GitHub / Discord sign-in** — code is env-toggleable and ready; needs the OAuth apps + Supabase provider config + `NEXT_PUBLIC_ENABLE_*` flags (see `AUTH_PROVIDERS.md`).
 
@@ -117,17 +120,25 @@ Other commands: `npm test` (run tests once), `npm run test:watch`, `npm run buil
 
 ---
 
-## Where to start (next two tasks)
+## Where to start (the Concept Hub — in progress)
 
-The previous round — a **full-repo audit then full cleanup** — is **shipped**. That round (see [§2](#2-current-status--live-links), [§17](#17-roadmap--known-limitations), and `git log`) found **1 P2 + ~18 P3s** (no P0/P1) and fixed them: the `submitPractice` run-token guard (a stale practice grade landing after sign-out/Restart could write the prior identity's score into the guest store), the diagnostic image-preview blob-URL leak, `REVOKE … FROM PUBLIC` grant hygiene on the three SECURITY INVOKER RPCs (applied to the live DB), a baseline `Content-Security-Policy`, CI `permissions`/`concurrency`/`timeout` hardening, guest-`localStorage`-quota error surfacing, a guest-migration cap, dead-code removal (`saveScores`), a rate-limiter off-by-one, doc fixes, and **+11 tests** (now 145). Supabase advisors are clean (only the two intended service-role-lock INFOs); no open Greptile threads.
+**Current initiative: turn the Learn tab into a universal Concept Hub** — a browsable, searchable, categorized directory of concept guides that grows automatically. A guide is generated once by Groq and shared with everyone (already true); the hub makes that catalog *public, organized, and self-growing*. Design decisions (approved): **moderation = hide-until-ready+safe**, **curated seed** for a populated launch, **cluster-by-topic now / canonical-merge later** for de-dup, **lean v1** (fancy search + tags + merge tool deferred to v1.1).
 
-If you (human or LLM) are picking this up cold, the next two suggested tasks — follow the dev loop in [§15](#15-how-we-work-the-dev-loop) for both:
+**v1 — Backend foundation: ✅ SHIPPED** (this section's first PR; see [§8](#8-database--persistence)/[§10](#10-server-api-reference)):
+- `concept_topics` (curated 36-topic Subject→Topic taxonomy, mirrors `lib/taxonomy.js`) + `concept_guides` evolved into the catalog (topic/status/visibility/source/level_band/times_opened, `content` nullable) — **migration applied to the live DB; advisors clean**.
+- **Public read-only RLS** (`visibility='public' and status='ready'`); writes stay service-role only.
+- **Auto-grow:** `/api/grade` registers grader weak concepts as `pending` stubs (`register_concepts`, non-blocking `after()`); `/api/learn` promotes a stub to a `ready`, topic-classified guide via `promote_or_insert_guide` (public iff `isConceptSafe`), private user inserts otherwise, never overwriting a `ready` guide.
+- `_concept_key` SQL function with **byte-for-byte parity** to JS `conceptKey` (verified live). **+9 tests** (now 159).
 
-### Task 1 — Nonce-based strict CSP
-A **baseline** CSP now ships (§14) but `script-src`/`style-src` still allow `'unsafe-inline'` (Next injects inline runtime scripts; the app uses inline style objects). Add a middleware that generates a per-request nonce, thread it into Next's inline scripts, and tighten `script-src` to `'self' 'nonce-…'` (drop `'unsafe-inline'`). Roll out as `Content-Security-Policy-Report-Only` first, test **every route + the OAuth redirect + photo-preview + Supabase calls** in a real browser (watch the console for violations), then flip to enforcing. Keep the existing header test green and add one asserting the nonce wiring.
+If you're picking this up, the remaining v1 work — follow the dev loop in [§15](#15-how-we-work-the-dev-loop):
 
-### Task 2 — Extend the score model toward per-item IRT/Elo (§11, §17)
-`blend()` already weights by question difficulty (fixed band midpoints) and per-attempt reasoning quality via an Elo *surprise* term. The next step is **per-item difficulty ratings** (rather than band midpoints) and **calibrating the constants** (`ELO_SCALE`, the confidence range, the `alpha` cap) against logged attempts. (Alternatively, the one deferred *feature* is GitHub/Discord sign-in — config-only, tracked in §2 + `AUTH_PROVIDERS.md`.) Add tests for any new scoring behavior and keep `npm test` / `npm run build` green. For DB changes, edit `db/schema.sql` **and** apply the migration to the live project, then re-check the advisors.
+### Task 1 — Hub UI (the browse experience)
+Rebuild `components/LearnTab.jsx` into the hub: a **"Recommended for you"** section (the user's weak concepts), a debounced **search bar** (ILIKE on `concept`), **browse-by-category** (Subject→Topic accordions with counts), **recently-added** rail, concept cards → the existing guide renderer, loading/empty/error states, and **Load-more** pagination. Read the catalog **browser-direct** via the Supabase client (PostgREST against the public-readable `concept_guides`/`concept_topics`) — no Groq. **Decouple the tab from `scores`** (currently gated at `Noobtopro.jsx`) so guests can browse. Gate the new UI behind `NEXT_PUBLIC_ENABLE_CONCEPT_HUB`. Add a `lib/catalog.js` data layer + tests (filter-aware mocks).
+
+### Task 2 — Curated seed + moderation polish
+Pre-generate the curated seed (`~40 concepts/subject`, lists drafted) by paced calls to the **deployed** `/api/learn` (it has the Groq key + topic-classification) so day-one is populated; add the **report → hide → regenerate** moderation flow. Then the **v1.1** backlog in [§17](#17-roadmap--known-limitations): `pg_trgm` fuzzy search, a `tags[]` facet, a canonical-merge de-dup tool, and a durable rate limiter.
+
+*(Deferred, unrelated: nonce-based strict CSP (§14/§17); per-item IRT/Elo score model (§11/§17); GitHub/Discord sign-in (§2 + `AUTH_PROVIDERS.md`).)*
 
 ---
 
@@ -183,6 +194,8 @@ lib/
   store.js             Data layer: Supabase when signed in, localStorage for guests
   supabase.js          Browser Supabase client + auth helpers + PROVIDERS
   supabaseAdmin.js     Server-only service-role client (concept cache) + conceptKey()
+  taxonomy.js          Concept-hub Subject→Topic taxonomy (36 slugs; mirrors concept_topics)
+  contentSafety.js     isConceptSafe() gate for public concept-hub entries
 db/
   schema.sql           CANONICAL database DDL (tables, RLS, all RPCs) — run this to provision
 test/                  Vitest suite (see §13)
@@ -238,7 +251,8 @@ To stand up the database from scratch (or reproduce it), **run `db/schema.sql` i
 ### Tables
 - **`scores`** — `(user_id uuid, subject text check(math|physics|chemistry), score int, weak_concepts text[], comment text, updated_at)`, PK `(user_id, subject)`.
 - **`attempts`** — `(id bigint identity PK, user_id, created_at, type text check('baseline'|'attempt'), subject, reasoning_score, delta, new_score, total_after, phd_after)`. Indexed `(user_id, created_at, id)`.
-- **`concept_guides`** *(internal cache)* — `(subject, concept_key, concept, content jsonb, created_at)`, PK `(subject, concept_key)`. **RLS enabled with NO policies** → only the service role (server) can touch it; no end-user can read or pollute it.
+- **`concept_topics`** *(taxonomy reference)* — `(subject, slug, label, sort)`, PK `(subject, slug)`. The curated 36-topic Subject→Topic tree (mirrors `lib/taxonomy.js`). **Public-readable** (`for select using (true)`) so the hub renders labels/ordering; writes service-role only.
+- **`concept_guides`** *(the concept-hub catalog)* — `(subject, concept_key, concept, topic→concept_topics, content jsonb null, status 'ready'|'pending', visibility 'public'|'hidden', source 'grader'|'curated'|'user', level_band, times_opened, created_at, updated_at)`, PK `(subject, concept_key)`. **Publicly readable but read-only** — the policy `for select to anon, authenticated using (visibility='public' and status='ready')` exposes only vetted, generated guides (pending stubs and hidden/moderated rows never leak); **all writes stay service-role only**. `content` is `null` for a `pending` stub (a concept registered but not yet generated). ⚠️ This is now a public object — **never add a PII/per-user column here.**
 - **`diagnostic_pool`** *(internal cache)* — `(id bigint identity, content jsonb, created_at)`. A handful of full 3-subject baseline diagnostics, reused across users (standardized, like the guides). Same **RLS-on / NO-policies** service-role lock. `/api/generate` serves a random one with no Groq call once it reaches `DIAG_POOL_TARGET` (12); below that it self-fills via the **`try_add_diagnostic(p_content, p_target)`** RPC — an advisory-locked, count-gated insert (`service_role`-only) so concurrent cold-start fills can't overshoot the target.
 
 `scores`/`attempts` have RLS: `for all to authenticated using ((select auth.uid()) = user_id) with check (...)` — each user only ever sees/writes their own rows.
@@ -247,7 +261,10 @@ To stand up the database from scratch (or reproduce it), **run `db/schema.sql` i
 - **`migrate_guest_data(p_scores jsonb, p_attempts jsonb)`** — atomic, idempotent, advisory-locked per user; migrates guest progress into an **empty** account in one transaction (first-writer-wins; never overwrites). Called on first sign-in. (Service-invoker → RLS applies.)
 - **`delete_user_data()`** — atomic delete of the caller's scores + attempts (Profile → "Reset my progress").
 - **`save_progress(p_scores jsonb, p_attempt jsonb)`** — atomic per-update write: upserts the caller's scores **and** appends the matching attempt in **one transaction** (capturing `auth.uid()` once), so a partial failure can't persist a score without its attempt. Values are clamped / type-allow-listed / guard-cast (PG16+ `pg_input_is_valid`) like the migration RPC. (Service-invoker → RLS applies.) Drives `saveProgress` for the diagnostic baseline and every practice attempt.
-- *(The concept cache is written/read by the server directly using the service role, not via RPC.)*
+- **`register_concepts(p_subject, p_concepts jsonb)`** *(concept hub)* — auto-grow: registers the grader's (server-normalized) weak concepts as **`pending` stubs** (hidden until generated). `SECURITY DEFINER`, `service_role`-only; `on conflict do nothing` so it never disturbs an existing row. Called non-blocking (`after()`) from `/api/grade`.
+- **`promote_or_insert_guide(p_subject, p_concept, p_content, p_topic, p_level, p_safe)`** *(concept hub)* — on a `/api/learn` generation: **promotes** a `pending` grader stub to `ready` (made `public` iff `p_safe`), else inserts a fresh **user-originated guide kept private (`hidden`)** until vetted; **never overwrites an existing `ready` guide** (first-writer-wins). `SECURITY DEFINER`, `service_role`-only.
+- **`_concept_key(text)`** *(concept hub)* — SQL re-implementation of `conceptKey()` with **byte-for-byte parity** (verified against the JS), so grader-registered keys match generated ones.
+- *(The hub's **reads** are browser-direct against the publicly-readable `concept_guides`/`concept_topics` via PostgREST — no RPC, no Groq.)*
 
 ### `lib/store.js` — the dual-mode data layer
 The UI only ever calls these; they transparently use Supabase when signed in, else `localStorage` (`key "noobtopro:v1"`):
@@ -283,11 +300,12 @@ All three routes are `POST`, `dynamic = "force-dynamic"`, **rate-limited per IP*
 - Free-text fields capped (~12k chars); image validated (allowlisted MIME jpeg/png/webp/gif, base64, ~3 MB cap).
 - **Diagnostic →** `{ subject, score(0–100), weakConcepts[], comment }`.
 - **Practice →** `{ reasoningScore(0–100), rubric{conceptual_understanding, logical_structure, strategy, execution_accuracy, communication: 0–4}, correctnessNote, socraticHint, microLesson, weakConcepts[], newScoreSuggestion }`. All scores clamped, rubric normalized, `weakConcepts` coerced to a string array.
+- **Concept-hub auto-grow:** after responding (`after()`, non-blocking), the server-normalized `weakConcepts` are registered as `pending` catalog stubs via `register_concepts` (no added grading latency; no-op without the service-role key).
 
 ### `POST /api/learn`
 - `{ subject, concept }` (a `score` field is accepted but **ignored** — guides are level-neutral and standardized).
-- **Read-through shared cache:** normalizes the concept to a key (`conceptKey`: lowercase/trim/collapse-space/strip-quotes); on a hit returns the stored guide (`cached:true`) **without calling Groq**; on a miss generates via Groq, normalizes, and stores first-writer-wins (`cached:false`). Cache only active when `SUPABASE_SERVICE_ROLE_KEY` is set — **this is the platform's single biggest token saver: each guide (and its bundled practice question) is generated once and reused for every user, forever.**
-- **Response:** `{ subject, concept, overview, keyIdeas[], socraticQuestions[], pitfalls[], tryThis, tryThisQuestion, cached }`. `tryThisQuestion` is a practice-ready `{ question, targetConcept, difficulty }` (or `null`) — a concrete "try this" problem **cached with the guide**, so the Learn tab can start a practice attempt from it with **no `/api/generate` call**.
+- **Read-through shared cache:** normalizes the concept to a key (`conceptKey`: lowercase/trim/collapse-space/strip-quotes); on a hit returns the stored guide (`cached:true`) **without calling Groq**; on a miss generates via Groq, normalizes, and writes via **`promote_or_insert_guide`** (`cached:false`) — promoting a `pending` grader stub to `ready` (public iff `isConceptSafe(concept)`), or inserting a fresh user-originated guide kept **private** until vetted; never overwrites a `ready` guide. The LLM also classifies the concept into a curated **`topic`** slug (validated against `lib/taxonomy.js`; unknown → `general_<subject>`). Cache only active when `SUPABASE_SERVICE_ROLE_KEY` is set — **this is the platform's single biggest token saver: each guide is generated once and reused for every user, forever.**
+- **Response:** `{ subject, concept, topic, overview, keyIdeas[], socraticQuestions[], pitfalls[], tryThis, tryThisQuestion, cached }`. `tryThisQuestion` is a practice-ready `{ question, targetConcept, difficulty }` (or `null`) — a concrete "try this" problem **cached with the guide**, so the Learn tab can start a practice attempt from it with **no `/api/generate` call**.
 
 ### The Groq client (`lib/groq.js`)
 - Models: **generation + Learn** use `llama-3.3-70b-versatile` (`GROQ_MODEL`); **grading** uses the cheaper `openai/gpt-oss-120b` (`GROQ_GRADE_MODEL`, via `groqJSON({grade:true})`, with `reasoning_effort` pinned low); **vision** (photo grading) uses `meta-llama/llama-4-scout-17b-16e-instruct` regardless. Every call logs `[groq] <model> in=… out=…` token usage to the server log for cost monitoring. All overridable via env.
@@ -328,7 +346,7 @@ Components: **SignIn** (provider buttons), **ProfileTab** (identity + stats + co
 
 ## 13. Testing
 
-**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **150 tests across 15 files**, all passing.
+**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **159 tests across 17 files**, all passing.
 
 | File | Covers |
 |---|---|
@@ -337,7 +355,9 @@ Components: **SignIn** (provider buttons), **ProfileTab** (identity + stats + co
 | `test/rateLimit.test.js` | window limit, reset, per-key, memory bound (enforceCap) |
 | `test/api-generate.test.js` | validation/400s, prototype-key rejection, non-leaking 500, weakConcepts cap, **diagnostic pool (warm-serve / cold self-fill via RPC / invalid-row + invalid-generated guards / read-error fall-through)** |
 | `test/api-grade.test.js` | validation, MIME/base64, score/rubric normalization, difficulty-band threading, **valid-image → vision-model forwarding**, non-leaking 500 |
-| `test/api-learn.test.js` | validation, normalization, **cache hit/miss/write-fail/key-normalization via the real `conceptKey` (quote-strip)**, tryThisQuestion shaping |
+| `test/api-learn.test.js` | validation, normalization, **cache hit/miss via `promote_or_insert_guide` / key-normalization (real `conceptKey`) / LLM-topic validation / safety-gate (`p_safe`)**, tryThisQuestion shaping |
+| `test/taxonomy.test.js` | the 36-topic Subject→Topic tree: 12/subject incl. `general_*`, `isValidTopic`/`normalizeTopic` (case-tolerant, prototype-safe, cross-subject reject), labels/slugs |
+| `test/contentSafety.test.js` | `isConceptSafe` accepts STEM labels; rejects links/emails/markup/blocklist/over-long/symbol-dominated |
 | `test/store.test.js` | migration clamping + **single-flight dedup + >5000-attempt cap**, delete RPC, signed-in load/save paths + **user_id scoping** + data-wipe guard, **atomic `saveProgress`** incl. **guest quota-failure surfacing** (mocked Supabase) |
 | `test/noobtopro.test.jsx` | the state machine: **diagnostic image-preview revoke on completion** + **`submitPractice` run-token guard** (stale grade after Restart doesn't persist or repopulate) |
 | `test/noobtopro-reset.test.jsx` | the **"Restart" logo**: a signed-in user keeps persisted progress (re-hydrates, never blanks) while a guest's local session clears to the intro |
@@ -399,6 +419,10 @@ History of what's shipped is in `git log` (PRs #2–#26): flatten-for-Vercel, au
 **Activation (config only, no code):**
 - Set `SUPABASE_SERVICE_ROLE_KEY` → turns on the shared concept-guide cache.
 - Configure + enable GitHub & Discord providers → flip `NEXT_PUBLIC_ENABLE_*`.
+
+**Concept Hub (in progress — see "Where to start"):**
+- v1 remaining: the hub **browse UI** (`LearnTab` rebuild + `lib/catalog.js`, behind `NEXT_PUBLIC_ENABLE_CONCEPT_HUB`) and the **curated seed** generation + **moderation report/hide/regenerate** flow.
+- v1.1: **`pg_trgm`** fuzzy/typo-tolerant search (available, not yet installed — ships as its own `create extension` migration; v1 uses plain `ILIKE`); a curated **`tags[]`** cross-cutting facet; a **canonical-merge** tool to de-duplicate near-identical concepts (the live data already has clusters like 4 energy / 3 equilibrium — v1 clusters them by topic); a **durable rate limiter** before heavy public traffic. `times_opened` is stored but inert until a batched popularity counter is designed.
 
 **Product / model:**
 - **Extend `blend()` toward a full IRT/Elo model.** The shipped version already weights by question difficulty and per-attempt reasoning quality via an Elo *surprise* term (see §11); remaining work is per-item difficulty ratings (vs fixed band midpoints) and calibrating the constants (`ELO_SCALE`, the confidence range, the `alpha` cap) against logged attempts.

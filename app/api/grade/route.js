@@ -1,9 +1,32 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { groqJSON, DIAG_GRADE_SYS, PRACTICE_GRADE_SYS } from "@/lib/groq";
 import { clampScore, ORDER } from "@/lib/scoring";
 import { rateLimit, clientKey } from "@/lib/rateLimit";
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const dynamic = "force-dynamic";
+
+// Auto-grow the concept hub: register the grader's (server-normalized, capped)
+// weak concepts as PENDING catalog stubs, AFTER the response so grading latency
+// is untouched. Runs only when the service-role key is set; falls back to
+// fire-and-forget outside a request scope (e.g. unit tests) so it never throws
+// into the grade path.
+function registerWeakConcepts(subject, weakConcepts) {
+  if (!ORDER.includes(subject) || !Array.isArray(weakConcepts) || weakConcepts.length === 0) return;
+  const task = async () => {
+    try {
+      const sb = getSupabaseAdmin();
+      if (sb) await sb.rpc("register_concepts", { p_subject: subject, p_concepts: weakConcepts });
+    } catch (e) {
+      console.error("[/api/grade] register_concepts", e); // best-effort; self-heals next grade
+    }
+  };
+  try {
+    after(task);
+  } catch {
+    void task();
+  }
+}
 
 // Cap the base64 image at ~3 MB decoded. Kept under Vercel's ~4.5 MB request
 // body limit so this check is actually reachable (the platform would otherwise
@@ -141,10 +164,12 @@ export async function POST(req) {
       });
       // Clamp the model's score before it reaches the client/UI.
       const clamped = clampScore(data?.score);
+      const weakConcepts = normalizeWeakConcepts(data?.weakConcepts);
+      registerWeakConcepts(subject, weakConcepts); // auto-grow the hub (non-blocking)
       return NextResponse.json({
         ...data,
         score: clamped ?? 0,
-        weakConcepts: normalizeWeakConcepts(data?.weakConcepts),
+        weakConcepts,
       });
     }
 
@@ -165,12 +190,14 @@ export async function POST(req) {
     // Normalize every score the UI renders so malformed model output can't show
     // NaN or out-of-range values. reasoningScore -> /100 display; rubric -> 0–4
     // bars; newScoreSuggestion -> blend() (null is handled there as "no change").
+    const weakConcepts = normalizeWeakConcepts(data?.weakConcepts);
+    registerWeakConcepts(subject, weakConcepts); // auto-grow the hub (non-blocking)
     return NextResponse.json({
       ...data,
       reasoningScore: clampScore(data?.reasoningScore) ?? 0,
       newScoreSuggestion: clampScore(data?.newScoreSuggestion),
       rubric: normalizeRubric(data?.rubric),
-      weakConcepts: normalizeWeakConcepts(data?.weakConcepts),
+      weakConcepts,
     });
   } catch (e) {
     // Log server-side; return a generic message so upstream Groq status/body

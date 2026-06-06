@@ -3,6 +3,8 @@ import { groqJSON, LEARN_SYS } from "@/lib/groq";
 import { ORDER } from "@/lib/scoring";
 import { rateLimit, clientKey } from "@/lib/rateLimit";
 import { getSupabaseAdmin, conceptKey } from "@/lib/supabaseAdmin";
+import { normalizeTopic, topicSlugsFor } from "@/lib/taxonomy";
+import { isConceptSafe } from "@/lib/contentSafety";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +42,7 @@ function normalizeGuide(subject, concept, raw) {
   return {
     subject,
     concept,
+    topic: normalizeTopic(subject, raw?.topic), // curated taxonomy slug (validated)
     overview: cap(raw?.overview, 1500),
     keyIdeas: capArr(raw?.keyIdeas, 6, 500),
     socraticQuestions: capArr(raw?.socraticQuestions, 5, 500),
@@ -103,7 +106,8 @@ export async function POST(req) {
       system: LEARN_SYS,
       user:
         `Subject: ${subject}\n` +
-        `Concept to teach: ${safeConcept}\n\n` +
+        `Concept to teach: ${safeConcept}\n` +
+        `Allowed topics (pick exactly one slug for the "topic" field): ${topicSlugsFor(subject)}\n\n` +
         `Write the one standard, level-neutral guide for this concept now — teach, don't solve.`,
       // A full concept guide (overview + key ideas + Socratic questions + pitfalls
       // + try-this) is the longest response we ask Groq for; give it more room than
@@ -119,16 +123,22 @@ export async function POST(req) {
     );
   }
 
-  // 3) Store for everyone (best-effort, first-writer-wins). Only worth caching a
-  // guide with real content.
+  // 3) Store for everyone (best-effort). Promote a pending (grader-registered)
+  // stub into a ready, browsable guide — made PUBLIC only if the concept passes
+  // the safety gate — or insert a fresh user-originated guide kept PRIVATE
+  // (hidden) until vetted. Never overwrites an existing ready guide (first-writer-
+  // wins is enforced inside the RPC). conceptKey/_concept_key parity means a
+  // grader-registered stub collides on the same key and is promoted, not duplicated.
   if (sb && guide.overview) {
     try {
-      await sb
-        .from("concept_guides")
-        .upsert(
-          { subject, concept_key: key, concept: safeConcept, content: guide },
-          { onConflict: "subject,concept_key", ignoreDuplicates: true }
-        );
+      await sb.rpc("promote_or_insert_guide", {
+        p_subject: subject,
+        p_concept: safeConcept,
+        p_content: guide,
+        p_topic: guide.topic,
+        p_level: guide.tryThisQuestion ? guide.tryThisQuestion.difficulty : null,
+        p_safe: isConceptSafe(safeConcept),
+      });
     } catch (e) {
       console.error("[/api/learn] cache write", e); // non-fatal
     }
