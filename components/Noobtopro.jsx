@@ -521,9 +521,13 @@ export default function Noobtopro() {
         targetConcept: pQuestion.targetConcept,
         score: prev.score,
         reasoning: pText,
+        difficulty: pQuestion.difficulty,
         image: pImg ? { mime: pImg.mime, data: pImg.data } : undefined,
       });
-      const updatedScore = blend(prev.score, r.newScoreSuggestion);
+      const updatedScore = blend(prev.score, r.newScoreSuggestion, {
+        difficulty: pQuestion.difficulty,
+        reasoningScore: r.reasoningScore,
+      });
       const updatedScores = {
         ...scores,
         [pSubject]: {

@@ -31,6 +31,23 @@ const RUBRIC_KEYS = [
   "communication",
 ];
 
+// Accepted practice difficulty bands (must match PRACTICE_GEN_SYS in lib/groq.js
+// and DIFFICULTY_ANCHORS in lib/scoring.js). An unknown/missing value normalizes
+// to "(unspecified)" so an arbitrary client string never reaches the prompt —
+// mirrors the ORDER.includes / capText input-bounding used elsewhere in this route.
+const ALLOWED_DIFFICULTY = new Set([
+  "beginner",
+  "foundational",
+  "intermediate",
+  "advanced",
+  "phd",
+]);
+function normalizeDifficulty(d) {
+  if (typeof d !== "string") return "(unspecified)";
+  const key = d.trim().toLowerCase();
+  return ALLOWED_DIFFICULTY.has(key) ? key : "(unspecified)";
+}
+
 // Validate an optional attached image. Returns { ok, image } or { ok:false, error }.
 function normalizeImage(image) {
   if (image == null) return { ok: true, image: undefined };
@@ -87,10 +104,11 @@ export async function POST(req) {
     return NextResponse.json({ error: "Request body must be valid JSON." }, { status: 400 });
   }
 
-  const { kind, subject, question, targetConcept, score, reasoning, image } = body || {};
+  const { kind, subject, question, targetConcept, score, reasoning, image, difficulty } = body || {};
   const work = reasoning && reasoning.trim() ? capText(reasoning.trim()) : "(no written reasoning provided)";
   const safeQuestion = capText(question);
   const safeConcept = capText(targetConcept) || "(unspecified)";
+  const safeDifficulty = normalizeDifficulty(difficulty);
 
   if (kind !== "diagnostic" && kind !== "practice") {
     return NextResponse.json(
@@ -137,6 +155,7 @@ export async function POST(req) {
         `Subject: ${subject}\n` +
         `Question: ${safeQuestion}\n` +
         `Concept being probed: ${safeConcept}\n` +
+        `Question difficulty band: ${safeDifficulty}\n` +
         `Learner's current level: ${safeScore}/100\n\n` +
         `Learner's reasoning:\n"""${work}"""`,
       image: img.image,
