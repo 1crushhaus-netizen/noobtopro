@@ -226,3 +226,38 @@ create table if not exists public.concept_guides (
 alter table public.concept_guides enable row level security;
 -- (No policies on purpose — service-role-only access. Writes use first-writer-
 -- wins: insert ... on conflict do nothing, so a guide is generated once and frozen.)
+
+-- ---- shared diagnostic pool ------------------------------------------------
+-- The diagnostic is a static, level-neutral baseline (no per-user input), so it
+-- is safe to standardize across users — same philosophy as concept_guides. We
+-- pool a handful of full 3-subject sets, then /api/generate serves them at random
+-- with NO Groq call; below DIAG_POOL_TARGET the pool self-fills. INTERNAL table:
+-- RLS on, NO policies (service-role only). If SUPABASE_SERVICE_ROLE_KEY is unset,
+-- pooling is skipped and the diagnostic is generated fresh each time (still works).
+create table if not exists public.diagnostic_pool (
+  id bigint generated always as identity primary key,
+  content jsonb not null,                 -- a full {questions:[{subject,topic,question}x3]} set
+  created_at timestamptz not null default now()
+);
+alter table public.diagnostic_pool enable row level security;
+
+-- Atomic, advisory-locked, count-gated pool insert. Concurrent cold-start fills
+-- would otherwise each read count < target and all insert (TOCTOU -> overshoot);
+-- serializing on one advisory lock and re-checking the count inside the same
+-- statement caps the pool at p_target exactly. SECURITY DEFINER + service-role-only
+-- (the table has no RLS policies; only the server's admin client calls this).
+create or replace function public.try_add_diagnostic(p_content jsonb, p_target int default 12)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  perform pg_advisory_xact_lock(hashtext('diagnostic_pool_fill'));
+  if (select count(*) from public.diagnostic_pool) < greatest(coalesce(p_target, 0), 0) then
+    insert into public.diagnostic_pool (content) values (p_content);
+  end if;
+end;
+$$;
+revoke all on function public.try_add_diagnostic(jsonb, int) from public, anon, authenticated;
+grant execute on function public.try_add_diagnostic(jsonb, int) to service_role;

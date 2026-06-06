@@ -227,11 +227,12 @@ NEXT_PUBLIC_* values are **inlined into the client bundle at build time** (a cha
 | Variable | Secret? | Required | What it does |
 |---|---|---|---|
 | `GROQ_API_KEY` | **Yes** (mark Sensitive) | For LLM features | Server-side Groq key. Without it, `/api/*` return a friendly 500. |
-| `GROQ_MODEL` | no | no | Override text model. Default `llama-3.3-70b-versatile`. |
+| `GROQ_MODEL` | no | no | Override the text model used for **generation + Learn**. Default `llama-3.3-70b-versatile`. |
+| `GROQ_GRADE_MODEL` | no | no | Override the **grading** model (the hottest path). Default `openai/gpt-oss-120b` (~3.9× cheaper input / ~1.3× output than the 70B; `reasoning_effort` pinned low). Set to `llama-3.3-70b-versatile` to roll back instantly. |
 | `GROQ_VISION_MODEL` | no | no | Override vision model for photo grading. Default `meta-llama/llama-4-scout-17b-16e-instruct`. |
 | `NEXT_PUBLIC_SUPABASE_URL` | no (public) | For auth/persistence | Supabase API URL. Without it + the anon key, the app runs guest-only. |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | no (public, RLS-protected) | For auth/persistence | Supabase anon key. Public by design; RLS scopes rows to their owner. |
-| `SUPABASE_SERVICE_ROLE_KEY` | **Yes** (mark Sensitive) | no | Enables the shared concept-guide cache in `/api/learn`. Server-only secret (Supabase → Settings → API → `service_role`). Unset = no cache (still works). |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Yes** (mark Sensitive) | no | Enables **both** shared read-through caches — the concept-guide cache (`/api/learn`) **and** the diagnostic pool (`/api/generate`). Server-only secret (Supabase → Settings → API → `service_role`). Unset = neither cache active (both features still work, regenerating each time). |
 | `NEXT_PUBLIC_ENABLE_GITHUB` | no (public) | no | `"true"` shows the GitHub sign-in button. Set **only after** configuring GitHub in Supabase, else it errors on click. |
 | `NEXT_PUBLIC_ENABLE_DISCORD` | no (public) | no | Same, for Discord. |
 
@@ -246,6 +247,7 @@ To stand up the database from scratch (or reproduce it), **run `db/schema.sql` i
 - **`scores`** — `(user_id uuid, subject text check(math|physics|chemistry), score int, weak_concepts text[], comment text, updated_at)`, PK `(user_id, subject)`.
 - **`attempts`** — `(id bigint identity PK, user_id, created_at, type text check('baseline'|'attempt'), subject, reasoning_score, delta, new_score, total_after, phd_after)`. Indexed `(user_id, created_at, id)`.
 - **`concept_guides`** *(internal cache)* — `(subject, concept_key, concept, content jsonb, created_at)`, PK `(subject, concept_key)`. **RLS enabled with NO policies** → only the service role (server) can touch it; no end-user can read or pollute it.
+- **`diagnostic_pool`** *(internal cache)* — `(id bigint identity, content jsonb, created_at)`. A handful of full 3-subject baseline diagnostics, reused across users (standardized, like the guides). Same **RLS-on / NO-policies** service-role lock. `/api/generate` serves a random one with no Groq call once it reaches `DIAG_POOL_TARGET` (12); below that it self-fills via the **`try_add_diagnostic(p_content, p_target)`** RPC — an advisory-locked, count-gated insert (`service_role`-only) so concurrent cold-start fills can't overshoot the target.
 
 `scores`/`attempts` have RLS: `for all to authenticated using ((select auth.uid()) = user_id) with check (...)` — each user only ever sees/writes their own rows.
 
@@ -282,7 +284,7 @@ The UI only ever calls these; they transparently use Supabase when signed in, el
 All three routes are `POST`, `dynamic = "force-dynamic"`, **rate-limited per IP** (`lib/rateLimit.js`: 30 req/min/IP, in-memory; returns `429` + `Retry-After`), validate input (→ `400`), normalize model output, and return a **generic `500`** (the real Groq error is logged server-side, never leaked).
 
 ### `POST /api/generate`
-- **Diagnostic:** `{ "kind": "diagnostic" }` → `{ questions: [{subject, topic, question} × 3] }` (one per subject).
+- **Diagnostic:** `{ "kind": "diagnostic" }` → `{ questions: [{subject, topic, question} × 3] }` (one per subject). **Read-through `diagnostic_pool`:** once the pool holds `DIAG_POOL_TARGET` (12) valid full sets, returns a random one (`pooled:true`) with **no Groq call**; below that, generates fresh and self-fills the pool (only valid 3-subject sets). Skipped when `SUPABASE_SERVICE_ROLE_KEY` is unset (always generates).
 - **Practice:** `{ "kind": "practice", "subject": "math"|"physics"|"chemistry", "score": int, "weakConcepts": string[] }` → `{ subject, topic, targetConcept, difficulty, question }`. Subject validated via `ORDER.includes` (prototype-safe); `weakConcepts` capped.
 
 ### `POST /api/grade`
@@ -297,7 +299,7 @@ All three routes are `POST`, `dynamic = "force-dynamic"`, **rate-limited per IP*
 - **Response:** `{ subject, concept, overview, keyIdeas[], socraticQuestions[], pitfalls[], tryThis, tryThisQuestion, cached }`. `tryThisQuestion` is a practice-ready `{ question, targetConcept, difficulty }` (or `null`) — a concrete "try this" problem **cached with the guide**, so the Learn tab can start a practice attempt from it with **no `/api/generate` call**.
 
 ### The Groq client (`lib/groq.js`)
-- Models: text `llama-3.3-70b-versatile`, vision `meta-llama/llama-4-scout-17b-16e-instruct` (overridable via env).
+- Models: **generation + Learn** use `llama-3.3-70b-versatile` (`GROQ_MODEL`); **grading** uses the cheaper `openai/gpt-oss-120b` (`GROQ_GRADE_MODEL`, via `groqJSON({grade:true})`, with `reasoning_effort` pinned low); **vision** (photo grading) uses `meta-llama/llama-4-scout-17b-16e-instruct` regardless. Every call logs `[groq] <model> in=… out=…` token usage to the server log for cost monitoring. All overridable via env.
 - All system prompts live here: `DIAG_GEN_SYS`, `DIAG_GRADE_SYS`, `PRACTICE_GEN_SYS`, `PRACTICE_GRADE_SYS`, `LEARN_SYS`. Every grading/teaching prompt forbids revealing answers.
 - `groqJSON({system, user, image})` — calls Groq (JSON mode, with a robust fallback that strips ``` fences and does a **balanced-brace, string-aware** extraction), and on an attached image uses the vision model with graceful text-only fallback.
 
@@ -335,14 +337,14 @@ Components: **SignIn** (provider buttons), **ProfileTab** (identity + stats + co
 
 ## 13. Testing
 
-**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **126 tests across 11 files**, all passing.
+**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **133 tests across 11 files**, all passing.
 
 | File | Covers |
 |---|---|
 | `test/scoring.test.js` | clampScore/band/blend (legacy + weighted Elo path)/totalPoints/phdIndex incl. regressions |
-| `test/groq.test.js` | JSON extraction (fences, prose, braces-in-strings), fallback retry **gating (no retry on hard HTTP errors)**, per-call `max_tokens`, errors |
+| `test/groq.test.js` | JSON extraction (fences, prose, braces-in-strings), fallback retry **gating (no retry on hard HTTP errors)**, per-call `max_tokens`, **grade-model routing (gpt-oss + `reasoning_effort` low)**, errors |
 | `test/rateLimit.test.js` | window limit, reset, per-key, memory bound (enforceCap) |
-| `test/api-generate.test.js` | validation/400s, prototype-key rejection, non-leaking 500, weakConcepts cap |
+| `test/api-generate.test.js` | validation/400s, prototype-key rejection, non-leaking 500, weakConcepts cap, **diagnostic pool (warm-serve / cold self-fill via RPC / invalid-row + invalid-generated guards / read-error fall-through)** |
 | `test/api-grade.test.js` | validation, MIME/base64, score/rubric normalization, difficulty-band threading, non-leaking 500 |
 | `test/api-learn.test.js` | validation, normalization, **cache hit/miss/write-fail/key-normalization** (filter-aware mock), tryThisQuestion shaping |
 | `test/store.test.js` | migration clamping, delete RPC, signed-in load/save/record paths + data-wipe guard, **atomic `saveProgress`** (mocked Supabase) |
