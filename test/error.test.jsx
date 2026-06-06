@@ -8,7 +8,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("app/error.js — error boundary", () => {
+describe("app/error.jsx — error boundary", () => {
   it("logs the caught error on mount so prod crashes leave a breadcrumb", () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     const boom = new globalThis.Error("boom");

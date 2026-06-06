@@ -300,10 +300,20 @@ export default function Noobtopro() {
         setStage((p) => (p === "signin" ? "dashboard" : p)); // leave the sign-in menu
         hydrate(); // migrates guest progress, then loads the account
       } else if (event === "SIGNED_OUT") {
-        // Signing out abandons any in-progress diagnostic/practice — free its
-        // image previews before re-hydrating so the object URLs don't leak.
+        // Signing out abandons any in-progress diagnostic/practice. Free its image
+        // previews AND clear the composer state, so the abandoned flow unmounts and
+        // nothing renders a now-revoked object URL (hydrate() may keep stage on
+        // "diagnostic", which would otherwise show a broken preview). hydrate()
+        // then reloads the guest view.
         Object.values(answersRef.current || {}).forEach((a) => revokePreview(a && a.img));
         revokePreview(pImgRef.current);
+        setAnswers({});
+        setQuestions([]);
+        setQi(0);
+        setPImg(null);
+        setPText("");
+        setPQuestion(null);
+        setFeedback(null);
         setView("practice");
         hydrate();
       }

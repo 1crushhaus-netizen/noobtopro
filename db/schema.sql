@@ -88,7 +88,7 @@ begin
   insert into public.scores (user_id, subject, score, weak_concepts, comment, updated_at)
   select uid,
          s->>'subject',
-         greatest(0, least(100, coalesce((s->>'score')::numeric, 0)))::int,
+         greatest(0, least(100, coalesce(case when pg_input_is_valid(s->>'score', 'numeric') then round((s->>'score')::numeric) end, 0)))::int,
          coalesce(
            (select array_agg(left(value, 200)) from jsonb_array_elements_text(s->'weak_concepts') as value),
            '{}'::text[]

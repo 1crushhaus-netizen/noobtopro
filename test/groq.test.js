@@ -111,6 +111,32 @@ describe("groqJSON", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("falls back to a text-only grade on the text model when a vision call hits a hard error (429)", async () => {
+    // A 429/5xx on the VISION model is model-specific; TEXT_MODEL is a separate
+    // endpoint, so a degraded text-only grade is still a valid recovery (not a
+    // total failure). First (vision) call 429 → second call must be text-only.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 429, text: async () => "vision rate limited" })
+      .mockResolvedValueOnce(reply('{"reasoningScore":50}'));
+    vi.stubGlobal("fetch", fetchMock);
+    const out = await groqJSON({ system: "s", user: "u", image: { data: "abc", mime: "image/png" } });
+    expect(out).toEqual({ reasoningScore: 50 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(secondBody.model).toBe("llama-3.3-70b-versatile"); // TEXT_MODEL
+    expect(typeof secondBody.messages[1].content).toBe("string"); // text-only, no image array
+  });
+
+  it("fails fast on a vision 401/403 (shared key) without a pointless text-only retry", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 401, text: async () => "bad key" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      groqJSON({ system: "s", user: "u", image: { data: "abc", mime: "image/png" } })
+    ).rejects.toThrow(/401/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("threads a per-call maxTokens into the request body, defaulting to 1200", async () => {
     const fetchMock = vi.fn(async () => reply('{"ok":true}'));
     vi.stubGlobal("fetch", fetchMock);
