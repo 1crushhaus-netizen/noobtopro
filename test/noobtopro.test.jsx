@@ -45,13 +45,29 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+// The 3-tier diagnostic: every subject × every difficulty (9 questions). Listed
+// out of order on purpose — beginDiagnostic re-orders them subject-major, easy→hard.
 const DIAGNOSTIC = {
   questions: [
-    { subject: "math", topic: "t", question: "MATHQ" },
-    { subject: "physics", topic: "t", question: "PHYSQ" },
-    { subject: "chemistry", topic: "t", question: "CHEMQ" },
+    { subject: "physics", topic: "t", difficulty: "advanced", question: "PHYS-ADV" },
+    { subject: "math", topic: "t", difficulty: "foundational", question: "MATH-FND" },
+    { subject: "chemistry", topic: "t", difficulty: "intermediate", question: "CHEM-INT" },
+    { subject: "math", topic: "t", difficulty: "advanced", question: "MATH-ADV" },
+    { subject: "physics", topic: "t", difficulty: "foundational", question: "PHYS-FND" },
+    { subject: "chemistry", topic: "t", difficulty: "advanced", question: "CHEM-ADV" },
+    { subject: "math", topic: "t", difficulty: "intermediate", question: "MATH-INT" },
+    { subject: "physics", topic: "t", difficulty: "intermediate", question: "PHYS-INT" },
+    { subject: "chemistry", topic: "t", difficulty: "foundational", question: "CHEM-FND" },
   ],
 };
+
+// The order beginDiagnostic presents them in: subject-major (math, physics,
+// chemistry), each easy→hard (foundational, intermediate, advanced).
+const DIAGNOSTIC_ORDER = [
+  "MATH-FND", "MATH-INT", "MATH-ADV",
+  "PHYS-FND", "PHYS-INT", "PHYS-ADV",
+  "CHEM-FND", "CHEM-INT", "CHEM-ADV",
+];
 
 async function attachImageToCurrentComposer(container) {
   const input = container.querySelector('input[type="file"]');
@@ -65,27 +81,23 @@ describe("Noobtopro — diagnostic image previews are revoked on completion (lea
   it("revokes every answer's object URL once the diagnostic finishes and the dashboard shows", async () => {
     vi.stubGlobal("fetch", vi.fn(async (path) => {
       if (path === "/api/generate") return jsonRes(DIAGNOSTIC);
-      if (path === "/api/grade") return jsonRes({ score: 55, weakConcepts: [], comment: "ok" });
+      if (path === "/api/grade") return jsonRes({ score: 55, weakConcepts: [], comment: "" });
       return jsonRes({});
     }));
 
     const { container } = render(<Noobtopro />);
     fireEvent.click(await screen.findByRole("button", { name: /prove it/i }));
 
-    // Q1 (math): attach an image, advance.
-    await screen.findByText("MATHQ");
-    await attachImageToCurrentComposer(container);
-    fireEvent.click(screen.getByRole("button", { name: /next question/i }));
-
-    // Q2 (physics): attach an image, advance.
-    await screen.findByText("PHYSQ");
-    await attachImageToCurrentComposer(container);
-    fireEvent.click(screen.getByRole("button", { name: /next question/i }));
-
-    // Q3 (chemistry): attach an image, get ranked.
-    await screen.findByText("CHEMQ");
-    await attachImageToCurrentComposer(container);
-    fireEvent.click(screen.getByRole("button", { name: /get ranked/i }));
+    // Step through all 9 questions (subject-major, easy→hard). Attach an image to
+    // each so there are 9 previews; "Next question" for Q1–Q8, "Get ranked" for Q9.
+    for (let i = 0; i < DIAGNOSTIC_ORDER.length; i++) {
+      const isLast = i === DIAGNOSTIC_ORDER.length - 1;
+      await screen.findByText(DIAGNOSTIC_ORDER[i]);
+      await attachImageToCurrentComposer(container);
+      fireEvent.click(
+        screen.getByRole("button", { name: isLast ? /get ranked/i : /next question/i })
+      );
+    }
 
     // Lands on the dashboard once grading completes.
     await screen.findByText("Where you stand");
@@ -94,12 +106,12 @@ describe("Noobtopro — diagnostic image previews are revoked on completion (lea
     expect(screen.getByRole("img", { name: /Mathematics: Score \d+ of 100/ })).toBeTruthy();
     expect(screen.getByRole("img", { name: /Chemistry: Score \d+ of 100/ })).toBeTruthy();
 
-    // Three previews were created; all three must be revoked on completion (no leak).
-    expect(URL.createObjectURL).toHaveBeenCalledTimes(3);
-    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(3);
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:p0");
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:p1");
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:p2");
+    // Nine previews were created; all nine must be revoked on completion (no leak).
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(9);
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(9);
+    for (let i = 0; i < 9; i++) {
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith(`blob:p${i}`);
+    }
   });
 });
 

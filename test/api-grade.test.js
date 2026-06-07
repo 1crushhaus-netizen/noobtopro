@@ -292,6 +292,46 @@ describe("POST /api/grade — difficulty band threading (practice)", () => {
   });
 });
 
+describe("POST /api/grade — difficulty band threading (diagnostic)", () => {
+  // Pull the user-message string actually sent upstream to Groq (no image -> string).
+  function sentUserMessage(fetchMock) {
+    const sentBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const userMsg = sentBody.messages.find((m) => m.role === "user");
+    return typeof userMsg.content === "string" ? userMsg.content : "";
+  }
+
+  const diagnosticBody = (extra) => ({
+    kind: "diagnostic",
+    subject: "math",
+    question: "What is the limit of (sin x)/x as x->0?",
+    reasoning: "It approaches 1.",
+    ...extra,
+  });
+
+  it("threads a valid difficulty band into the grader prompt and returns the normalized {score, weakConcepts} shape", async () => {
+    const fetchMock = mockGroqReturning({
+      subject: "math",
+      score: 150, // out of range -> must clamp to 100
+      weakConcepts: ["limits", "  ", "epsilon-delta"],
+      comment: "ok",
+    });
+    const res = await POST(req(diagnosticBody({ difficulty: "advanced" })));
+    expect(res.status).toBe(200);
+    // The captured upstream prompt carries the difficulty band line.
+    expect(sentUserMessage(fetchMock)).toMatch(/difficulty band: advanced/i);
+    const json = await res.json();
+    expect(json.score).toBe(100); // clamped
+    expect(json.weakConcepts).toEqual(["limits", "epsilon-delta"]); // blank dropped
+  });
+
+  it("normalizes a missing difficulty to (unspecified) in the diagnostic prompt", async () => {
+    const fetchMock = mockGroqReturning({ subject: "math", score: 50, weakConcepts: [], comment: "ok" });
+    const res = await POST(req(diagnosticBody())); // no difficulty key
+    expect(res.status).toBe(200);
+    expect(sentUserMessage(fetchMock)).toMatch(/difficulty band: \(unspecified\)/i);
+  });
+});
+
 describe("POST /api/grade — image validation + vision forwarding", () => {
   // base64 of the 8-byte PNG magic signature (89 50 4E 47 0D 0A 1A 0A).
   const PNG_B64 = "iVBORw0KGgo=";

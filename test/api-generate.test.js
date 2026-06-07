@@ -42,13 +42,22 @@ function fakeAdmin({ count = 0, row = null } = {}) {
   };
 }
 
-const VALID_DIAG = {
-  questions: [
-    { subject: "math", topic: "t", question: "pooled q1" },
-    { subject: "physics", topic: "t", question: "pooled q2" },
-    { subject: "chemistry", topic: "t", question: "pooled q3" },
-  ],
-};
+// A VALID diagnostic is now 9 questions: for EVERY subject (math/physics/
+// chemistry) one question at EACH difficulty tier (foundational/intermediate/
+// advanced). Build it from ORDER × DIAGNOSTIC_DIFFICULTIES so it stays in lock-
+// step with isValidDiagnostic in app/api/generate/route.js.
+const DIAG_SUBJECTS = ["math", "physics", "chemistry"];
+const DIAG_DIFFICULTIES = ["foundational", "intermediate", "advanced"];
+function validDiagnostic() {
+  const questions = [];
+  for (const subject of DIAG_SUBJECTS) {
+    for (const difficulty of DIAG_DIFFICULTIES) {
+      questions.push({ subject, topic: "t", difficulty, question: `${subject} ${difficulty} q` });
+    }
+  }
+  return { questions }; // 9 questions, 3 per subject
+}
+const VALID_DIAG = validDiagnostic();
 
 function req(bodyObjOrString) {
   const body =
@@ -202,7 +211,7 @@ describe("POST /api/generate — diagnostic pool", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.pooled).toBe(true);
-    expect(json.questions).toHaveLength(3);
+    expect(json.questions).toHaveLength(9); // full 3-subject × 3-tier set
     expect(failFetch).not.toHaveBeenCalled(); // zero generation tokens
   });
 
@@ -250,35 +259,65 @@ describe("POST /api/generate — diagnostic pool", () => {
     const res = await POST(req({ kind: "diagnostic" }));
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.questions).toHaveLength(3);
+    expect(json.questions).toHaveLength(9);
     expect(fetchMock).toHaveBeenCalled(); // generated on a cold pool
     expect(admin.calls.rpcs).toHaveLength(1); // and stored it via the atomic pool-fill RPC
     expect(admin.calls.rpcs[0].fn).toBe("try_add_diagnostic");
-    expect(admin.calls.rpcs[0].args.p_content.questions).toHaveLength(3);
+    const stored = admin.calls.rpcs[0].args.p_content.questions;
+    expect(stored).toHaveLength(9); // 3 per subject
+    for (const subject of DIAG_SUBJECTS) {
+      expect(stored.filter((q) => q.subject === subject)).toHaveLength(3);
+    }
   });
 
-  it("does NOT serve an invalid (incomplete) pooled diagnostic — falls back to generation", async () => {
-    const fetchMock = mockGroqReturning(VALID_DIAG);
-    // Warm pool but the drawn row is missing chemistry → must not be served.
-    const badRow = { content: { questions: [{ subject: "math", question: "q" }, { subject: "physics", question: "q" }] } };
-    adminMock.getAdmin.mockReturnValue(fakeAdmin({ count: 12, row: badRow }));
-    const res = await POST(req({ kind: "diagnostic" }));
-    expect(res.status).toBe(200);
-    const json = await res.json();
-    expect(json.pooled).toBeUndefined(); // fell through to a fresh generation
-    expect(fetchMock).toHaveBeenCalled();
-  });
+  // A drawn row that isn't a complete 3-subject × 3-tier set must never be served.
+  // Cover BOTH incomplete shapes: a whole subject missing, and a single tier
+  // missing for one subject (the 9-question contract isn't just "≥1 per subject").
+  const incompletePooled = {
+    "missing a whole subject (no chemistry)": {
+      questions: validDiagnostic().questions.filter((q) => q.subject !== "chemistry"), // 6 questions
+    },
+    "missing a difficulty for one subject (math has only foundational+intermediate)": {
+      questions: validDiagnostic().questions.filter(
+        (q) => !(q.subject === "math" && q.difficulty === "advanced")
+      ), // 8 questions
+    },
+  };
+  for (const [label, badContent] of Object.entries(incompletePooled)) {
+    it(`does NOT serve an invalid pooled diagnostic — ${label} → falls back to generation`, async () => {
+      const fetchMock = mockGroqReturning(VALID_DIAG);
+      adminMock.getAdmin.mockReturnValue(fakeAdmin({ count: 12, row: { content: badContent } }));
+      const res = await POST(req({ kind: "diagnostic" }));
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.pooled).toBeUndefined(); // fell through to a fresh generation
+      expect(fetchMock).toHaveBeenCalled();
+    });
+  }
 
-  it("does NOT store an invalid (partial) GENERATED set in the shared pool", async () => {
-    // Cold pool, but the model returns a 2-subject set → must not poison the pool.
-    const fetchMock = mockGroqReturning({ questions: [{ subject: "math", topic: "t", question: "q1" }, { subject: "physics", topic: "t", question: "q2" }] });
-    const admin = fakeAdmin({ count: 0 });
-    adminMock.getAdmin.mockReturnValue(admin);
-    const res = await POST(req({ kind: "diagnostic" }));
-    expect(res.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalled();
-    expect(admin.calls.rpcs).toHaveLength(0); // invalid set never written to the pool
-  });
+  // A GENERATED set that isn't a complete 3-subject × 3-tier set must never be
+  // written to the shared pool. Cover a missing subject AND a missing tier.
+  const incompleteGenerated = {
+    "a 2-subject set (no chemistry)": {
+      questions: validDiagnostic().questions.filter((q) => q.subject !== "chemistry"),
+    },
+    "a set missing math's advanced tier": {
+      questions: validDiagnostic().questions.filter(
+        (q) => !(q.subject === "math" && q.difficulty === "advanced")
+      ),
+    },
+  };
+  for (const [label, badContent] of Object.entries(incompleteGenerated)) {
+    it(`does NOT store an invalid GENERATED set in the shared pool — ${label}`, async () => {
+      const fetchMock = mockGroqReturning(badContent);
+      const admin = fakeAdmin({ count: 0 });
+      adminMock.getAdmin.mockReturnValue(admin);
+      const res = await POST(req({ kind: "diagnostic" }));
+      expect(res.status).toBe(200);
+      expect(fetchMock).toHaveBeenCalled();
+      expect(admin.calls.rpcs).toHaveLength(0); // invalid set never written to the pool
+    });
+  }
 
   it("falls through to generation (200, not 500) when the pool read throws", async () => {
     const fetchMock = mockGroqReturning(VALID_DIAG);
@@ -289,7 +328,7 @@ describe("POST /api/generate — diagnostic pool", () => {
     const res = await POST(req({ kind: "diagnostic" }));
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.questions).toHaveLength(3);
+    expect(json.questions).toHaveLength(9);
     expect(json.pooled).toBeUndefined(); // read failed → generated fresh
     expect(fetchMock).toHaveBeenCalled();
   });

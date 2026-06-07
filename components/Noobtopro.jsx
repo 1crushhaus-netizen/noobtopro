@@ -10,6 +10,9 @@ import {
   blend,
   totalPoints,
   phdIndex,
+  DIAGNOSTIC_DIFFICULTIES,
+  DIFFICULTY_LABELS,
+  diagnosticSubjectScore,
 } from "@/lib/scoring";
 import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData } from "@/lib/store";
 import { getSupabase, isSupabaseConfigured, signInWithProvider, signOutUser, PROVIDERS } from "@/lib/supabase";
@@ -104,6 +107,10 @@ function fileToBase64(file) {
 }
 
 const now = () => new Date().toISOString();
+
+// Stable per-question key for the 3-tier diagnostic (each subject has an
+// easy/intermediate/hard question), so the answers map can hold all 9 answers.
+const qid = (q) => (q ? `${q.subject}:${q.difficulty}` : "");
 
 // NEXT_PUBLIC_* is inlined at build time. When "true", the Learn tab becomes the
 // browsable Concept Hub (full catalog); otherwise it stays the weak-concept picker.
@@ -500,20 +507,30 @@ export default function Noobtopro() {
     setBusy(true);
     try {
       const data = await api("/api/generate", { kind: "diagnostic" });
-      // Keep the FIRST question per known subject, then require exactly one for
-      // each of the three. Guards against the model returning duplicates or an
-      // unknown subject, which would otherwise crash the dashboard (scores[k]
-      // undefined). ORDER.includes avoids inherited-key matches.
-      const bySubject = {};
+      // Index by subject+difficulty, then require ALL 3 subjects × ALL 3 tiers
+      // (9 questions). Guards against duplicates / unknown subject or difficulty /
+      // a partial set. ORDER.includes is prototype-safe.
+      const byKey = {};
       for (const q of data.questions || []) {
-        if (q && ORDER.includes(q.subject) && !bySubject[q.subject]) bySubject[q.subject] = q;
+        if (
+          q &&
+          ORDER.includes(q.subject) &&
+          DIAGNOSTIC_DIFFICULTIES.includes(q.difficulty) &&
+          typeof q.question === "string" &&
+          q.question.trim() &&
+          !byKey[qid(q)]
+        ) {
+          byKey[qid(q)] = q;
+        }
       }
-      const qs = ORDER.map((s) => bySubject[s]).filter(Boolean);
-      if (qs.length < ORDER.length) {
+      // Order subject-major, easy → hard.
+      const qs = [];
+      for (const s of ORDER) for (const d of DIAGNOSTIC_DIFFICULTIES) if (byKey[`${s}:${d}`]) qs.push(byKey[`${s}:${d}`]);
+      if (qs.length < ORDER.length * DIAGNOSTIC_DIFFICULTIES.length) {
         throw new Error("Could not generate a full diagnostic. Please try again.");
       }
       const init = {};
-      qs.forEach((q) => (init[q.subject] = { text: "", img: null }));
+      qs.forEach((q) => (init[qid(q)] = { text: "", img: null }));
       // Release any previews left over from a previous diagnostic before replacing
       // the answers map, so re-taking the diagnostic can't leak the old blob URLs.
       Object.values(answers).forEach((a) => revokePreview(a && a.img));
@@ -528,11 +545,13 @@ export default function Noobtopro() {
     }
   }
 
-  const curSubject = questions[qi] ? questions[qi].subject : null;
-  const curAns = curSubject ? answers[curSubject] || { text: "", img: null } : { text: "", img: null };
+  const curQ = questions[qi] || null;
+  const curKey = qid(curQ);
+  const curSubject = curQ ? curQ.subject : null;
+  const curAns = curKey ? answers[curKey] || { text: "", img: null } : { text: "", img: null };
 
   function setCurText(t) {
-    setAnswers((a) => ({ ...a, [curSubject]: { ...a[curSubject], text: t } }));
+    setAnswers((a) => ({ ...a, [curKey]: { ...a[curKey], text: t } }));
   }
   async function attachCur(file) {
     let data;
@@ -549,14 +568,14 @@ export default function Noobtopro() {
     // the first blob. Revoking is idempotent, so the double invocation is safe.
     const preview = URL.createObjectURL(file);
     setAnswers((a) => {
-      const prev = a[curSubject] && a[curSubject].img;
+      const prev = a[curKey] && a[curKey].img;
       if (prev && prev.preview !== preview) revokePreview(prev);
-      return { ...a, [curSubject]: { ...a[curSubject], img: { data, mime: file.type, name: file.name, preview } } };
+      return { ...a, [curKey]: { ...a[curKey], img: { data, mime: file.type, name: file.name, preview } } };
     });
   }
   function removeCurImg() {
     revokePreview(curAns.img);
-    setAnswers((a) => ({ ...a, [curSubject]: { ...a[curSubject], img: null } }));
+    setAnswers((a) => ({ ...a, [curKey]: { ...a[curKey], img: null } }));
   }
 
   function nextDiagnostic() {
@@ -569,25 +588,42 @@ export default function Noobtopro() {
     setError("");
     setStage("scoring");
     try {
+      // Grade all 9 questions in parallel; each returns THIS question's reasoning
+      // quality (0–100) + weak concepts, calibrated to its difficulty band.
       const results = await Promise.all(
         questions.map(async (q) => {
-          const a = answers[q.subject] || { text: "", img: null };
+          const a = answers[qid(q)] || { text: "", img: null };
           const r = await api("/api/grade", {
             kind: "diagnostic",
             subject: q.subject,
             question: q.question,
+            difficulty: q.difficulty,
             reasoning: a.text,
             image: a.img ? { mime: a.img.mime, data: a.img.data } : undefined,
           });
-          return [q.subject, { score: r.score, weakConcepts: r.weakConcepts || [], comment: r.comment || "" }];
+          return { subject: q.subject, difficulty: q.difficulty, reasoningScore: r.score, weakConcepts: r.weakConcepts || [], comment: r.comment || "" };
         })
       );
       // The user abandoned this diagnostic mid-grade (signed out / hit Restart):
       // bail BEFORE persisting so we don't re-write the abandoned baseline to the
       // store or stomp the freshly-reset intro state with a stale dashboard.
       if (myRun !== diagRun.current) return;
+      // Combine each subject's 3 graded answers into a difficulty-weighted baseline.
       const obj = {};
-      results.forEach(([k, v]) => (obj[k] = v));
+      for (const s of ORDER) {
+        const subjectQs = results.filter((r) => r.subject === s);
+        if (subjectQs.length === 0) continue;
+        const score = diagnosticSubjectScore(subjectQs);
+        // Union the weak concepts across the 3 tiers (cap 8); use the hardest
+        // answered question's comment as the subject summary.
+        const weakConcepts = Array.from(
+          new Set(subjectQs.flatMap((r) => r.weakConcepts).filter((c) => typeof c === "string" && c.trim()))
+        ).slice(0, 8);
+        const hardest = [...subjectQs].sort(
+          (a, b) => DIAGNOSTIC_DIFFICULTIES.indexOf(b.difficulty) - DIAGNOSTIC_DIFFICULTIES.indexOf(a.difficulty)
+        )[0];
+        obj[s] = { score, weakConcepts, comment: (hardest && hardest.comment) || "" };
+      }
       // Atomic: persist the baseline scores AND the baseline attempt together.
       const st = await saveProgress(obj, { type: "baseline", t: now(), totalAfter: totalPoints(obj), phdAfter: phdIndex(obj) });
       if (myRun !== diagRun.current) return; // abandoned during the save round-trip
@@ -1064,21 +1100,29 @@ export default function Noobtopro() {
             )}
 
             {/* DIAGNOSTIC */}
-            {stage === "diagnostic" && questions[qi] && (
+            {stage === "diagnostic" && curQ && (
               <div className="fade-up" key={qi}>
-                <div className="np-progress">
-                  {questions.map((q, i) => (
-                    <div key={i} className="np-progdot" style={{ background: i <= qi ? SUBJECTS[q.subject].color : "rgba(255,255,255,.12)" }} />
+                {/* Progress: 3 subject groups × 3 difficulty pips (easy→hard),
+                    filled up to the current question. Relies on the subject-major,
+                    easy→hard ordering set in beginDiagnostic. */}
+                <div className="np-diag-progress">
+                  {ORDER.map((s, si) => (
+                    <div key={s} className="np-diag-proggroup">
+                      {DIAGNOSTIC_DIFFICULTIES.map((d, di) => {
+                        const idx = si * DIAGNOSTIC_DIFFICULTIES.length + di;
+                        return <div key={d} className="np-progdot" style={{ background: idx <= qi ? SUBJECTS[s].color : "rgba(255,255,255,.12)" }} />;
+                      })}
+                    </div>
                   ))}
                 </div>
                 <div className="np-qmeta">
                   <span style={{ color: SUBJECTS[curSubject].color }}>{SUBJECTS[curSubject].glyph}</span>
                   <span style={{ fontFamily: "var(--mono)", letterSpacing: 1 }}>
-                    {SUBJECTS[curSubject].label.toUpperCase()} · PROVE IT {qi + 1}/{questions.length}
+                    {SUBJECTS[curSubject].label.toUpperCase()} · {(DIFFICULTY_LABELS[curQ.difficulty] || "").toUpperCase()} · {qi + 1}/{questions.length}
                   </span>
-                  {questions[qi].topic && <span className="np-topic">{questions[qi].topic}</span>}
+                  {curQ.topic && <span className="np-topic">{curQ.topic}</span>}
                 </div>
-                <div className="np-card np-question">{questions[qi].question}</div>
+                <div className="np-card np-question">{curQ.question}</div>
                 <AnswerComposer
                   value={curAns.text}
                   onText={setCurText}
