@@ -9,6 +9,12 @@ import {
   diagnosticSubjectScore,
   DIAGNOSTIC_DIFFICULTIES,
   DIFFICULTY_LABELS,
+  RUBRIC_KEYS,
+  RUBRIC_MAX,
+  normalizeRubric,
+  diagnosticSubjectRubric,
+  blendRubric,
+  lowestRubricDimensions,
 } from "@/lib/scoring";
 
 describe("clampScore", () => {
@@ -460,5 +466,106 @@ describe("DIAGNOSTIC_DIFFICULTIES / DIFFICULTY_LABELS", () => {
     expect(DIFFICULTY_LABELS.foundational).toBe("Easy");
     expect(DIFFICULTY_LABELS.intermediate).toBe("Intermediate");
     expect(DIFFICULTY_LABELS.advanced).toBe("Hard");
+  });
+});
+
+describe("rubric constants", () => {
+  it("RUBRIC_KEYS is the 5 dimensions in display order, RUBRIC_MAX is 4", () => {
+    expect(RUBRIC_KEYS).toEqual([
+      "conceptual_understanding",
+      "logical_structure",
+      "strategy",
+      "execution_accuracy",
+      "communication",
+    ]);
+    expect(RUBRIC_MAX).toBe(4);
+  });
+});
+
+describe("normalizeRubric", () => {
+  it("clamps each dimension to an INTEGER in [0,4] and fills missing ones with 0", () => {
+    const out = normalizeRubric({ conceptual_understanding: 3, logical_structure: 9, strategy: -2, execution_accuracy: 2.6 });
+    expect(out).toEqual({
+      conceptual_understanding: 3,
+      logical_structure: 4, // clamped down
+      strategy: 0, // clamped up
+      execution_accuracy: 3, // rounded
+      communication: 0, // missing -> 0
+    });
+  });
+
+  it("returns an all-zero complete object for null/garbage input (never NaN)", () => {
+    expect(normalizeRubric(null)).toEqual({
+      conceptual_understanding: 0,
+      logical_structure: 0,
+      strategy: 0,
+      execution_accuracy: 0,
+      communication: 0,
+    });
+    for (const k of RUBRIC_KEYS) expect(Number.isFinite(normalizeRubric("x")[k])).toBe(true);
+  });
+});
+
+describe("diagnosticSubjectRubric", () => {
+  it("difficulty-weights the per-question rubrics (advanced counts ~7 vs foundational ~3)", () => {
+    // foundational all-1s, advanced all-4s. Weighted mean leans toward the harder
+    // question (anchor 70) over the easy one (anchor 30): (30*1 + 70*4)/(100) = 3.1.
+    const out = diagnosticSubjectRubric([
+      { difficulty: "foundational", rubric: { conceptual_understanding: 1, logical_structure: 1, strategy: 1, execution_accuracy: 1, communication: 1 } },
+      { difficulty: "advanced", rubric: { conceptual_understanding: 4, logical_structure: 4, strategy: 4, execution_accuracy: 4, communication: 4 } },
+    ]);
+    for (const k of RUBRIC_KEYS) expect(out[k]).toBeCloseTo(3.1, 5);
+  });
+
+  it("keeps FLOAT resolution (not rounded to int) and clamps to [0,4]", () => {
+    const out = diagnosticSubjectRubric([
+      { difficulty: "intermediate", rubric: { conceptual_understanding: 2, logical_structure: 3, strategy: 0, execution_accuracy: 0, communication: 0 } },
+      { difficulty: "intermediate", rubric: { conceptual_understanding: 3, logical_structure: 4, strategy: 0, execution_accuracy: 0, communication: 0 } },
+    ]);
+    expect(out.conceptual_understanding).toBeCloseTo(2.5, 5); // equal weights -> mean
+    expect(out.logical_structure).toBeCloseTo(3.5, 5);
+  });
+
+  it("returns null when there is nothing to aggregate", () => {
+    expect(diagnosticSubjectRubric([])).toBe(null);
+    expect(diagnosticSubjectRubric(null)).toBe(null);
+  });
+
+  it("falls back to the intermediate anchor for an unknown difficulty band", () => {
+    const out = diagnosticSubjectRubric([{ difficulty: "???", rubric: { conceptual_understanding: 2 } }]);
+    expect(out.conceptual_understanding).toBeCloseTo(2, 5); // single item -> its own value
+  });
+});
+
+describe("blendRubric", () => {
+  it("seeds from the attempt when there is no prior rubric", () => {
+    const out = blendRubric(null, { conceptual_understanding: 3, logical_structure: 2, strategy: 1, execution_accuracy: 0, communication: 4 });
+    expect(out).toEqual({ conceptual_understanding: 3, logical_structure: 2, strategy: 1, execution_accuracy: 0, communication: 4 });
+  });
+
+  it("EWMA-nudges the prior toward the attempt (default alpha 0.35), keeping floats", () => {
+    const prev = { conceptual_understanding: 2, logical_structure: 2, strategy: 2, execution_accuracy: 2, communication: 2 };
+    const next = { conceptual_understanding: 4, logical_structure: 4, strategy: 4, execution_accuracy: 4, communication: 4 };
+    const out = blendRubric(prev, next); // 2 + 0.35*(4-2) = 2.7
+    for (const k of RUBRIC_KEYS) expect(out[k]).toBeCloseTo(2.7, 5);
+  });
+
+  it("clamps the result to [0,4] and tolerates garbage prev dimensions", () => {
+    const out = blendRubric({ conceptual_understanding: "bad", logical_structure: 99 }, { conceptual_understanding: 4, logical_structure: 4, strategy: 4, execution_accuracy: 4, communication: 4 }, 1);
+    expect(out.conceptual_understanding).toBeCloseTo(4, 5); // garbage prev -> seeds from target
+    expect(out.logical_structure).toBeLessThanOrEqual(4);
+  });
+});
+
+describe("lowestRubricDimensions", () => {
+  it("returns the n lowest dimension keys, ties broken by display order", () => {
+    const rubric = { conceptual_understanding: 3, logical_structure: 1, strategy: 1, execution_accuracy: 4, communication: 2 };
+    expect(lowestRubricDimensions(rubric, 1)).toEqual(["logical_structure"]);
+    expect(lowestRubricDimensions(rubric, 2)).toEqual(["logical_structure", "strategy"]);
+  });
+
+  it("returns [] for a missing/empty rubric", () => {
+    expect(lowestRubricDimensions(null)).toEqual([]);
+    expect(lowestRubricDimensions({})).toEqual([]);
   });
 });

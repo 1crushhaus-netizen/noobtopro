@@ -57,3 +57,61 @@ describe("db/schema.sql — _concept_key parity with lib/supabaseAdmin.js concep
     expect(key).toContain("200");
   });
 });
+
+describe("db/schema.sql — server-authoritative scoring (the trust boundary)", () => {
+  it("scores & attempts are SELECT-only for authenticated (no direct client write path)", () => {
+    expect(schema).toMatch(/create policy "read own scores"\s+on public\.scores for select/);
+    expect(schema).toMatch(/create policy "read own attempts"\s+on public\.attempts for select/);
+    // The prior read+write ("for all") policies must be gone, so a signed-in user can
+    // no longer PATCH their own scores row to an arbitrary value via PostgREST.
+    expect(schema).not.toMatch(/on public\.scores for all/);
+    expect(schema).not.toMatch(/on public\.attempts for all/);
+  });
+
+  it("the client-callable save_progress(jsonb,jsonb) is dropped and never recreated", () => {
+    expect(schema).toContain("drop function if exists public.save_progress(jsonb, jsonb)");
+    expect(schema).not.toMatch(/create or replace function public\.save_progress\(p_scores/);
+  });
+
+  it("save_progress_for writes for an explicit p_user and is SERVICE-ROLE ONLY", () => {
+    const body = fnBody("save_progress_for");
+    expect(body).toContain("security definer");
+    expect(body).toContain("p_user"); // user_id = p_user (the JWT-verified uid), not a client value
+    expect(body).toContain("rubric"); // persists the per-subject rubric profile
+    // Grant hygiene (after the body): revoked from every client role, granted ONLY to
+    // service_role — a grant to authenticated would let a caller write ANY user_id.
+    expect(schema).toContain(
+      "revoke all on function public.save_progress_for(uuid, jsonb, jsonb) from public, anon, authenticated"
+    );
+    expect(schema).toContain(
+      "grant execute on function public.save_progress_for(uuid, jsonb, jsonb) to service_role"
+    );
+    expect(schema).not.toMatch(
+      /grant execute on function public\.save_progress_for\(uuid, jsonb, jsonb\) to authenticated/
+    );
+  });
+
+  it("migrate_guest_data & delete_user_data are SECURITY DEFINER, self-scoped to auth.uid()", () => {
+    // They must be DEFINER to write under the now SELECT-only RLS, but stay self-scoped
+    // (auth.uid()) so an authenticated caller can only touch their OWN rows.
+    for (const name of ["migrate_guest_data", "delete_user_data"]) {
+      const body = fnBody(name);
+      expect(body, `${name} should be SECURITY DEFINER`).toContain("security definer");
+      expect(body, `${name} should self-scope via auth.uid()`).toContain("auth.uid()");
+    }
+  });
+
+  it("scores has a rubric jsonb column", () => {
+    expect(schema).toMatch(/rubric jsonb/);
+  });
+
+  it("revokes direct client write grants on scores/attempts (grant-layer defense-in-depth)", () => {
+    expect(schema).toMatch(/revoke insert, update, delete.*on public\.scores\s+from anon, authenticated/);
+    expect(schema).toMatch(/revoke insert, update, delete.*on public\.attempts\s+from anon, authenticated/);
+  });
+
+  it("keeps RLS ENABLED on scores and attempts (not just policy-shaped)", () => {
+    expect(schema).toMatch(/alter table public\.scores\s+enable row level security/);
+    expect(schema).toMatch(/alter table public\.attempts enable row level security/);
+  });
+});

@@ -8,11 +8,11 @@ import {
   SCALE_NOTE,
   band,
   blend,
+  blendRubric,
   totalPoints,
   phdIndex,
   DIAGNOSTIC_DIFFICULTIES,
   DIFFICULTY_LABELS,
-  diagnosticSubjectScore,
 } from "@/lib/scoring";
 import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData } from "@/lib/store";
 import { getSupabase, isSupabaseConfigured, signInWithProvider, signOutUser, PROVIDERS } from "@/lib/supabase";
@@ -72,10 +72,11 @@ async function api(path, body) {
   return data;
 }
 
-// Like api(), but attaches the signed-in user's Supabase access token so the
-// server can verify admin identity (the /api/admin/* routes re-verify on every
-// call). Used only by the Admin tab.
-async function adminApi(path, body) {
+// Like api(), but attaches the signed-in user's Supabase access token so the server
+// can verify the caller's identity from the JWT. Used by the authenticated routes:
+// the Admin tab (/api/admin/*) and server-authoritative scoring (/api/score), which
+// both re-verify the token on every call and never trust a client-supplied identity.
+async function authApi(path, body) {
   const sb = getSupabase();
   let token = null;
   if (sb) {
@@ -362,7 +363,7 @@ export default function Noobtopro() {
   // result only REVEALS the Admin tab — every admin action re-verifies server-side.
   async function checkAdmin() {
     try {
-      const d = await adminApi("/api/admin/me");
+      const d = await authApi("/api/admin/me");
       setIsAdmin(!!(d && d.isAdmin));
     } catch {
       setIsAdmin(false);
@@ -588,47 +589,44 @@ export default function Noobtopro() {
     setError("");
     setStage("scoring");
     try {
-      // Grade all 9 questions in parallel; each returns THIS question's reasoning
-      // quality (0–100) + weak concepts, calibrated to its difficulty band.
-      const results = await Promise.all(
-        questions.map(async (q) => {
-          const a = answers[qid(q)] || { text: "", img: null };
-          const r = await api("/api/grade", {
-            kind: "diagnostic",
-            subject: q.subject,
-            question: q.question,
-            difficulty: q.difficulty,
-            reasoning: a.text,
-            image: a.img ? { mime: a.img.mime, data: a.img.data } : undefined,
-          });
-          return { subject: q.subject, difficulty: q.difficulty, reasoningScore: r.score, weakConcepts: r.weakConcepts || [], comment: r.comment || "" };
-        })
-      );
-      // The user abandoned this diagnostic mid-grade (signed out / hit Restart):
-      // bail BEFORE persisting so we don't re-write the abandoned baseline to the
-      // store or stomp the freshly-reset intro state with a stale dashboard.
-      if (myRun !== diagRun.current) return;
-      // Combine each subject's 3 graded answers into a difficulty-weighted baseline.
-      const obj = {};
-      for (const s of ORDER) {
-        const subjectQs = results.filter((r) => r.subject === s);
-        if (subjectQs.length === 0) continue;
-        const score = diagnosticSubjectScore(subjectQs);
-        // Union the weak concepts across the 3 tiers (cap 8); use the hardest
-        // answered question's comment as the subject summary.
-        const weakConcepts = Array.from(
-          new Set(subjectQs.flatMap((r) => r.weakConcepts).filter((c) => typeof c === "string" && c.trim()))
-        ).slice(0, 8);
-        const hardest = [...subjectQs].sort(
-          (a, b) => DIAGNOSTIC_DIFFICULTIES.indexOf(b.difficulty) - DIAGNOSTIC_DIFFICULTIES.indexOf(a.difficulty)
-        )[0];
-        obj[s] = { score, weakConcepts, comment: (hardest && hardest.comment) || "" };
+      // Build the answers payload (one per question). Grading + difficulty-weighted
+      // aggregation now happen SERVER-SIDE in ONE /api/score request (bounded
+      // concurrency + retry-once-on-429 + allSettled), replacing the old 9-parallel-
+      // call burst where a single 429 sank the whole diagnostic.
+      const payload = questions.map((q) => {
+        const a = answers[qid(q)] || { text: "", img: null };
+        return {
+          subject: q.subject,
+          question: q.question,
+          difficulty: q.difficulty,
+          reasoning: a.text,
+          image: a.img ? { mime: a.img.mime, data: a.img.data } : undefined,
+        };
+      });
+
+      let scoresObj;
+      if (user) {
+        // Signed-in: the server grades, aggregates, AND persists the baseline for the
+        // verified user (server-authoritative — the client supplies no score).
+        const data = await authApi("/api/score", { kind: "diagnostic", answers: payload });
+        // Abandoned mid-grade (signed out / Restart): bail before touching state.
+        if (myRun !== diagRun.current) return;
+        scoresObj = data.scores || {};
+        setScores(scoresObj);
+        if (data.attempt) setHistory((h) => [...h, data.attempt]);
+      } else {
+        // Guest: the server grades + aggregates (no account to persist to); the
+        // baseline is saved to localStorage here.
+        const data = await api("/api/score", { kind: "diagnostic", answers: payload });
+        if (myRun !== diagRun.current) return;
+        scoresObj = data.scores || {};
+        const evt = { type: "baseline", t: now(), totalAfter: totalPoints(scoresObj), phdAfter: phdIndex(scoresObj) };
+        const st = await saveProgress(scoresObj, evt);
+        if (myRun !== diagRun.current) return; // abandoned during the save round-trip
+        if (st && st.history) setHistory(st.history); // null = couldn't refresh; keep current
+        setScores(scoresObj);
       }
-      // Atomic: persist the baseline scores AND the baseline attempt together.
-      const st = await saveProgress(obj, { type: "baseline", t: now(), totalAfter: totalPoints(obj), phdAfter: phdIndex(obj) });
-      if (myRun !== diagRun.current) return; // abandoned during the save round-trip
-      if (st && st.history) setHistory(st.history); // null = couldn't refresh; keep current
-      setScores(obj);
+
       setStage("dashboard");
       // The diagnostic answer images are no longer rendered once we move to the
       // dashboard; release their preview blob URLs (the base64 was already sent to
@@ -816,55 +814,73 @@ export default function Noobtopro() {
     setBusy(true);
     try {
       const prev = scores[pSubject];
-      const r = await api("/api/grade", {
-        kind: "practice",
-        subject: pSubject,
-        question: pQuestion.question,
-        targetConcept: pQuestion.targetConcept,
-        score: prev.score,
-        reasoning: pText,
-        difficulty: pQuestion.difficulty,
-        image: pImg ? { mime: pImg.mime, data: pImg.data } : undefined,
-      });
-      if (myRun !== practiceRun.current) return; // abandoned mid-grade — don't persist a stale write
-      const updatedScore = blend(prev.score, r.newScoreSuggestion, {
-        difficulty: pQuestion.difficulty,
-        reasoningScore: r.reasoningScore,
-      });
-      const updatedScores = {
-        ...scores,
-        [pSubject]: {
+      if (user) {
+        // Signed-in: SERVER-AUTHORITATIVE. The server grades, computes the new score
+        // from the user's STORED level, and persists it for the verified uid; the
+        // client renders the trusted result and cannot substitute a score.
+        const data = await authApi("/api/score", {
+          kind: "practice",
+          subject: pSubject,
+          question: pQuestion.question,
+          targetConcept: pQuestion.targetConcept,
+          difficulty: pQuestion.difficulty,
+          reasoning: pText,
+          image: pImg ? { mime: pImg.mime, data: pImg.data } : undefined,
+        });
+        if (myRun !== practiceRun.current) return; // abandoned mid-grade
+        // Defensive: a malformed response must not put an undefined subjectScore into
+        // state (which would crash the dashboard/livescore reads) — surface an error.
+        if (!data || !data.subjectScore) throw new Error("Grading failed. Please try again.");
+        setScores((s) => ({ ...s, [pSubject]: data.subjectScore }));
+        if (data.attempt) setHistory((h) => [...h, data.attempt]);
+        setScoreDelta(data.delta);
+        setFeedback(data); // coaching fields (reasoningScore/rubric/hints) are top-level
+      } else {
+        // Guest: grade only, blend the score + rubric LOCALLY, persist to localStorage
+        // (no account to protect, so the client-computed score is fine here).
+        const r = await api("/api/grade", {
+          kind: "practice",
+          subject: pSubject,
+          question: pQuestion.question,
+          targetConcept: pQuestion.targetConcept,
+          score: prev.score,
+          reasoning: pText,
+          difficulty: pQuestion.difficulty,
+          image: pImg ? { mime: pImg.mime, data: pImg.data } : undefined,
+        });
+        if (myRun !== practiceRun.current) return; // abandoned mid-grade — don't persist a stale write
+        const updatedScore = blend(prev.score, r.newScoreSuggestion, {
+          difficulty: pQuestion.difficulty,
+          reasoningScore: r.reasoningScore,
+        });
+        const updatedSubject = {
           score: updatedScore,
           weakConcepts: r.weakConcepts && r.weakConcepts.length ? r.weakConcepts : prev.weakConcepts,
           comment: prev.comment,
-        },
-      };
-      // Atomic: persist the updated score AND its attempt in one transaction, so a
-      // partial failure can't leave the score saved but the attempt lost (which a
-      // retry would then re-grade and overwrite). Send ONLY the changed subject:
-      // save_progress upserts every subject in the map, so passing the full map
-      // would rewrite the two UNCHANGED subjects with this tab's (possibly stale)
-      // hydrated copy and clobber a concurrent same-user session's progress on them.
-      // (totalAfter/phdAfter still use the full map — they're the attempt snapshot.)
-      const st = await saveProgress({ [pSubject]: updatedScores[pSubject] }, {
-        type: "attempt",
-        t: now(),
-        subject: pSubject,
-        reasoningScore: r.reasoningScore,
-        delta: updatedScore - prev.score,
-        newScore: updatedScore,
-        totalAfter: totalPoints(updatedScores),
-        phdAfter: phdIndex(updatedScores),
-      });
-      if (myRun !== practiceRun.current) return; // abandoned during the save round-trip — don't repopulate the reset UI
-      if (st && st.history) setHistory(st.history); // null = couldn't refresh; keep current
-      setScores(updatedScores);
-      setScoreDelta(updatedScore - prev.score);
-      setFeedback(r);
+          rubric: blendRubric(prev.rubric, r.rubric),
+        };
+        const updatedScores = { ...scores, [pSubject]: updatedSubject };
+        // Atomic local write of the changed subject + its attempt. Send ONLY the
+        // changed subject (mirrors the server upsert) so the other two aren't rewritten.
+        const st = await saveProgress({ [pSubject]: updatedSubject }, {
+          type: "attempt",
+          t: now(),
+          subject: pSubject,
+          reasoningScore: r.reasoningScore,
+          delta: updatedScore - prev.score,
+          newScore: updatedScore,
+          totalAfter: totalPoints(updatedScores),
+          phdAfter: phdIndex(updatedScores),
+        });
+        if (myRun !== practiceRun.current) return; // abandoned during the save round-trip
+        if (st && st.history) setHistory(st.history); // null = couldn't refresh; keep current
+        setScores(updatedScores);
+        setScoreDelta(updatedScore - prev.score);
+        setFeedback(r);
+      }
       // The composer/img unmounts once feedback is truthy (the graded view renders),
       // so the attached photo is no longer shown; release its preview blob URL (the
-      // base64 was already sent to the grader) instead of leaking it until the next
-      // action — mirrors the diagnostic fix that revokes answer previews on completion.
+      // base64 was already sent to the grader) instead of leaking it until the next action.
       revokePreview(pImg);
       setPImg(null);
     } catch (e) {
@@ -1013,7 +1029,7 @@ export default function Noobtopro() {
             onBack={closeSignIn}
           />
         ) : view === "admin" && user && isAdmin ? (
-          <AdminDashboard adminApi={adminApi} />
+          <AdminDashboard adminApi={authApi} />
         ) : view === "profile" && user ? (
           <ProfileTab
             user={user}
@@ -1030,7 +1046,7 @@ export default function Noobtopro() {
             hubEnabled={HUB_ENABLED}
             user={user}
             isAdmin={isAdmin}
-            adminApi={adminApi}
+            adminApi={authApi}
             scores={scores}
             active={learnConcept}
             content={learnContent}
@@ -1048,6 +1064,7 @@ export default function Noobtopro() {
             scores={scores}
             history={history}
             onPractice={(s) => { setView("practice"); startPractice(s); }}
+            onLearn={openLearn}
           />
         ) : (
           <>
@@ -1214,7 +1231,7 @@ export default function Noobtopro() {
                       </span>
                       {pQuestion.targetConcept && <span className="np-topic">{pQuestion.targetConcept}</span>}
                       <span className="np-livescore" style={{ borderColor: SUBJECTS[pSubject].color }}>
-                        {scores[pSubject].score}<span style={{ color: "var(--muted)" }}>/100</span>
+                        {scores[pSubject]?.score ?? 0}<span style={{ color: "var(--muted)" }}>/100</span>
                         {scoreDelta !== null && scoreDelta !== 0 && (
                           <span style={{ color: scoreDelta > 0 ? "var(--phys)" : "var(--chem)", marginLeft: 6 }}>
                             {scoreDelta > 0 ? "+" : ""}{scoreDelta}
