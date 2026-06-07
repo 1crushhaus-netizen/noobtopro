@@ -56,7 +56,7 @@ body {
 .np-stepdesc { font-size: 14px; color: var(--muted); }
 
 .np-subjectrow { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 30px; }
-.np-chip { border: 1px solid var(--line); border-radius: 999px; padding: 7px 15px; font-size: 14px; font-weight: 500; }
+.np-chip { border: 1px solid rgba(255,255,255,.18); border-radius: 999px; padding: 7px 15px; font-size: 14px; font-weight: 500; color: var(--text); background: rgba(255,255,255,.05); }
 
 .np-card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px; }
 
@@ -104,7 +104,7 @@ body {
 .np-comment { font-size: 13px; color: var(--muted); margin-top: 2px; }
 .np-weakwrap { width: 100%; margin-top: 6px; }
 .np-weaklabel { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 6px; }
-.np-weaktags { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+.np-weaktags { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-start; }
 .np-weaktag { background: rgba(255, 255, 255, .05); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; font-size: 12px; }
 
 .np-feedhead { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 14px; }
@@ -278,9 +278,13 @@ body {
 /* ---- concept hub (browse) ---- */
 .np-hub-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; justify-content: space-between; }
 .np-hub-filters { display: flex; flex-wrap: wrap; gap: 8px; }
-.np-hub-filters .np-chip { cursor: pointer; background: transparent; }
-.np-hub-filters .np-chip.active { background: rgba(255,255,255,.05); }
-.np-hub-search { flex: 1; min-width: 200px; max-width: 340px; padding: 9px 12px; border-radius: 10px; }
+.np-hub-filters .np-chip { cursor: pointer; background: rgba(255,255,255,.05); }
+.np-hub-filters .np-chip:hover { background: rgba(255,255,255,.1); }
+.np-hub-filters .np-chip.active { background: rgba(255,255,255,.14); }
+/* The search reuses .np-input (a textarea style: borderless, transparent, min-height
+   120px), so override those to render as a proper one-line input that matches the cards. */
+.np-hub-search { flex: 1; min-width: 200px; max-width: 340px; min-height: 0; padding: 11px 14px; border-radius: 10px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.18); font-size: 15px; line-height: 1.4; }
+.np-hub-search:focus { border-color: rgba(255,255,255,.32); background: rgba(255,255,255,.06); }
 .np-hub-topic { margin: 4px 0 14px; }
 .np-hub-topiclabel { font-family: var(--mono); font-size: 11px; letter-spacing: .5px; text-transform: uppercase; color: var(--muted); margin: 10px 0 7px; }
 .np-concepttag.np-hub-unapproved { border-style: dashed; color: var(--muted); font-style: italic; }

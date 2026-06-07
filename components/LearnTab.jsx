@@ -293,8 +293,8 @@ function ConceptHub({ scores, user, isAdmin, adminApi, active, content, busy, er
     <div className="fade-up">
       <h2 className="np-h2">Concept Hub</h2>
       <p className="np-lede" style={{ marginBottom: 16 }}>
-        Browse the library of concepts. Open any one for a Socratic guide that teaches the <em>idea</em> — never the answer —
-        and a practice problem to try.
+        Browse the library of concepts. Open any one for a guide that builds intuition and walks through <em>why it works</em> —
+        the proof or derivation — plus a practice problem to try. You'll see the full worked solution after you attempt it.
       </p>
 
       {/* Weak-concept shortcuts */}
