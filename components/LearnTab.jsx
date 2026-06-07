@@ -102,6 +102,15 @@ function GuideView({ active, content, busy, question, regenerating, onPracticeQu
         </div>
       )}
 
+      {content.whyItWorks && (
+        <div className="np-card np-lesson">
+          <div className="np-cardicon" style={{ color: activeColor }}>Why it works</div>
+          {/* The proof / derivation / mechanism. pre-wrap preserves the argument's line
+              structure; React escapes the text (no raw HTML). */}
+          <div className="np-lessontext" style={{ whiteSpace: "pre-wrap" }}>{content.whyItWorks}</div>
+        </div>
+      )}
+
       {content.socraticQuestions && content.socraticQuestions.length > 0 && (
         <div className="np-card np-socratic">
           <div className="np-cardicon">Questions to think through</div>

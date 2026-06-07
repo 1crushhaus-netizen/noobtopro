@@ -59,6 +59,18 @@ describe("db/schema.sql — curation-only invariant (auto-grown guides are never
     expect(schema).toContain("grant execute on function public.dedupe_pending_stubs() to service_role");
     expect(schema).not.toMatch(/grant execute on function public\.dedupe_pending_stubs\(\) to authenticated/);
   });
+
+  it("refresh_guide (PR 5 auto-heal) only overwrites NON-curated guides, and is service-role only", () => {
+    // The stale-guide auto-heal must never overwrite a curated (author-vetted) row, and
+    // must never promote a hidden guide to public — it only updates content/topic/level.
+    const body = fnBody("refresh_guide");
+    expect(body).toContain("security definer");
+    expect(body).toContain("source <> 'curated'"); // curated guides are off-limits
+    expect(body).not.toContain("visibility"); // never changes visibility (no hidden→public)
+    expect(schema).toContain("revoke all on function public.refresh_guide(text, text, jsonb, text, text) from public, anon, authenticated");
+    expect(schema).toContain("grant execute on function public.refresh_guide(text, text, jsonb, text, text) to service_role");
+    expect(schema).not.toMatch(/grant execute on function public\.refresh_guide\([^)]*\) to authenticated/);
+  });
 });
 
 describe("db/schema.sql — _concept_key parity with lib/supabaseAdmin.js conceptKey", () => {

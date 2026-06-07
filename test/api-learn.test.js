@@ -14,7 +14,7 @@ vi.mock("@/lib/supabaseAdmin", async (importActual) => {
 // .maybeSingle() reads and its rpc("promote_or_insert_guide", ...) write. Captures
 // the table + filters so a column/value regression on the cache-read path is
 // catchable, and the last rpc call so the write payload can be asserted.
-function fakeAdmin({ hitContent = null, onRpc, rpcThrows, expectSubject = null, expectKey = null } = {}) {
+function fakeAdmin({ hitContent = null, hitSource = "curated", onRpc, rpcThrows, expectSubject = null, expectKey = null } = {}) {
   const filters = {};
   const calls = { rpc: null };
   const client = {
@@ -38,7 +38,7 @@ function fakeAdmin({ hitContent = null, onRpc, rpcThrows, expectSubject = null, 
                     const subjectOk = expectSubject == null || filters.subject === expectSubject;
                     const keyOk = expectKey == null || filters.concept_key === expectKey;
                     const hit = hitContent && subjectOk && keyOk;
-                    return { data: hit ? { content: hitContent } : null };
+                    return { data: hit ? { content: hitContent, source: hitSource } : null };
                   },
                 };
               },
@@ -327,5 +327,50 @@ describe("POST /api/learn — shared cache", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.overview).toBe("fresh2");
+  });
+});
+
+describe("POST /api/learn — depth (whyItWorks) + stale auto-heal (PR 5)", () => {
+  it("carries the whyItWorks proof through generation", async () => {
+    const admin = fakeAdmin({ hitContent: null });
+    mocks.getAdmin.mockReturnValue(admin);
+    mockGroqReturning({
+      topic: "algebra", overview: "x", keyIdeas: ["k"], whyItWorks: "Equality is preserved by identical operations on both sides, so...",
+      socraticQuestions: [], pitfalls: [], tryThis: "t",
+    });
+    const res = await POST(req({ subject: "math", concept: "solving linear equations" }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.whyItWorks).toMatch(/Equality is preserved/);
+    expect(admin.calls.rpc.args.p_content.whyItWorks).toMatch(/Equality is preserved/); // persisted
+  });
+
+  it("REGENERATES + overwrites a STALE non-curated guide (no whyItWorks) via refresh_guide", async () => {
+    // A cached auto-grown guide from before PR 5 — no proof field.
+    const stale = { subject: "math", concept: "limits", overview: "shallow", keyIdeas: [], socraticQuestions: [], pitfalls: [], tryThis: "" };
+    const admin = fakeAdmin({ hitContent: stale, hitSource: "user", expectSubject: "math", expectKey: "limits" });
+    mocks.getAdmin.mockReturnValue(admin);
+    const fetchMock = mockGroqReturning({ topic: "calculus_analysis", overview: "deep", keyIdeas: ["k"], whyItWorks: "Here is the proof: ...", socraticQuestions: [], pitfalls: [], tryThis: "t" });
+    const res = await POST(req({ subject: "math", concept: "limits" }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.cached).toBe(false); // it regenerated despite the cache hit
+    expect(json.whyItWorks).toMatch(/proof/);
+    expect(fetchMock).toHaveBeenCalled(); // Groq WAS called (stale → regenerate)
+    expect(admin.calls.rpc.fn).toBe("refresh_guide"); // overwrote in place, not promote
+  });
+
+  it("serves a CURATED guide as-is even without whyItWorks (never auto-refreshed)", async () => {
+    const curatedNoProof = { subject: "math", concept: "limits", overview: "curated", keyIdeas: [], socraticQuestions: [], pitfalls: [], tryThis: "" };
+    const admin = fakeAdmin({ hitContent: curatedNoProof, hitSource: "curated", expectSubject: "math", expectKey: "limits" });
+    mocks.getAdmin.mockReturnValue(admin);
+    const failFetch = vi.fn(() => { throw new Error("a curated guide must be served as-is, no Groq"); });
+    vi.stubGlobal("fetch", failFetch);
+    const res = await POST(req({ subject: "math", concept: "limits" }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.cached).toBe(true);
+    expect(failFetch).not.toHaveBeenCalled();
+    expect(admin.calls.rpc).toBe(null); // never refreshed
   });
 });

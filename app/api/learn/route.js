@@ -47,6 +47,10 @@ function normalizeGuide(subject, concept, raw) {
     topic: normalizeTopic(subject, raw?.topic), // curated taxonomy slug (validated)
     overview: cap(raw?.overview, 1500),
     keyIdeas: capArr(raw?.keyIdeas, 6, 500),
+    // The proof / derivation / mechanism — the depth the Learn tab was missing. A
+    // proof can run long, so a generous cap (still bounded so a runaway model output
+    // can't bloat the cached row).
+    whyItWorks: cap(raw?.whyItWorks, 2500),
     socraticQuestions: capArr(raw?.socraticQuestions, 5, 500),
     pitfalls: capArr(raw?.pitfalls, 5, 500),
     tryThis: cap(raw?.tryThis, 800),
@@ -96,19 +100,34 @@ export async function POST(req) {
   reportInjection({ req, route: "/api/learn", subject, concept: safeConcept, text: safeConcept });
   const sb = getSupabaseAdmin(); // null when SUPABASE_SERVICE_ROLE_KEY isn't set
 
-  // 1) Shared cache hit → return the standardized guide without calling Groq.
+  // 1) Shared cache hit → return the standardized guide without calling Groq, UNLESS
+  //    it's a STALE auto-grown guide (a non-curated `ready` row whose content predates
+  //    the PR 5 `whyItWorks` proof field). Those fall through to regenerate + overwrite
+  //    (refresh_guide) so the depth fix reaches already-cached guides — at most once
+  //    each (once healed it has whyItWorks → no longer stale). Curated guides are
+  //    author-vetted and served as-is (refreshed only by the seed).
+  let staleRefresh = false;
   if (sb) {
     try {
       const { data: row } = await sb
         .from("concept_guides")
-        .select("content")
+        .select("content, source")
         .eq("subject", subject)
         .eq("concept_key", key)
         .maybeSingle();
       if (row && row.content && typeof row.content === "object") {
-        // Re-normalize the stored row so the served shape is always safe to render.
         const c = row.content;
-        return NextResponse.json({ ...normalizeGuide(subject, cap(c.concept, 200) || safeConcept, c), cached: true });
+        // "Stale" = the whyItWorks KEY is ABSENT (a pre-PR-5 guide). We gate on the
+        // key's PRESENCE, not on non-empty content, so a regenerated guide always heals
+        // EXACTLY ONCE: normalizeGuide always sets whyItWorks (to "" if the model omits
+        // it), so after one refresh the key is present → never stale again. (Gating on
+        // non-empty could loop forever, rate-limit-bounded, if the model kept omitting it.)
+        const hasProofField = c.whyItWorks !== undefined && c.whyItWorks !== null;
+        if (row.source === "curated" || hasProofField) {
+          // Re-normalize the stored row so the served shape is always safe to render.
+          return NextResponse.json({ ...normalizeGuide(subject, cap(c.concept, 200) || safeConcept, c), cached: true });
+        }
+        staleRefresh = true; // non-curated + no whyItWorks key → regenerate + overwrite below
       }
     } catch (e) {
       console.error("[/api/learn] cache read", e); // fall through to generation
@@ -152,14 +171,26 @@ export async function POST(req) {
   // browsable — the public hub shows only curated rows (see promote_or_insert_guide).
   if (sb && guide.overview && isConceptSafe(safeConcept)) {
     try {
-      await sb.rpc("promote_or_insert_guide", {
-        p_subject: subject,
-        p_concept: safeConcept,
-        p_content: guide,
-        p_topic: guide.topic,
-        p_level: guide.tryThisQuestion ? guide.tryThisQuestion.difficulty : null,
-        p_safe: true,
-      });
+      if (staleRefresh) {
+        // Overwrite the existing stale NON-CURATED guide in place (preserves its
+        // hidden visibility); refresh_guide is a no-op on a curated row.
+        await sb.rpc("refresh_guide", {
+          p_subject: subject,
+          p_concept: safeConcept,
+          p_content: guide,
+          p_topic: guide.topic,
+          p_level: guide.tryThisQuestion ? guide.tryThisQuestion.difficulty : null,
+        });
+      } else {
+        await sb.rpc("promote_or_insert_guide", {
+          p_subject: subject,
+          p_concept: safeConcept,
+          p_content: guide,
+          p_topic: guide.topic,
+          p_level: guide.tryThisQuestion ? guide.tryThisQuestion.difficulty : null,
+          p_safe: true,
+        });
+      }
     } catch (e) {
       console.error("[/api/learn] cache write", e); // non-fatal
     }
