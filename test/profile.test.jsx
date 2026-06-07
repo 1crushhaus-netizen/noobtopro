@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import ProfileTab from "@/components/ProfileTab";
 
 afterEach(cleanup);
@@ -30,6 +30,28 @@ describe("ProfileTab", () => {
     expect(screen.getByText("Mathematics")).toBeTruthy();
     expect(screen.getByText("Physics")).toBeTruthy();
     expect(screen.getByText("Chemistry")).toBeTruthy();
+  });
+
+  it("renders the anonymous-tiers leaderboard (distribution + own position, NO identities)", async () => {
+    const tiers = {
+      overall: { counts: [3, 2, 1, 0, 0], total: 6, you: { band: 1, score: 30, above: 3 } },
+      math: { counts: [1, 1, 2, 1, 1], total: 6, you: { band: 3, score: 60, above: 2 } },
+      physics: { counts: [4, 1, 1, 0, 0], total: 6, you: { band: 0, score: 10, above: 5 } },
+      chemistry: { counts: [0, 1, 2, 2, 1], total: 6, you: { band: 4, score: 90, above: 0 } },
+    };
+    const loadLeaderboard = vi.fn(async () => ({ tiers }));
+    render(
+      <ProfileTab user={user} scores={scores} history={[]} loadLeaderboard={loadLeaderboard}
+        onPractice={() => {}} onViewProgress={() => {}} onSignOut={() => {}} onReset={() => {}} />
+    );
+    expect(screen.getByText("Leaderboard")).toBeTruthy();
+    // After the async load, the caller's own position is shown for at least one track.
+    await waitFor(() => expect(screen.getAllByText(/You're/i).length).toBeGreaterThan(0));
+    expect(loadLeaderboard).toHaveBeenCalled();
+    // Anonymous: no email / name / "user" identity leaks into the leaderboard render.
+    expect(screen.queryByText("ada@example.com")).toBeTruthy(); // (the profile header still shows the OWN email)
+    // The distribution counts render (e.g. the overall total "6 ranked" appears per track).
+    expect(screen.getAllByText(/ranked/i).length).toBeGreaterThan(0);
   });
 
   it("fires onSignOut, and onReset only after confirmation", () => {

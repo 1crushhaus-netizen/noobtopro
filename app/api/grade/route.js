@@ -1,6 +1,7 @@
 import { NextResponse, after } from "next/server";
 import { groqJSON, DIAG_GRADE_SYS, PRACTICE_GRADE_SYS } from "@/lib/groq";
-import { clampScore, ORDER, normalizeRubric } from "@/lib/scoring";
+import { clampScore, ORDER, normalizeRubric, reconcileReasoningScore } from "@/lib/scoring";
+import { preGradeDock } from "@/lib/preGrade";
 import { checkRateLimit, clientKey } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
@@ -107,8 +108,23 @@ export async function POST(req) {
     }
   }
 
+  // DETERMINISTIC pre-grade dock (no LLM call): empty / "idk" / off-topic / gibberish
+  // → forced low score + all-zero rubric, for guests too (the client then runs the
+  // same Elo update locally). Identical anti-gaming lever as /api/score.
+  const dock = preGradeDock(reasoning);
+
   try {
     if (kind === "diagnostic") {
+      if (dock) {
+        return NextResponse.json({
+          subject,
+          score: dock.reasoningScore,
+          rubric: dock.rubric,
+          weakConcepts: dock.weakConcepts,
+          comment: dock.comment,
+          docked: true,
+        });
+      }
       const data = await groqJSON({
         system: DIAG_GRADE_SYS,
         user:
@@ -119,18 +135,31 @@ export async function POST(req) {
         image: img.image,
         grade: true, // route to the cheaper grading model
       });
-      // Clamp the model's score before it reaches the client/UI.
-      const clamped = clampScore(data?.score);
+      const rubric = normalizeRubric(data?.rubric);
       const weakConcepts = normalizeWeakConcepts(data?.weakConcepts);
       registerWeakConcepts(subject, weakConcepts); // auto-grow the hub (non-blocking)
       return NextResponse.json({
         ...data,
-        score: clamped ?? 0,
+        // Reconcile the score against the rubric so it can't contradict the bars.
+        score: reconcileReasoningScore(data?.score, rubric),
+        rubric,
         weakConcepts,
       });
     }
 
     // practice
+    if (dock) {
+      return NextResponse.json({
+        reasoningScore: dock.reasoningScore,
+        rubric: dock.rubric,
+        correctnessNote: dock.correctnessNote,
+        socraticHint: dock.socraticHint,
+        microLesson: dock.microLesson,
+        weakConcepts: dock.weakConcepts,
+        newScoreSuggestion: dock.reasoningScore,
+        docked: true,
+      });
+    }
     const safeScore = clampScore(score) ?? 0;
     const data = await groqJSON({
       system: PRACTICE_GRADE_SYS,
@@ -144,16 +173,17 @@ export async function POST(req) {
       image: img.image,
       grade: true, // route to the cheaper grading model
     });
-    // Normalize every score the UI renders so malformed model output can't show
-    // NaN or out-of-range values. reasoningScore -> /100 display; rubric -> 0–4
-    // bars; newScoreSuggestion -> blend() (null is handled there as "no change").
+    // Normalize every score the UI renders so malformed model output can't show NaN or
+    // out-of-range values. reasoningScore is reconciled against the rubric; rubric -> 0–4
+    // bars; newScoreSuggestion -> the client's local Elo update (null = no change).
+    const rubric = normalizeRubric(data?.rubric);
     const weakConcepts = normalizeWeakConcepts(data?.weakConcepts);
     registerWeakConcepts(subject, weakConcepts); // auto-grow the hub (non-blocking)
     return NextResponse.json({
       ...data,
-      reasoningScore: clampScore(data?.reasoningScore) ?? 0,
+      reasoningScore: reconcileReasoningScore(data?.reasoningScore, rubric),
       newScoreSuggestion: clampScore(data?.newScoreSuggestion),
-      rubric: normalizeRubric(data?.rubric),
+      rubric,
       weakConcepts,
     });
   } catch (e) {

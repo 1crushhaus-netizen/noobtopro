@@ -184,6 +184,14 @@ export default function ProgressDashboard({ scores, history = [], onPractice, on
     glyph: SUBJECTS[a.subject]?.glyph || "·",
   }));
 
+  // The most recent graded attempts that carry a "why your rank moved" rationale
+  // (newest first), for the explainability list below.
+  const recentMoves = attempts
+    .filter((a) => typeof a.rationale === "string" && a.rationale.trim())
+    .slice(-6)
+    .reverse()
+    .map((a) => ({ subject: a.subject, delta: Math.round(a.delta || 0), rationale: a.rationale }));
+
   // Subjects that have a rubric profile (set once the diagnostic/first attempt is
   // graded) — drives the radar chart and the "what to work on" guidance.
   const rubricSubjects = ORDER
@@ -298,6 +306,28 @@ export default function ProgressDashboard({ scores, history = [], onPractice, on
           <p className="np-statsub">No graded attempts yet.</p>
         )}
       </div>
+
+      {/* Why your rank moved — the persisted, deterministic per-attempt explanations. */}
+      {recentMoves.length >= 1 && (
+        <div className="np-card">
+          <div className="np-charttitle" style={{ marginBottom: 6 }}>Why your rank moved</div>
+          <div className="np-chartsub" style={{ marginBottom: 12 }}>The most recent graded attempts, and exactly why each gained or cost points.</div>
+          {recentMoves.map((m, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
+              <span style={{ color: SUBJECTS[m.subject]?.color || "var(--muted)", fontFamily: "var(--mono)", width: 16 }}>
+                {SUBJECTS[m.subject]?.glyph || "·"}
+              </span>
+              <span style={{
+                fontFamily: "var(--mono)", fontWeight: 700, width: 44, textAlign: "right",
+                color: m.delta > 0 ? "var(--phys)" : m.delta < 0 ? "var(--chem)" : "var(--muted)",
+              }}>
+                {m.delta > 0 ? "+" : ""}{m.delta}
+              </span>
+              <span className="np-statsub" style={{ flex: 1 }}>{m.rationale}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
