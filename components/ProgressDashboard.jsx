@@ -198,44 +198,6 @@ export default function ProgressDashboard({ scores, history = [], onPractice, on
         mastery across all three subjects.
       </p>
 
-      <div className="np-stats">
-        <div className="np-card np-statcard">
-          <span className="np-statlabel">Total points</span>
-          <span className="np-statnum">{total}<span style={{ color: "var(--muted)", fontSize: 18 }}> / 300</span></span>
-          <span className="np-statsub">summed across all three subjects</span>
-        </div>
-        <div className="np-card np-statcard">
-          <span className="np-statlabel">PhD-level intelligence</span>
-          <span className="np-statnum" style={{ color: "#F2B441" }}>{phd}<span style={{ color: "var(--muted)", fontSize: 18 }}> / 100</span></span>
-          <span className="np-statsub">{band(phd)} overall</span>
-        </div>
-        <div className="np-card np-statcard">
-          <span className="np-statlabel">Problems graded</span>
-          <span className="np-statnum">{attempts.length}</span>
-          <span className="np-statsub">reasoning attempts coached</span>
-        </div>
-      </div>
-
-      <div className="np-card np-chartcard">
-        <div className="np-charttitle">Total points over time</div>
-        <div className="np-chartsub">From your starting scores through every graded attempt.</div>
-        {linePoints.length >= 2 ? (
-          <LineChart values={linePoints} yMax={300} color="#F2B441" />
-        ) : (
-          <p className="np-statsub">Answer a practice problem to start the trend line.</p>
-        )}
-      </div>
-
-      <div className="np-card np-chartcard">
-        <div className="np-charttitle">Points gained and lost</div>
-        <div className="np-chartsub">Each bar is one graded attempt — green when your reasoning earned points, coral when it cost them.</div>
-        {barItems.length >= 1 ? (
-          <BarChart items={barItems} />
-        ) : (
-          <p className="np-statsub">No graded attempts yet.</p>
-        )}
-      </div>
-
       <div className="np-card np-chartcard">
         <div className="np-charttitle">Reasoning profile</div>
         <div className="np-chartsub">
@@ -284,6 +246,34 @@ export default function ProgressDashboard({ scores, history = [], onPractice, on
         )}
       </div>
 
+      <div className="np-card np-chartcard">
+        <div className="np-charttitle">Total points over time</div>
+        <div className="np-chartsub">From your starting scores through every graded attempt.</div>
+        {linePoints.length >= 2 ? (
+          <LineChart values={linePoints} yMax={300} color="#F2B441" />
+        ) : (
+          <p className="np-statsub">Answer a practice problem to start the trend line.</p>
+        )}
+      </div>
+
+      <div className="np-stats">
+        <div className="np-card np-statcard">
+          <span className="np-statlabel">Total points</span>
+          <span className="np-statnum">{total}<span style={{ color: "var(--muted)", fontSize: 18 }}> / 300</span></span>
+          <span className="np-statsub">summed across all three subjects</span>
+        </div>
+        <div className="np-card np-statcard">
+          <span className="np-statlabel">PhD-level intelligence</span>
+          <span className="np-statnum" style={{ color: "#F2B441" }}>{phd}<span style={{ color: "var(--muted)", fontSize: 18 }}> / 100</span></span>
+          <span className="np-statsub">{band(phd)} overall</span>
+        </div>
+        <div className="np-card np-statcard">
+          <span className="np-statlabel">Problems graded</span>
+          <span className="np-statnum">{attempts.length}</span>
+          <span className="np-statsub">reasoning attempts coached</span>
+        </div>
+      </div>
+
       <div className="np-card">
         <div className="np-charttitle" style={{ marginBottom: 14 }}>By subject</div>
         {ORDER.map((k) => (
@@ -297,6 +287,16 @@ export default function ProgressDashboard({ scores, history = [], onPractice, on
             <button className="np-ghost" onClick={() => onPractice && onPractice(k)} style={{ whiteSpace: "nowrap" }}>practice</button>
           </div>
         ))}
+      </div>
+
+      <div className="np-card np-chartcard">
+        <div className="np-charttitle">Points gained and lost</div>
+        <div className="np-chartsub">Each bar is one graded attempt — green when your reasoning earned points, coral when it cost them.</div>
+        {barItems.length >= 1 ? (
+          <BarChart items={barItems} />
+        ) : (
+          <p className="np-statsub">No graded attempts yet.</p>
+        )}
       </div>
     </div>
   );
