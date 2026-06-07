@@ -147,3 +147,40 @@ describe("db/schema.sql — audit-hardening invariants", () => {
     expect(schema).toMatch(/revoke insert, update, delete, truncate on public\.rate_limits from anon, authenticated/);
   });
 });
+
+describe("db/schema.sql — Elo ranking + leaderboard invariants (PR 3)", () => {
+  it("item_difficulty is RLS-on + write-locked (internal, service-role only)", () => {
+    expect(schema).toMatch(/create table if not exists public\.item_difficulty/);
+    expect(schema).toMatch(/alter table public\.item_difficulty enable row level security/);
+    expect(schema).toMatch(/revoke insert, update, delete, truncate on public\.item_difficulty from anon, authenticated/);
+    // FK to the taxonomy keeps the bucket key space bounded + valid.
+    expect(schema).toMatch(/foreign key \(subject, topic\) references public\.concept_topics\(subject, slug\)/);
+  });
+
+  it("bump_item_difficulty is SECURITY DEFINER + service-role only (no client grant)", () => {
+    const body = fnBody("bump_item_difficulty");
+    expect(body).toContain("security definer");
+    expect(schema).toContain("revoke all on function public.bump_item_difficulty(text, text, text, numeric, numeric) from public, anon, authenticated");
+    expect(schema).toContain("grant execute on function public.bump_item_difficulty(text, text, text, numeric, numeric) to service_role");
+    expect(schema).not.toMatch(/grant execute on function public\.bump_item_difficulty\([^)]*\) to authenticated/);
+  });
+
+  it("leaderboard_tiers is SECURITY DEFINER + service-role only, and exposes NO per-user identity", () => {
+    const body = fnBody("leaderboard_tiers");
+    expect(body).toContain("security definer");
+    // Anonymous by construction: it aggregates counts; it must NOT select email / name
+    // or return per-user identity rows.
+    expect(body).not.toMatch(/email/i);
+    expect(body).not.toMatch(/raw_user_meta_data/i);
+    expect(schema).toContain("revoke all on function public.leaderboard_tiers(uuid) from public, anon, authenticated");
+    expect(schema).toContain("grant execute on function public.leaderboard_tiers(uuid) to service_role");
+    // A grant to authenticated would add the authenticated_security_definer advisor AND
+    // let a client call the cross-user aggregate directly — neither is allowed.
+    expect(schema).not.toMatch(/grant execute on function public\.leaderboard_tiers\(uuid\) to authenticated/);
+  });
+
+  it("attempts has a rationale column (the persisted 'why your rank moved' line)", () => {
+    expect(schema).toMatch(/alter table public\.attempts add column if not exists rationale text/);
+    expect(fnBody("save_progress_for")).toContain("rationale"); // persisted by the write RPC
+  });
+});

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { groqJSON, DIAG_GEN_SYS, PRACTICE_GEN_SYS } from "@/lib/groq";
 import { ORDER, clampScore, DIAGNOSTIC_DIFFICULTIES } from "@/lib/scoring";
+import { topicSlugsFor, normalizeTopic } from "@/lib/taxonomy";
 import { checkRateLimit, clientKey } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
@@ -152,8 +153,13 @@ export async function POST(req) {
         `Subject: ${subject}\n` +
         `Learner score: ${safeScore}/100\n` +
         `Weak concepts: ${concepts.join(", ") || "none recorded"}\n` +
+        `Allowed topics (pick exactly one slug for topicSlug): ${topicSlugsFor(subject)}\n` +
         `Generate the question now.`,
     });
+    // Normalize the LLM's topicSlug to a real taxonomy slug (or general_<subject>) so
+    // the per-(subject,topic,band) difficulty bucket on /api/score is always bounded
+    // and FK-valid. The human-readable `topic` is left as-is for display.
+    if (data && typeof data === "object") data.topicSlug = normalizeTopic(subject, data.topicSlug);
     return NextResponse.json(data);
   } catch (e) {
     // Log the real cause server-side; return a generic message so upstream Groq

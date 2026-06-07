@@ -7,12 +7,14 @@ import {
   RUBRIC_LABELS,
   SCALE_NOTE,
   band,
-  blend,
   blendRubric,
   totalPoints,
   phdIndex,
   DIAGNOSTIC_DIFFICULTIES,
   DIFFICULTY_LABELS,
+  eloUpdate,
+  defaultDifficultyForBand,
+  explainRankMove,
 } from "@/lib/scoring";
 import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData } from "@/lib/store";
 import { getSupabase, isSupabaseConfigured, signInWithProvider, signOutUser, PROVIDERS } from "@/lib/supabase";
@@ -829,6 +831,7 @@ export default function Noobtopro() {
           question: pQuestion.question,
           targetConcept: pQuestion.targetConcept,
           difficulty: pQuestion.difficulty,
+          topicSlug: pQuestion.topicSlug, // taxonomy slug → the difficulty-bucket key (normalized server-side)
           reasoning: pText,
           image: pImg ? { mime: pImg.mime, data: pImg.data } : undefined,
         });
@@ -841,8 +844,10 @@ export default function Noobtopro() {
         setScoreDelta(data.delta);
         setFeedback(data); // coaching fields (reasoningScore/rubric/hints) are top-level
       } else {
-        // Guest: grade only, blend the score + rubric LOCALLY, persist to localStorage
-        // (no account to protect, so the client-computed score is fine here).
+        // Guest: grade only, then run the SAME item-as-opponent Elo update LOCALLY and
+        // persist to localStorage (no account to protect, so a client-computed score is
+        // fine here). The guest has no persisted item-difficulty bucket, so the item's
+        // difficulty is the static band anchor (no population calibration off-device).
         const r = await api("/api/grade", {
           kind: "practice",
           subject: pSubject,
@@ -854,15 +859,30 @@ export default function Noobtopro() {
           image: pImg ? { mime: pImg.mime, data: pImg.data } : undefined,
         });
         if (myRun !== practiceRun.current) return; // abandoned mid-grade — don't persist a stale write
-        const updatedScore = blend(prev.score, r.newScoreSuggestion, {
-          difficulty: pQuestion.difficulty,
-          reasoningScore: r.reasoningScore,
+        const reasoningScore = r.reasoningScore ?? 0;
+        const guestAttempts = history.filter((h) => h.type === "attempt" && h.subject === pSubject).length;
+        const elo = eloUpdate({
+          rating: prev.score,
+          difficulty: defaultDifficultyForBand(pQuestion.difficulty),
+          outcome: reasoningScore / 100,
+          attemptCount: guestAttempts,
+        });
+        const updatedScore = elo.newRating;
+        const delta = updatedScore - prev.score;
+        const rationale = explainRankMove({
+          delta,
+          reasoningScore,
+          expected: elo.expected,
+          difficultyBand: pQuestion.difficulty,
+          docked: !!r.docked,
         });
         const updatedSubject = {
           score: updatedScore,
           weakConcepts: r.weakConcepts && r.weakConcepts.length ? r.weakConcepts : prev.weakConcepts,
           comment: prev.comment,
-          rubric: blendRubric(prev.rubric, r.rubric),
+          // A docked non-answer carries no rubric signal — leave the radar profile intact
+          // (the rating already absorbed the penalty), matching /api/score.
+          rubric: r.docked ? prev.rubric : blendRubric(prev.rubric, r.rubric),
         };
         const updatedScores = { ...scores, [pSubject]: updatedSubject };
         // Atomic local write of the changed subject + its attempt. Send ONLY the
@@ -871,17 +891,18 @@ export default function Noobtopro() {
           type: "attempt",
           t: now(),
           subject: pSubject,
-          reasoningScore: r.reasoningScore,
-          delta: updatedScore - prev.score,
+          reasoningScore,
+          delta,
           newScore: updatedScore,
           totalAfter: totalPoints(updatedScores),
           phdAfter: phdIndex(updatedScores),
+          rationale,
         });
         if (myRun !== practiceRun.current) return; // abandoned during the save round-trip
         if (st && st.history) setHistory(st.history); // null = couldn't refresh; keep current
         setScores(updatedScores);
-        setScoreDelta(updatedScore - prev.score);
-        setFeedback(r);
+        setScoreDelta(delta);
+        setFeedback({ ...r, rationale });
       }
       // The composer/img unmounts once feedback is truthy (the graded view renders),
       // so the attached photo is no longer shown; release its preview blob URL (the
@@ -1040,6 +1061,7 @@ export default function Noobtopro() {
             user={user}
             scores={scores}
             history={history}
+            loadLeaderboard={() => authApi("/api/leaderboard", {})}
             onStartDiagnostic={() => { setView("practice"); beginDiagnostic(); }}
             onPractice={(s) => { setView("practice"); startPractice(s); }}
             onSignOut={() => signOutUser()}
@@ -1279,6 +1301,16 @@ export default function Noobtopro() {
                             ))}
                           </div>
                         </div>
+
+                        {/* Why your rank moved — the persisted, deterministic explanation. */}
+                        {feedback.rationale && (
+                          <div className="np-note" style={{ display: "flex", alignItems: "center", gap: 10, fontFamily: "var(--mono)", fontSize: 13 }}>
+                            <span style={{ color: scoreDelta > 0 ? "var(--phys)" : scoreDelta < 0 ? "var(--chem)" : "var(--muted)", fontWeight: 700 }}>
+                              {scoreDelta > 0 ? "▲" : scoreDelta < 0 ? "▼" : "■"}
+                            </span>
+                            <span>{feedback.rationale}</span>
+                          </div>
+                        )}
 
                         {feedback.correctnessNote && <div className="np-note">{feedback.correctnessNote}</div>}
 

@@ -2,6 +2,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { POST } from "@/app/api/grade/route";
 import { _resetRateLimits } from "@/lib/rateLimit";
 
+// Substantive, multi-word reasoning the deterministic pre-grade dock lets through to
+// the (mocked) grader. Short/"idk"/single-word answers are docked with no Groq call.
+const REASONING = "I applied the limit definition and simplified the expression step by step.";
+// A rubric whose mean implies a 0–100 score equal to ~25*mean, so reconcileReasoningScore
+// is a NO-OP for a model score near that value (lets the old score assertions stand).
+const RUBRIC_50 = { conceptual_understanding: 2, logical_structure: 2, strategy: 2, execution_accuracy: 2, communication: 2 };
+const RUBRIC_100 = { conceptual_understanding: 4, logical_structure: 4, strategy: 4, execution_accuracy: 4, communication: 4 };
+
 // Build a POST Request the route handler can consume.
 function req(bodyObjOrString) {
   const body =
@@ -39,7 +47,7 @@ describe("POST /api/grade — request guard (CSRF / content-type)", () => {
     new Request("http://test.local/api/grade", {
       method: "POST",
       headers,
-      body: JSON.stringify({ kind: "diagnostic", subject: "math", question: "Q", reasoning: "because" }),
+      body: JSON.stringify({ kind: "diagnostic", subject: "math", question: "Q", reasoning: REASONING }),
     });
 
   it("blocks a forced cross-site request with 403 (no Groq call)", async () => {
@@ -59,11 +67,52 @@ describe("POST /api/grade — request guard (CSRF / content-type)", () => {
   });
 
   it("allows a same-origin JSON request through to normal handling", async () => {
-    mockGroqReturning({ subject: "math", score: 50, weakConcepts: [], comment: "ok" });
+    mockGroqReturning({ subject: "math", score: 50, rubric: RUBRIC_50, weakConcepts: [], comment: "ok" });
     const res = await POST(raw({ "Content-Type": "application/json", "Sec-Fetch-Site": "same-origin" }));
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.score).toBe(50);
+  });
+});
+
+describe("POST /api/grade — deterministic pre-grade dock (no LLM call)", () => {
+  it("docks an empty / 'idk' / gibberish answer to a single-digit score + all-zero rubric, no Groq call", async () => {
+    for (const reasoning of ["", "   ", "idk", "no idea", "asdfghjklasdfghjkl"]) {
+      const failFetch = vi.fn(() => { throw new Error("must not call Groq on a docked answer"); });
+      vi.stubGlobal("fetch", failFetch);
+      const res = await POST(req({ kind: "practice", subject: "math", question: "Q", reasoning }));
+      expect(res.status).toBe(200);
+      const j = await res.json();
+      expect(j.docked).toBe(true);
+      expect(j.reasoningScore).toBeLessThan(10);
+      expect(Object.values(j.rubric).every((v) => v === 0)).toBe(true);
+      expect(failFetch).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("docks a blank diagnostic answer too (score single-digit, no Groq call)", async () => {
+    const failFetch = vi.fn(() => { throw new Error("must not call Groq on a docked answer"); });
+    vi.stubGlobal("fetch", failFetch);
+    const res = await POST(req({ kind: "diagnostic", subject: "math", question: "Q", reasoning: "pass" }));
+    expect(res.status).toBe(200);
+    const j = await res.json();
+    expect(j.docked).toBe(true);
+    expect(j.score).toBeLessThan(10);
+    expect(failFetch).not.toHaveBeenCalled();
+  });
+
+  it("reconciles a score that contradicts its rubric (all-zero rubric can't ship an 88)", async () => {
+    mockGroqReturning({
+      reasoningScore: 88,
+      rubric: { conceptual_understanding: 0, logical_structure: 0, strategy: 0, execution_accuracy: 0, communication: 0 },
+      correctnessNote: "", socraticHint: "h", microLesson: "m", weakConcepts: [], newScoreSuggestion: 88,
+    });
+    const res = await POST(req({ kind: "practice", subject: "math", question: "Q", targetConcept: "x", score: 50, reasoning: REASONING }));
+    expect(res.status).toBe(200);
+    const j = await res.json();
+    expect(j.reasoningScore).toBeLessThanOrEqual(25); // pulled toward the rubric-implied 0
+    expect(j.reasoningScore).toBeLessThan(88);
   });
 });
 
@@ -129,7 +178,7 @@ describe("POST /api/grade — input validation (no network)", () => {
       }))
     );
     const res = await POST(
-      req({ kind: "diagnostic", subject: "math", question: "Q", reasoning: "x" })
+      req({ kind: "diagnostic", subject: "math", question: "Q", reasoning: REASONING })
     );
     expect(res.status).toBe(500);
     const json = await res.json();
@@ -187,16 +236,16 @@ describe("POST /api/grade — rate limiting", () => {
 
 describe("POST /api/grade — model output is normalized", () => {
   it("clamps an out-of-range diagnostic score to [0, 100]", async () => {
-    mockGroqReturning({ subject: "math", score: 150, weakConcepts: [], comment: "ok" });
+    mockGroqReturning({ subject: "math", score: 150, rubric: RUBRIC_100, weakConcepts: [], comment: "ok" });
     const res = await POST(
-      req({ kind: "diagnostic", subject: "math", question: "Q", reasoning: "because" })
+      req({ kind: "diagnostic", subject: "math", question: "Q", reasoning: REASONING })
     );
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.score).toBe(100);
   });
 
-  it("normalizes a malformed practice grade (reasoningScore, rubric, suggestion)", async () => {
+  it("normalizes a malformed practice grade (reasoningScore reconciled, rubric clamped)", async () => {
     mockGroqReturning({
       reasoningScore: "not-a-number",
       rubric: { conceptual_understanding: 9, logical_structure: -3 },
@@ -213,26 +262,30 @@ describe("POST /api/grade — model output is normalized", () => {
         question: "Q",
         targetConcept: "vectors",
         score: 50,
-        reasoning: "work",
+        reasoning: REASONING,
       })
     );
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.reasoningScore).toBe(0); // unparseable -> 0
+    // Unparseable score → reconcile falls back to the rubric-implied score. Rubric is
+    // {ce:4, ls:0, others:0} → mean 0.8 → ~20.
+    expect(json.reasoningScore).toBe(20);
     expect(json.rubric.conceptual_understanding).toBe(4); // 9 -> clamped to 4
     expect(json.rubric.logical_structure).toBe(0); // -3 -> clamped to 0
     expect(json.rubric.strategy).toBe(0); // missing -> 0
-    expect(json.newScoreSuggestion).toBe(null); // omitted -> null (blend keeps prev)
+    expect(json.newScoreSuggestion).toBe(null); // omitted -> null (client Elo keeps prev)
   });
 
   it("caps oversized free-text before sending it upstream", async () => {
     const fetchMock = mockGroqReturning({
       subject: "math",
       score: 50,
+      rubric: RUBRIC_50,
       weakConcepts: [],
       comment: "",
     });
-    const giant = "x".repeat(50_000);
+    // Long but VARIED text (a repeated sentence) so the gibberish dock doesn't catch it.
+    const giant = "The derivative of x squared is two x. ".repeat(2_000);
     const res = await POST(
       req({ kind: "diagnostic", subject: "math", question: "Q", reasoning: giant })
     );
@@ -258,13 +311,13 @@ describe("POST /api/grade — difficulty band threading (practice)", () => {
     question: "Q",
     targetConcept: "limits",
     score: 50,
-    reasoning: "work",
+    reasoning: REASONING,
     ...extra,
   });
 
   const gradePayload = {
     reasoningScore: 60,
-    rubric: { conceptual_understanding: 3 },
+    rubric: RUBRIC_50,
     correctnessNote: "n",
     socraticHint: "h",
     microLesson: "m",
@@ -304,7 +357,7 @@ describe("POST /api/grade — difficulty band threading (diagnostic)", () => {
     kind: "diagnostic",
     subject: "math",
     question: "What is the limit of (sin x)/x as x->0?",
-    reasoning: "It approaches 1.",
+    reasoning: "It approaches 1 because sin x is approximately x for small angles, so the ratio tends to 1.",
     ...extra,
   });
 
@@ -312,6 +365,7 @@ describe("POST /api/grade — difficulty band threading (diagnostic)", () => {
     const fetchMock = mockGroqReturning({
       subject: "math",
       score: 150, // out of range -> must clamp to 100
+      rubric: RUBRIC_100, // rubric-consistent so reconcile leaves the clamped 100 alone
       weakConcepts: ["limits", "  ", "epsilon-delta"],
       comment: "ok",
     });

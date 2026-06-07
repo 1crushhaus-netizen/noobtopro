@@ -28,9 +28,7 @@
 import { NextResponse, after } from "next/server";
 import { groqJSON, PRACTICE_GRADE_SYS, DIAG_GRADE_SYS } from "@/lib/groq";
 import {
-  clampScore,
   ORDER,
-  blend,
   blendRubric,
   normalizeRubric,
   diagnosticSubjectScore,
@@ -38,7 +36,13 @@ import {
   totalPoints,
   phdIndex,
   DIAGNOSTIC_DIFFICULTIES,
+  eloUpdate,
+  defaultDifficultyForBand,
+  reconcileReasoningScore,
+  explainRankMove,
 } from "@/lib/scoring";
+import { normalizeTopic } from "@/lib/taxonomy";
+import { preGradeDock } from "@/lib/preGrade";
 import { checkRateLimit, clientKey } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
@@ -72,6 +76,28 @@ function registerWeakConcepts(subject, weakConcepts) {
     after(task);
   } catch {
     void task();
+  }
+}
+
+// Calibrate the item-difficulty bucket for (subject, topic, band) AFTER the response —
+// an atomic, clamped nudge by the Elo difficulty delta. Best-effort + non-blocking:
+// a calibration write must never fail or slow the learner's grade. No-op without the
+// service-role key (sb null). The seed lands a brand-new bucket at the band midpoint.
+function bumpItemDifficulty(sb, subject, topic, band, delta, seed) {
+  if (!sb || !Number.isFinite(Number(delta))) return;
+  const run = async () => {
+    try {
+      await sb.rpc("bump_item_difficulty", {
+        p_subject: subject, p_topic: topic, p_band: band, p_delta: delta, p_seed: seed,
+      });
+    } catch (e) {
+      console.error("[/api/score] bump_item_difficulty", e); // self-heals next attempt
+    }
+  };
+  try {
+    after(run);
+  } catch {
+    void run();
   }
 }
 
@@ -199,18 +225,36 @@ async function handlePractice(req, body) {
     }
   }
 
+  // The difficulty band + the calibration bucket key (subject, taxonomy slug, band).
+  // safeDifficulty is allow-listed; "(unspecified)" → intermediate so the Elo math
+  // always has a real band. normalizeTopic bounds the topic to a real slug or
+  // general_<subject>, so the bucket key space is bounded + FK-valid.
+  const bandKey = safeDifficulty !== "(unspecified)" ? safeDifficulty : "intermediate";
+  const topicSlug = normalizeTopic(subject, body && body.topicSlug != null ? body.topicSlug : body && body.topic);
+  const seedDifficulty = defaultDifficultyForBand(bandKey);
+
   try {
-    // ACCEPTED RESIDUAL: this is a read-modify-write (read prev → blend → write). Two
-    // concurrent same-user, same-subject grades could lose one update. It's single-user
+    // ACCEPTED RESIDUAL: the rating is a read-modify-write (read prev → Elo → write).
+    // Two concurrent same-user, same-subject grades could lose one update; single-user
     // and low-stakes (the practiceRun guard + one-question-at-a-time UI make it rare),
-    // so it's accepted rather than serialized; revisit if scores gate anything paid.
-    // 1) Server-authoritative PREV: read the user's current scores from the DB. The
-    //    client never supplies the level the new score is computed from.
-    const { data: rows, error: readErr } = await sb
-      .from("scores")
-      .select("subject, score, weak_concepts, comment, rubric")
-      .eq("user_id", uid);
-    if (readErr) throw readErr;
+    // so it's accepted rather than serialized. (The item-difficulty bump is commutative,
+    // so it's safe under concurrency regardless.)
+    // 1) Server-authoritative PREV + the learner's attempt count (sets the Elo K) + the
+    //    calibrated item difficulty for this bucket — ALL read server-side; the client
+    //    supplies none of the values the new rating is computed from.
+    const [scoresRes, countRes, diffRes] = await Promise.all([
+      sb.from("scores").select("subject, score, weak_concepts, comment, rubric").eq("user_id", uid),
+      sb.from("attempts").select("id", { count: "exact", head: true }).eq("user_id", uid).eq("subject", subject).eq("type", "attempt"),
+      sb.from("item_difficulty").select("difficulty").eq("subject", subject).eq("topic", topicSlug).eq("band", bandKey).maybeSingle(),
+    ]);
+    if (scoresRes.error) throw scoresRes.error;
+    const rows = scoresRes.data;
+    const attemptCount = typeof countRes.count === "number" ? countRes.count : 0;
+    const itemDifficulty =
+      diffRes && diffRes.data && Number.isFinite(Number(diffRes.data.difficulty))
+        ? Number(diffRes.data.difficulty)
+        : seedDifficulty;
+
     const current = {};
     for (const r of rows || []) {
       current[r.subject] = {
@@ -221,43 +265,59 @@ async function handlePractice(req, body) {
       };
     }
     const prev = current[subject] || null;
+    const prevScore = prev ? prev.score : 0;
 
-    // 2) Grade this attempt.
-    const data = await gradeOne({
-      system: PRACTICE_GRADE_SYS,
-      user:
-        `Subject: ${subject}\n` +
-        `Question: ${safeQuestion}\n` +
-        `Concept being probed: ${safeConcept}\n` +
-        `Question difficulty band: ${safeDifficulty}\n` +
-        `Learner's current level: ${prev ? prev.score : 0}/100\n\n` +
-        `Learner's reasoning:\n"""${work}"""`,
-      image: img.image,
-    });
+    // 2) DETERMINISTIC pre-grade dock (no LLM call) on the ORIGINAL answer: empty /
+    //    "idk" / off-topic / gibberish → forced low outcome + all-zero rubric. Else grade.
+    const dock = preGradeDock(reasoning);
+    const data = dock
+      ? dock
+      : await gradeOne({
+          system: PRACTICE_GRADE_SYS,
+          user:
+            `Subject: ${subject}\n` +
+            `Question: ${safeQuestion}\n` +
+            `Concept being probed: ${safeConcept}\n` +
+            `Question difficulty band: ${safeDifficulty}\n` +
+            `Learner's current level: ${prevScore}/100\n\n` +
+            `Learner's reasoning:\n"""${work}"""`,
+          image: img.image,
+        });
 
-    const reasoningScore = clampScore(data?.reasoningScore) ?? 0;
     const attemptRubric = normalizeRubric(data?.rubric);
+    // 3) Reconcile the headline score with its rubric (consistency / anti-gaming).
+    const reasoningScore = reconcileReasoningScore(data?.reasoningScore, attemptRubric);
     const weakConcepts = normalizeWeakConcepts(data?.weakConcepts);
-    const suggestion = clampScore(data?.newScoreSuggestion);
 
-    // 3) Compute the trusted new score + rubric profile server-side.
-    const newScore = blend(prev ? prev.score : undefined, suggestion, {
-      difficulty: safeDifficulty,
-      reasoningScore,
+    // 4) Item-as-opponent Elo update (NON-ADDITIVE): outcome = reasoningScore/100 drives
+    //    the rating against the item's calibrated difficulty; the item difficulty
+    //    self-calibrates by the same surprise.
+    const { newRating, diffDelta, expected } = eloUpdate({
+      rating: prevScore,
+      difficulty: itemDifficulty,
+      outcome: reasoningScore / 100,
+      attemptCount,
     });
-    const newRubric = blendRubric(prev ? prev.rubric : null, attemptRubric);
+    const newScore = newRating;
+
+    // Radar profile: blend toward this attempt EXCEPT on a dock — a non-answer is no
+    // signal for the rubric dimensions (the rating already absorbs the penalty), so a
+    // stray "idk" must not collapse a learner's persisted reasoning profile.
+    const newRubric = dock ? (prev ? prev.rubric : null) : blendRubric(prev ? prev.rubric : null, attemptRubric);
     const newWeak = weakConcepts.length ? weakConcepts : prev ? prev.weakConcepts : [];
     const comment = prev ? prev.comment : "";
 
-    // 4) Snapshot totals over the full (updated) map for the attempt-history row.
+    const delta = newScore - prevScore;
+    const rationale = explainRankMove({ delta, reasoningScore, expected, difficultyBand: bandKey, docked: !!dock });
+
+    // 5) Snapshot totals over the full (updated) map for the attempt-history row.
     const updatedMap = { ...current, [subject]: { score: newScore } };
     const totalAfter = totalPoints(updatedMap);
     const phdAfter = phdIndex(updatedMap);
-    const delta = newScore - (prev ? prev.score : 0);
     const t = nowIso();
 
-    // 5) Persist ONLY the changed subject (+ its attempt) atomically for the verified
-    //    uid. Sending one subject (not the full map) avoids clobbering a concurrent
+    // 6) Persist ONLY the changed subject (+ its attempt, with the rationale) atomically
+    //    for the verified uid. Sending one subject avoids clobbering a concurrent
     //    same-user session's progress on the other two.
     const { error: saveErr } = await sb.rpc("save_progress_for", {
       p_user: uid,
@@ -273,10 +333,14 @@ async function handlePractice(req, body) {
         total_after: totalAfter,
         phd_after: phdAfter,
         created_at: t,
+        rationale,
       },
     });
     if (saveErr) throw saveErr;
 
+    // 7) Calibrate the item-difficulty bucket (non-blocking; only on a real grade — a
+    //    docked non-answer carries no signal about the item's difficulty).
+    if (!dock) bumpItemDifficulty(sb, subject, topicSlug, bandKey, diffDelta, seedDifficulty);
     registerWeakConcepts(subject, weakConcepts); // auto-grow the hub (non-blocking)
 
     return NextResponse.json({
@@ -288,8 +352,10 @@ async function handlePractice(req, body) {
       weakConcepts,
       newScore,
       delta,
+      rationale,
+      docked: !!dock,
       subjectScore: { score: newScore, weakConcepts: newWeak, comment, rubric: newRubric },
-      attempt: { type: "attempt", t, subject, reasoningScore, delta, newScore, totalAfter, phdAfter },
+      attempt: { type: "attempt", t, subject, reasoningScore, delta, newScore, totalAfter, phdAfter, rationale },
     });
   } catch (e) {
     console.error("[/api/score practice]", e);
@@ -366,6 +432,10 @@ async function handleDiagnostic(req, body) {
         typeof a.reasoning === "string" && a.reasoning.trim()
           ? capText(a.reasoning.trim())
           : "(no written reasoning provided)",
+      // Deterministic dock on the RAW answer (before the placeholder substitution
+      // above), so a blank / "idk" / off-topic diagnostic answer is graded low with no
+      // LLM call, just like practice.
+      dock: preGradeDock(a.reasoning),
       image: img.image,
     });
   }
@@ -394,20 +464,26 @@ async function handleDiagnostic(req, body) {
 
   try {
     const graded = await settledPool(items, GRADE_CONCURRENCY, async (it) => {
-      const data = await gradeOne({
-        system: DIAG_GRADE_SYS,
-        user:
-          `Subject: ${it.subject}\n` +
-          `Question difficulty band: ${it.difficulty}\n` +
-          `Question: ${it.question}\n\n` +
-          `Learner's reasoning:\n"""${it.reasoning}"""`,
-        image: it.image,
-      });
+      const data = it.dock
+        ? it.dock
+        : await gradeOne({
+            system: DIAG_GRADE_SYS,
+            user:
+              `Subject: ${it.subject}\n` +
+              `Question difficulty band: ${it.difficulty}\n` +
+              `Question: ${it.question}\n\n` +
+              `Learner's reasoning:\n"""${it.reasoning}"""`,
+            image: it.image,
+          });
+      const rubric = normalizeRubric(data?.rubric);
+      // The dock verdict carries `reasoningScore`; the grader carries `score`. Reconcile
+      // either against the rubric so the baseline score can't contradict the bars.
+      const rawScore = it.dock ? data.reasoningScore : data?.score;
       return {
         subject: it.subject,
         difficulty: it.difficulty,
-        reasoningScore: clampScore(data?.score) ?? 0,
-        rubric: normalizeRubric(data?.rubric),
+        reasoningScore: reconcileReasoningScore(rawScore, rubric),
+        rubric,
         weakConcepts: normalizeWeakConcepts(data?.weakConcepts),
         comment: typeof data?.comment === "string" ? data.comment : "",
       };

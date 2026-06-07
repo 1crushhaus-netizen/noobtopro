@@ -41,8 +41,13 @@ create table if not exists public.attempts (
   delta int,
   new_score int,
   total_after int,
-  phd_after int
+  phd_after int,
+  -- One-line, server-computed "why your rank moved" explanation (Elo delta + dock
+  -- signals), shown to the learner. NULL for pre-0004 rows / baseline attempts.
+  rationale text
 );
+-- Add the rationale column to an already-provisioned attempts table (idempotent).
+alter table public.attempts add column if not exists rationale text;
 
 create index if not exists attempts_user_created_idx
   on public.attempts (user_id, created_at, id);
@@ -258,7 +263,7 @@ begin
     if p_attempt->>'subject' is not null and p_attempt->>'subject' not in ('math', 'physics', 'chemistry') then
       raise exception 'invalid attempt subject: %', p_attempt->>'subject';
     end if;
-    insert into public.attempts (user_id, type, subject, reasoning_score, delta, new_score, total_after, phd_after, created_at)
+    insert into public.attempts (user_id, type, subject, reasoning_score, delta, new_score, total_after, phd_after, created_at, rationale)
     values (p_user,
             coalesce(p_attempt->>'type', 'attempt'),
             p_attempt->>'subject',
@@ -267,7 +272,8 @@ begin
             case when pg_input_is_valid(p_attempt->>'new_score', 'numeric') then greatest(-2147483648, least(2147483647, round((p_attempt->>'new_score')::numeric)))::int end,
             case when pg_input_is_valid(p_attempt->>'total_after', 'numeric') then greatest(-2147483648, least(2147483647, round((p_attempt->>'total_after')::numeric)))::int end,
             case when pg_input_is_valid(p_attempt->>'phd_after', 'numeric') then greatest(-2147483648, least(2147483647, round((p_attempt->>'phd_after')::numeric)))::int end,
-            least(coalesce(case when pg_input_is_valid(p_attempt->>'created_at', 'timestamptz') then (p_attempt->>'created_at')::timestamptz end, now()), now()));
+            least(coalesce(case when pg_input_is_valid(p_attempt->>'created_at', 'timestamptz') then (p_attempt->>'created_at')::timestamptz end, now()), now()),
+            left(p_attempt->>'rationale', 500));
   end if;
 end;
 $$;
@@ -604,3 +610,115 @@ end;
 $$;
 revoke all on function public.rate_limit_hit(text, int, int) from public, anon, authenticated;
 grant execute on function public.rate_limit_hit(text, int, int) to service_role;
+
+-- ---- item-as-opponent Elo: self-calibrating question difficulty ------------
+-- The rating engine (lib/scoring.js) treats each QUESTION as the rated opponent. Its
+-- difficulty lives on the same 0–100 scale as the learner's per-subject rating and is
+-- calibrated per BUCKET — (subject, taxonomy-topic-slug, band) — because questions are
+-- generated fresh (no stable per-question id). /api/score reads the bucket difficulty,
+-- computes the Elo update server-side, and nudges the bucket via bump_item_difficulty.
+-- INTERNAL: RLS on, NO policy (service-role only — same lock as diagnostic_pool /
+-- rate_limits / security_events; produces the accepted INFO rls_enabled_no_policy
+-- advisor). NEVER browser-read/written; holds NO per-user data.
+create table if not exists public.item_difficulty (
+  subject text not null check (subject in ('math','physics','chemistry')),
+  topic   text not null,                          -- a taxonomy slug (FK -> concept_topics)
+  band    text not null check (band in ('beginner','foundational','intermediate','advanced','phd')),
+  difficulty numeric not null,                    -- 0..100, calibrated toward population outcomes
+  attempts bigint not null default 0,
+  updated_at timestamptz not null default now(),
+  primary key (subject, topic, band),
+  foreign key (subject, topic) references public.concept_topics(subject, slug)
+);
+alter table public.item_difficulty enable row level security;  -- no policy => service-role only
+revoke insert, update, delete, truncate on public.item_difficulty from anon, authenticated;
+
+-- Atomic difficulty nudge (seed-lazy upsert). The Elo math lives in JS (one source of
+-- truth); this just applies the computed delta as an atomic, clamped increment.
+-- Concurrent attempts on one bucket commute (additive deltas), so no advisory lock is
+-- needed. FK-guarded: a non-taxonomy topic returns null rather than violating the FK.
+-- SECURITY DEFINER + service-role only.
+create or replace function public.bump_item_difficulty(
+  p_subject text, p_topic text, p_band text, p_delta numeric, p_seed numeric
+) returns numeric
+language plpgsql security definer set search_path = public as $$
+declare
+  v_difficulty numeric;
+begin
+  if p_subject not in ('math','physics','chemistry') then return null; end if;
+  if p_band not in ('beginner','foundational','intermediate','advanced','phd') then return null; end if;
+  if not exists (select 1 from public.concept_topics where subject = p_subject and slug = p_topic) then
+    return null;
+  end if;
+  insert into public.item_difficulty (subject, topic, band, difficulty, attempts, updated_at)
+  values (p_subject, p_topic, p_band,
+          greatest(0, least(100, coalesce(p_seed, 50) + coalesce(p_delta, 0))), 1, now())
+  on conflict (subject, topic, band) do update
+    set difficulty = greatest(0, least(100, public.item_difficulty.difficulty + coalesce(p_delta, 0))),
+        attempts   = public.item_difficulty.attempts + 1,
+        updated_at = now()
+  returning difficulty into v_difficulty;
+  return v_difficulty;
+end;
+$$;
+revoke all on function public.bump_item_difficulty(text, text, text, numeric, numeric) from public, anon, authenticated;
+grant execute on function public.bump_item_difficulty(text, text, text, numeric, numeric) to service_role;
+
+-- ---- leaderboard (ANONYMOUS tiers) -----------------------------------------
+-- The Profile leaderboard exposes NO names, NO email, NO per-attempt rows — only the
+-- aggregate distribution across the 5 fixed ranks (per subject + 'overall', the rounded
+-- mean of a user's subject scores) PLUS the caller's own band/score and how many ranked
+-- users sit strictly above them (for a "top X%" readout). Qualifying users = those with
+-- >=1 scores row (completed a diagnostic). Because scores is SELECT-own under RLS, this
+-- cross-user aggregate needs definer rights; it is SERVICE-ROLE ONLY and invoked by the
+-- JWT-verified /api/leaderboard route with the caller's uid — so it never trusts a
+-- client identity and adds NO authenticated_security_definer advisor. The per-band counts
+-- are exactly what a future percentile-recut tiering would consume (architected for it).
+create or replace function public.leaderboard_tiers(p_uid uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with base as (
+    select subject::text as track, user_id, score from public.scores
+    union all
+    select 'overall'::text as track, user_id, round(avg(score))::int as score
+      from public.scores group by user_id
+  ),
+  banded as (
+    select track, user_id, score,
+      case when score < 20 then 0 when score < 40 then 1 when score < 60 then 2 when score < 80 then 3 else 4 end as bidx
+    from base
+  ),
+  counts as (
+    select track,
+      count(*) filter (where bidx = 0) as c0,
+      count(*) filter (where bidx = 1) as c1,
+      count(*) filter (where bidx = 2) as c2,
+      count(*) filter (where bidx = 3) as c3,
+      count(*) filter (where bidx = 4) as c4,
+      count(*) as total
+    from banded group by track
+  ),
+  me as (
+    select track, score, bidx from banded where user_id = p_uid
+  ),
+  per_track as (
+    select c.track,
+      jsonb_build_object(
+        'counts', jsonb_build_array(c.c0, c.c1, c.c2, c.c3, c.c4),
+        'total', c.total,
+        'you', case when m.track is null then null else jsonb_build_object(
+            'band', m.bidx,
+            'score', m.score,
+            'above', (select count(*) from banded b where b.track = c.track and b.score > m.score)
+          ) end
+      ) as obj
+    from counts c left join me m on m.track = c.track
+  )
+  select coalesce(jsonb_object_agg(track, obj), '{}'::jsonb) from per_track;
+$$;
+revoke all on function public.leaderboard_tiers(uuid) from public, anon, authenticated;
+grant execute on function public.leaderboard_tiers(uuid) to service_role;
