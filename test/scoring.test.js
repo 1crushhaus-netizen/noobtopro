@@ -6,6 +6,9 @@ import {
   totalPoints,
   phdIndex,
   ORDER,
+  diagnosticSubjectScore,
+  DIAGNOSTIC_DIFFICULTIES,
+  DIFFICULTY_LABELS,
 } from "@/lib/scoring";
 
 describe("clampScore", () => {
@@ -342,5 +345,120 @@ describe("totalPoints / phdIndex", () => {
     expect(Number.isInteger(v)).toBe(true);
     expect(v).toBeGreaterThanOrEqual(0);
     expect(v).toBeLessThanOrEqual(100);
+  });
+});
+
+// 3-tier diagnostic baseline: combine a subject's three answers (easy/intermediate
+// /hard) into a 0-100 score, each reasoningScore weighted by its difficulty ANCHOR
+// (foundational 30 / intermediate 50 / advanced 70 ~= 3:5:7). Sum(anchor) = 150 for
+// the canonical 3-question set, so the closed form is round(Sum(anchor*score)/150).
+describe("diagnosticSubjectScore", () => {
+  // Helper: build the canonical easy/intermediate/hard triple.
+  const triple = (easy, mid, hard) => [
+    { difficulty: "foundational", reasoningScore: easy },
+    { difficulty: "intermediate", reasoningScore: mid },
+    { difficulty: "advanced", reasoningScore: hard },
+  ];
+
+  it("acing all three (100/100/100) -> 100", () => {
+    // (30*100 + 50*100 + 70*100) / 150 = 15000/150 = 100.
+    expect(diagnosticSubjectScore(triple(100, 100, 100))).toBe(100);
+  });
+
+  it("all zero -> 0", () => {
+    expect(diagnosticSubjectScore(triple(0, 0, 0))).toBe(0);
+  });
+
+  it("acing ONLY the easy/foundational -> round(30*100/150) = 20", () => {
+    expect(diagnosticSubjectScore(triple(100, 0, 0))).toBe(20);
+  });
+
+  it("acing easy+intermediate, failing advanced -> round((30+50)*100/150) = 53", () => {
+    // 8000/150 = 53.33 -> 53.
+    expect(diagnosticSubjectScore(triple(100, 100, 0))).toBe(53);
+  });
+
+  it("acing ONLY advanced -> round(70*100/150) = 47", () => {
+    // 7000/150 = 46.67 -> 47.
+    expect(diagnosticSubjectScore(triple(0, 0, 100))).toBe(47);
+  });
+
+  it("a mixed realistic case is the difficulty-weighted mean (hand-computed)", () => {
+    // easy 80, intermediate 60, hard 40:
+    // (30*80 + 50*60 + 70*40) / 150 = (2400 + 3000 + 2800)/150 = 8200/150
+    // = 54.67 -> 55.
+    expect(diagnosticSubjectScore(triple(80, 60, 40))).toBe(55);
+  });
+
+  it("clamps each reasoningScore via clampScore (150->100, negative->0, garbage->0)", () => {
+    // 150 treated as 100 on the easy item, the rest 0 -> same as acing only easy = 20.
+    expect(diagnosticSubjectScore(triple(150, 0, 0))).toBe(20);
+    // A negative reasoningScore is treated as 0 -> all-zero -> 0.
+    expect(diagnosticSubjectScore(triple(-50, -1, -999))).toBe(0);
+    // Non-number / garbage (clampScore -> null) becomes 0; only the hard item scores.
+    expect(diagnosticSubjectScore(triple("garbage", null, 100))).toBe(47);
+    // 150 on every item all clamp to 100 -> 100.
+    expect(diagnosticSubjectScore(triple(150, 150, 150))).toBe(100);
+  });
+
+  it("unknown/missing difficulty falls back to the intermediate anchor (50) as its weight", () => {
+    // Single unknown-difficulty item: weight = 50, score 100 -> 5000/50 = 100.
+    expect(
+      diagnosticSubjectScore([{ difficulty: "wat", reasoningScore: 100 }])
+    ).toBe(100);
+    // Pair "wat" (must weigh 50) acing with a foundational (30) zero:
+    // (50*100 + 30*0) / (50 + 30) = 5000/80 = 62.5 -> 63. This pins the fallback
+    // weight at 50: it would be 70 (->70) if treated as advanced, or the item
+    // would be dropped (->0) if unknown difficulty contributed no weight.
+    expect(
+      diagnosticSubjectScore([
+        { difficulty: "wat", reasoningScore: 100 },
+        { difficulty: "foundational", reasoningScore: 0 },
+      ])
+    ).toBe(63);
+    // A missing difficulty key behaves the same as an unknown string (weight 50).
+    expect(diagnosticSubjectScore([{ reasoningScore: 80 }])).toBe(80);
+  });
+
+  it("empty array and non-array (null/undefined) -> 0", () => {
+    expect(diagnosticSubjectScore([])).toBe(0);
+    expect(diagnosticSubjectScore(null)).toBe(0);
+    expect(diagnosticSubjectScore(undefined)).toBe(0);
+    expect(diagnosticSubjectScore({})).toBe(0);
+    expect(diagnosticSubjectScore("nope")).toBe(0);
+  });
+
+  it("always returns an integer in [0, 100] across messy inputs", () => {
+    const scoreVals = [0, 50, 100, 150, -10, null, undefined, NaN, "100", "x", {}];
+    const diffs = ["foundational", "intermediate", "advanced", "wat", "", null, 123];
+    for (const e of scoreVals) {
+      for (const m of diffs) {
+        for (const h of scoreVals) {
+          const v = diagnosticSubjectScore([
+            { difficulty: m, reasoningScore: e },
+            { difficulty: "intermediate", reasoningScore: h },
+          ]);
+          expect(Number.isInteger(v)).toBe(true);
+          expect(v).toBeGreaterThanOrEqual(0);
+          expect(v).toBeLessThanOrEqual(100);
+        }
+      }
+    }
+  });
+});
+
+describe("DIAGNOSTIC_DIFFICULTIES / DIFFICULTY_LABELS", () => {
+  it("DIAGNOSTIC_DIFFICULTIES is the easy->hard band order", () => {
+    expect(DIAGNOSTIC_DIFFICULTIES).toEqual([
+      "foundational",
+      "intermediate",
+      "advanced",
+    ]);
+  });
+
+  it("DIFFICULTY_LABELS maps each band to its friendly UI label", () => {
+    expect(DIFFICULTY_LABELS.foundational).toBe("Easy");
+    expect(DIFFICULTY_LABELS.intermediate).toBe("Intermediate");
+    expect(DIFFICULTY_LABELS.advanced).toBe("Hard");
   });
 });

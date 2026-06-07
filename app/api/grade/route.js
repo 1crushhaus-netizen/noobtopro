@@ -226,7 +226,11 @@ export async function POST(req) {
     if (kind === "diagnostic") {
       const data = await groqJSON({
         system: DIAG_GRADE_SYS,
-        user: `Subject: ${subject}\nQuestion: ${safeQuestion}\n\nLearner's reasoning:\n"""${work}"""`,
+        user:
+          `Subject: ${subject}\n` +
+          `Question difficulty band: ${safeDifficulty}\n` +
+          `Question: ${safeQuestion}\n\n` +
+          `Learner's reasoning:\n"""${work}"""`,
         image: img.image,
         grade: true, // route to the cheaper grading model
       });

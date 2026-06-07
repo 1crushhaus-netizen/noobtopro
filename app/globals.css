@@ -82,6 +82,9 @@ body {
 
 .np-progress { display: flex; gap: 8px; margin-bottom: 20px; }
 .np-progdot { height: 4px; flex: 1; border-radius: 3px; transition: background .4s ease; }
+/* 3-tier diagnostic: 3 subject groups, each with 3 difficulty pips (wider gap between groups). */
+.np-diag-progress { display: flex; gap: 16px; margin-bottom: 20px; }
+.np-diag-proggroup { display: flex; gap: 5px; flex: 1; }
 .np-qmeta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-bottom: 12px; }
 .np-topic { background: rgba(255, 255, 255, .05); border-radius: 6px; padding: 3px 9px; font-size: 12px; }
 .np-livescore { margin-left: auto; font-family: var(--mono); font-weight: 700; border: 1px solid; border-radius: 8px; padding: 4px 10px; font-size: 14px; }

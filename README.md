@@ -46,7 +46,7 @@
 
 It inverts the usual "learn then test" flow:
 
-1. **Prove it** — three open problems (one per subject). You solve them and explain every step.
+1. **Prove it** — for each subject, three open problems at escalating difficulty (easy → intermediate → hard; 9 total). You solve them and explain every step. The per-subject baseline weights the harder questions more (points proportional to difficulty), so one pass calibrates where you stand.
 2. **Get ranked** — your *reasoning* is graded on a 5-part rubric and mapped to a **0–100 rank per subject**.
 3. **Climb** — pick a subject, get problems calibrated to your level, and improve. Sound reasoning moves your score even when the final answer is wrong.
 
@@ -301,13 +301,13 @@ The UI only ever calls these; they transparently use Supabase when signed in, el
 All three routes are `POST`, `dynamic = "force-dynamic"`, **same-origin-gated** (`lib/requestGuard.js`: rejects forced cross-site requests via `Sec-Fetch-Site` → `403`, and requires `Content-Type: application/json` → `415`, blunting CSRF-style cross-site cost/quota abuse), **rate-limited per IP** (`lib/rateLimit.js`, in-memory; `429` + `Retry-After`; `/api/learn` is tighter at 15/min and image grades get a separate 10/min budget), validate input (→ `400`), normalize model output, and return a **generic `500`** (the real Groq error is logged server-side, never leaked). *(The in-memory limiter is per-instance/IP-spoofable — a durable, per-account limiter is still a pre-monetization TODO, see §17.)*
 
 ### `POST /api/generate`
-- **Diagnostic:** `{ "kind": "diagnostic" }` → `{ questions: [{subject, topic, question} × 3] }` (one per subject). **Read-through `diagnostic_pool`:** once the pool holds `DIAG_POOL_TARGET` (12) valid full sets, returns a random one (`pooled:true`) with **no Groq call**; below that, generates fresh and self-fills the pool (only valid 3-subject sets). Skipped when `SUPABASE_SERVICE_ROLE_KEY` is unset (always generates).
+- **Diagnostic:** `{ "kind": "diagnostic" }` → `{ questions: [{subject, topic, difficulty, question} × 9] }` — **3 per subject** at difficulty `foundational`/`intermediate`/`advanced` (easy/intermediate/hard). **Read-through `diagnostic_pool`:** once the pool holds `DIAG_POOL_TARGET` (12) valid full sets, returns a random one (`pooled:true`) with **no Groq call**; below that, generates fresh and self-fills the pool. `isValidDiagnostic` only accepts a set with **all 3 subjects × all 3 tiers** (9 questions). Skipped when `SUPABASE_SERVICE_ROLE_KEY` is unset (always generates).
 - **Practice:** `{ "kind": "practice", "subject": "math"|"physics"|"chemistry", "score": int, "weakConcepts": string[] }` → `{ subject, topic, targetConcept, difficulty, question }`. Subject validated via `ORDER.includes` (prototype-safe); `weakConcepts` capped.
 
 ### `POST /api/grade`
 - `{ kind: "diagnostic"|"practice", subject, question, [targetConcept], [difficulty], [score], reasoning, [image: { mime, data(base64) }] }`. *(practice-only `difficulty` is the question's band, allowlist-validated and used only to calibrate the grader; unknown/missing → `(unspecified)`.)*
 - Free-text fields capped (~12k chars); image validated (allowlisted MIME jpeg/png/webp/gif, base64, ~3 MB cap).
-- **Diagnostic →** `{ subject, score(0–100), weakConcepts[], comment }`.
+- **Diagnostic →** `{ subject, score(0–100), weakConcepts[], comment }` — grades **one** question's reasoning, calibrated to its `difficulty` band (threaded into the prompt like practice). The client grades all 9 in parallel and combines the 3 per subject via `diagnosticSubjectScore` (see §11).
 - **Practice →** `{ reasoningScore(0–100), rubric{conceptual_understanding, logical_structure, strategy, execution_accuracy, communication: 0–4}, correctnessNote, socraticHint, microLesson, weakConcepts[], newScoreSuggestion }`. All scores clamped, rubric normalized, `weakConcepts` coerced to a string array.
 - **Concept-hub auto-grow:** after responding (`after()`, non-blocking), the server-normalized `weakConcepts` are registered as `pending` catalog stubs via `register_concepts` (no added grading latency; no-op without the service-role key).
 
@@ -338,6 +338,7 @@ Unlike the three public routes above, these require an **admin**. The browser at
 - `blend(prev, suggestion, opts?)` — difficulty- and confidence-weighted damped update, a step toward an IRT/Elo model. `new = round(prev + alpha*(sug - prev))`: the grader's `suggestion` sets the target/direction and `alpha` (learning rate, clamped to `[0.05, 0.6]`) is the legacy anchor `0.35` scaled by **confidence** (`reasoningScore` — a blank attempt barely moves the score, an excellent one moves it more) and an **Elo surprise** term (the gap between the attempt's outcome and the outcome expected from `prev` vs the question's difficulty anchor, aligned to the move's direction — beating an above-level item amplifies an upward move; an outcome that contradicts the suggested direction damps it). Difficulty bands map to midpoint anchors (`beginner 10 … phd 90`, prototype-pollution-safe lookup). **Backward-compatible:** called with two args — or `opts` lacking both signals — it reproduces the exact legacy `round(prev*0.65 + sug*0.35)`. Null-safety unchanged: a null/garbage suggestion keeps `prev` (0 if none); a literal `NaN`/out-of-range `prev` is clamped; output is always an int in `[0,100]`. Threaded from `submitPractice` in `components/Noobtopro.jsx` via `{ difficulty: pQuestion.difficulty, reasoningScore: r.reasoningScore }`.
 - `totalPoints(scores)` — sum of the three subject scores (0–300).
 - `phdIndex(scores)` — mean of the three (0–100); the headline "PhD-level intelligence" number.
+- `diagnosticSubjectScore(perQuestion)` — combines a subject's **three** diagnostic answers (easy/intermediate/hard) into a 0–100 **baseline**, weighting each question's reasoning score by its difficulty anchor (foundational 30 / intermediate 50 / advanced 70 ≈ 3:5:7) — **points proportional to difficulty**. Acing all → ~100; acing only easy → ~20. Used by `submitDiagnostic` (no `blend()` — this is the baseline, not an update). Exported alongside `DIAGNOSTIC_DIFFICULTIES` (`["foundational","intermediate","advanced"]`) and `DIFFICULTY_LABELS` (Easy/Intermediate/Hard).
 
 ---
 
@@ -351,7 +352,7 @@ The entire app is one big client component, **`components/Noobtopro.jsx`**, driv
 The render switch resolves in this order: `stage === "signin"` (sign-in menu, full-screen) → `view === "profile"` (ProfileTab) → `view === "learn"` (LearnTab) → `view === "progress"` (ProgressDashboard) → else the **Practice flow** (the `stage` machine: intro → diagnostic → scoring loader → dashboard "Where you stand" → practice Q&A + feedback).
 
 Key flows / handlers:
-- `beginDiagnostic()` → `/api/generate` (diagnostic) → answer each → `submitDiagnostic()` grades all three in parallel → dashboard. As a guest, finishing pops the **"save your progress" modal** (dimmed `inert` background, scroll-lock, focus trap, Escape/backdrop close).
+- `beginDiagnostic()` → `/api/generate` (diagnostic) → **9 questions (3 per subject, easy/intermediate/hard)** answered one at a time (ordered subject-major, easy→hard; answers keyed by `subject:difficulty`; a grouped progress bar of 3×3 pips + a difficulty label per question) → `submitDiagnostic()` grades all 9 in parallel and combines each subject's three via `diagnosticSubjectScore` → dashboard. As a guest, finishing pops the **"save your progress" modal** (dimmed `inert` background, scroll-lock, focus trap, Escape/backdrop close).
 - `startPractice(subject)` / `submitPractice()` → `/api/generate` + `/api/grade`; blends the new score; renders the rubric + Socratic hint + micro-lesson (no answer).
 - `openLearn(subject, concept)` → switches to the Learn tab and fetches `/api/learn` (guarded by a monotonic `learnRun` token so rapid clicks can't show a stale guide). **Memoized per session** in `learnCacheRef` (`"subject::concept"` → guide), so revisiting a concept renders instantly with **no server round-trip**. Each guide carries a cached **"try this" question**: `startPracticeWithQuestion(subject, q)` enters practice using it directly (no generation), and `regenerateLearnQuestion()` fetches a fresh, level-calibrated one on demand (session-only — the shared cached guide is untouched).
 - The dashboard's **"Work on" weak-concept tags are buttons** → they call `openLearn`.
@@ -363,11 +364,11 @@ Components: **SignIn** (provider buttons), **ProfileTab** (identity + stats + co
 
 ## 13. Testing
 
-**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **298 tests across 26 files**, all passing.
+**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **314 tests across 26 files**, all passing.
 
 | File | Covers |
 |---|---|
-| `test/scoring.test.js` | clampScore/band/blend (legacy + weighted Elo path)/totalPoints/phdIndex incl. regressions **+ non-integer-score coercion** |
+| `test/scoring.test.js` | clampScore/band/blend (legacy + weighted Elo path)/totalPoints/phdIndex incl. regressions **+ non-integer-score coercion** + **`diagnosticSubjectScore` difficulty-weighted baseline** (anchor 3:5:7, clamping, unknown-band fallback) |
 | `test/groq.test.js` | JSON extraction (fences, prose, braces-in-strings), fallback retry **gating (no retry on hard HTTP errors)**, per-call `max_tokens`, **grade-model routing (gpt-oss + `reasoning_effort` low)**, errors |
 | `test/rateLimit.test.js` | window limit, reset, per-key, memory bound (enforceCap) |
 | `test/api-generate.test.js` | validation/400s, prototype-key rejection, non-leaking 500, weakConcepts cap, **diagnostic pool (warm-serve / cold self-fill via RPC / invalid-row + invalid-generated guards / read-error fall-through)** |

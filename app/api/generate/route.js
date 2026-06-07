@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { groqJSON, DIAG_GEN_SYS, PRACTICE_GEN_SYS } from "@/lib/groq";
-import { ORDER, clampScore } from "@/lib/scoring";
+import { ORDER, clampScore, DIAGNOSTIC_DIFFICULTIES } from "@/lib/scoring";
 import { rateLimit, clientKey } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
@@ -14,15 +14,24 @@ export const dynamic = "force-dynamic";
 // serve them randomly with NO Groq call; below the target the pool self-fills.
 const DIAG_POOL_TARGET = 12;
 
-// A diagnostic is only usable if it has a question for ALL three subjects (the
-// client renders one card per subject). Never serve or store a partial set.
+// A diagnostic is only usable if it has, for EVERY subject, one question at EACH
+// difficulty tier (foundational/intermediate/advanced) — 9 valid questions, 3 per
+// subject. Never serve or store a partial set. ORDER.includes is prototype-safe.
 function isValidDiagnostic(content) {
   if (!content || !Array.isArray(content.questions)) return false;
-  const seen = new Set();
+  const seen = new Set(); // "subject:difficulty" pairs with a non-empty question
   for (const q of content.questions) {
-    if (q && ORDER.includes(q.subject) && typeof q.question === "string" && q.question.trim()) seen.add(q.subject);
+    if (
+      q &&
+      ORDER.includes(q.subject) &&
+      DIAGNOSTIC_DIFFICULTIES.includes(q.difficulty) &&
+      typeof q.question === "string" &&
+      q.question.trim()
+    ) {
+      seen.add(`${q.subject}:${q.difficulty}`);
+    }
   }
-  return ORDER.every((s) => seen.has(s));
+  return ORDER.every((s) => DIAGNOSTIC_DIFFICULTIES.every((d) => seen.has(`${s}:${d}`)));
 }
 
 export async function POST(req) {
