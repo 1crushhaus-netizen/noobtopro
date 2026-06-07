@@ -450,6 +450,75 @@ $$;
 revoke all on function public.promote_or_insert_guide(text, text, jsonb, text, text, boolean) from public, anon, authenticated;
 grant execute on function public.promote_or_insert_guide(text, text, jsonb, text, text, boolean) to service_role;
 
+-- Concept Hub PUBLIC SEED (PR 4): the sanctioned BATCH public-publish path (alongside
+-- the admin "approve" action). Upserts a CURATED, PUBLIC, READY guide for a core
+-- concept; idempotent + re-runnable (re-running refreshes content). On conflict it also
+-- promotes any prior hidden grader/user row for the key to the curated public catalog
+-- (taking canonical ownership). service-role only — a signed-in user can NEVER publish
+-- via it (the curation-only model holds: seed + admin approve are the only public paths).
+-- The seed script (scripts/seed-concept-hub.mjs) calls this for the core concept of each
+-- of the 36 taxonomy topics (lib/taxonomy.js SEED_CONCEPTS).
+create or replace function public.seed_curated_guide(
+  p_subject text, p_topic text, p_concept text, p_content jsonb, p_level text default null
+) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  k  text := _concept_key(p_concept);
+  t  text := case when exists (select 1 from public.concept_topics where subject = p_subject and slug = p_topic)
+                  then p_topic else 'general_' || p_subject end;
+  lv text := case when p_level in ('beginner','foundational','intermediate','advanced','phd') then p_level else null end;
+begin
+  if p_subject not in ('math','physics','chemistry') or k = '' or p_content is null then return; end if;
+  insert into public.concept_guides (subject, concept_key, concept, content, topic, level_band, status, source, visibility, updated_at)
+  values (p_subject, k, left(p_concept, 200), p_content, t, lv, 'ready', 'curated', 'public', now())
+  on conflict (subject, concept_key) do update
+    set content    = excluded.content,
+        concept    = excluded.concept,
+        topic      = excluded.topic,
+        level_band = excluded.level_band,
+        status     = 'ready',
+        source     = 'curated',
+        visibility = 'public',
+        updated_at = now();
+end;
+$$;
+revoke all on function public.seed_curated_guide(text, text, text, jsonb, text) from public, anon, authenticated;
+grant execute on function public.seed_curated_guide(text, text, text, jsonb, text) to service_role;
+
+-- Conservative canonical de-dup housekeeping (PR 4): delete content-less grader PENDING
+-- stubs already subsumed by a READY guide in the same (subject, topic) (the stub's key
+-- appears as a whole WORD in the ready guide's key — a word-boundary match, not a raw
+-- substring, so "sin" is NOT pruned by "cosine"; wildcard-safe, no LIKE). Pending stubs
+-- are mere hints (no content, never public), so this is a safe collapse; a concept
+-- re-stubs if a future grade re-registers it. Touches NO ready/public/curated row.
+-- service-role only. (Fuzzy semantic merge of distinct-keyed near-duplicates is the
+-- v1.1 follow-on — pg_trgm.)
+create or replace function public.dedupe_pending_stubs() returns int
+language plpgsql security definer set search_path = public as $$
+declare
+  v_removed int;
+begin
+  with kept as (
+    select subject, topic, concept_key from public.concept_guides where status = 'ready'
+  ),
+  dupes as (
+    select g.ctid
+    from public.concept_guides g
+    join kept k
+      on k.subject = g.subject
+     and k.topic   = g.topic
+     and k.concept_key <> g.concept_key
+     and g.concept_key = any(string_to_array(k.concept_key, ' '))
+    where g.status = 'pending'
+  )
+  delete from public.concept_guides where ctid in (select ctid from dupes);
+  get diagnostics v_removed = row_count;
+  return v_removed;
+end;
+$$;
+revoke all on function public.dedupe_pending_stubs() from public, anon, authenticated;
+grant execute on function public.dedupe_pending_stubs() to service_role;
+
 -- ---- shared diagnostic pool ------------------------------------------------
 -- The diagnostic is a static, level-neutral baseline (no per-user input), so it
 -- is safe to standardize across users — same philosophy as concept_guides. We
