@@ -254,6 +254,15 @@ describe("loadState (guest blob sanitization)", () => {
     const st = await loadState();
     expect(st).toEqual({ scores: null, history: [] });
   });
+
+  it("collapses an all-garbage scores blob to null (so hydrate routes the guest to the intro, not a 0/0/0 dashboard)", async () => {
+    mocks.session = guest;
+    // Every subject is a non-object → all dropped → scores must be null, matching the
+    // signed-in path (not a truthy empty {} that looks like a placed-but-empty user).
+    window.localStorage.setItem(KEY, JSON.stringify({ scores: { math: "x", physics: 5, chemistry: null }, history: [] }));
+    const st = await loadState();
+    expect(st.scores).toBe(null);
+  });
 });
 
 describe("saveProgress (atomic score + attempt write)", () => {

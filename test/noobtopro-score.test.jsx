@@ -108,3 +108,63 @@ describe("Noobtopro — signed-in practice is server-authoritative", () => {
     expect(store.saveProgress).not.toHaveBeenCalled();
   });
 });
+
+describe("Noobtopro — signed-in diagnostic is server-persisted", () => {
+  const DIAGNOSTIC = {
+    questions: [
+      { subject: "math", topic: "t", difficulty: "foundational", question: "MATH-FND" },
+      { subject: "math", topic: "t", difficulty: "intermediate", question: "MATH-INT" },
+      { subject: "math", topic: "t", difficulty: "advanced", question: "MATH-ADV" },
+      { subject: "physics", topic: "t", difficulty: "foundational", question: "PHYS-FND" },
+      { subject: "physics", topic: "t", difficulty: "intermediate", question: "PHYS-INT" },
+      { subject: "physics", topic: "t", difficulty: "advanced", question: "PHYS-ADV" },
+      { subject: "chemistry", topic: "t", difficulty: "foundational", question: "CHEM-FND" },
+      { subject: "chemistry", topic: "t", difficulty: "intermediate", question: "CHEM-INT" },
+      { subject: "chemistry", topic: "t", difficulty: "advanced", question: "CHEM-ADV" },
+    ],
+  };
+  const ORDER = ["MATH-FND", "MATH-INT", "MATH-ADV", "PHYS-FND", "PHYS-INT", "PHYS-ADV", "CHEM-FND", "CHEM-INT", "CHEM-ADV"];
+
+  it("sends all 9 answers to /api/score (kind:diagnostic) with the Bearer token, then persists server-side (no saveProgress)", async () => {
+    // Signed-in but no scores yet → starts at the intro so we can run the diagnostic.
+    store.loadState.mockResolvedValue({ scores: null, history: [] });
+    const persisted = {
+      math: { score: 55, weakConcepts: [], comment: "", rubric: { conceptual_understanding: 3, logical_structure: 3, strategy: 3, execution_accuracy: 3, communication: 3 } },
+      physics: { score: 40, weakConcepts: [], comment: "", rubric: { conceptual_understanding: 2, logical_structure: 2, strategy: 2, execution_accuracy: 2, communication: 2 } },
+      chemistry: { score: 30, weakConcepts: [], comment: "", rubric: { conceptual_understanding: 2, logical_structure: 2, strategy: 2, execution_accuracy: 2, communication: 2 } },
+    };
+    const fetchMock = vi.fn(async (path) => {
+      if (path === "/api/admin/me") return jsonRes({ isAdmin: false });
+      if (path === "/api/generate") return jsonRes(DIAGNOSTIC);
+      if (path === "/api/score")
+        return jsonRes({
+          scores: persisted,
+          persisted: true,
+          attempt: { type: "baseline", t: "t1", subject: null, totalAfter: 125, phdAfter: 42 },
+        });
+      return jsonRes({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<Noobtopro />);
+    fireEvent.click(await screen.findByRole("button", { name: /prove it/i }));
+    for (let i = 0; i < ORDER.length; i++) {
+      const isLast = i === ORDER.length - 1;
+      await screen.findByText(ORDER[i]);
+      fireEvent.change(screen.getByLabelText("Your reasoning"), { target: { value: `answer ${i}` } });
+      fireEvent.click(screen.getByRole("button", { name: isLast ? /get ranked/i : /next question/i }));
+    }
+
+    await screen.findByText("Where you stand");
+
+    // ONE batched /api/score request, kind:diagnostic, with the Bearer token + 9 answers.
+    const scoreCalls = fetchMock.mock.calls.filter(([p]) => p === "/api/score");
+    expect(scoreCalls).toHaveLength(1);
+    expect(scoreCalls[0][1].headers.Authorization).toBe("Bearer tok-123");
+    const body = JSON.parse(scoreCalls[0][1].body);
+    expect(body.kind).toBe("diagnostic");
+    expect(body.answers).toHaveLength(9);
+    // Server persisted it — the client never writes locally.
+    expect(store.saveProgress).not.toHaveBeenCalled();
+  });
+});

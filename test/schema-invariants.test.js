@@ -115,3 +115,24 @@ describe("db/schema.sql — server-authoritative scoring (the trust boundary)", 
     expect(schema).toMatch(/alter table public\.attempts enable row level security/);
   });
 });
+
+describe("db/schema.sql — audit-hardening invariants", () => {
+  it("save_progress_for serializes same-user writes with a per-user advisory lock", () => {
+    expect(fnBody("save_progress_for")).toContain("pg_advisory_xact_lock(hashtextextended(p_user::text, 0))");
+  });
+
+  it("revokes default client DML on the concept-hub / internal tables (keeps public SELECT + report INSERT)", () => {
+    expect(schema).toMatch(/revoke insert, update, delete, truncate on public\.diagnostic_pool, public\.security_events from anon, authenticated/);
+    expect(schema).toMatch(/revoke insert, update, delete, truncate on public\.concept_guides, public\.concept_topics from anon, authenticated/);
+    // concept_reports keeps authenticated INSERT (the report feature) — only anon's
+    // insert + everyone's update/delete/truncate are revoked.
+    expect(schema).toMatch(/revoke update, delete, truncate on public\.concept_reports from anon, authenticated/);
+    expect(schema).toMatch(/revoke insert on public\.concept_reports from anon/);
+    expect(schema).not.toMatch(/revoke insert[^;]*on public\.concept_reports from anon, authenticated/);
+  });
+
+  it("bounds report flooding with one-open-report-per-user partial unique index", () => {
+    expect(schema).toMatch(/create unique index if not exists concept_reports_one_open_per_user/);
+    expect(schema).toMatch(/where status = 'open'/);
+  });
+});

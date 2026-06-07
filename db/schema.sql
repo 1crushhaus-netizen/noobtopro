@@ -214,6 +214,11 @@ begin
     raise exception 'user required';
   end if;
 
+  -- Serialize concurrent writes for the SAME user (practice vs practice, or practice
+  -- vs diagnostic re-baseline) so a read-modify-write blend can't lose an update or
+  -- interleave into a mixed state. Transaction-scoped: released at commit/rollback.
+  perform pg_advisory_xact_lock(hashtextextended(p_user::text, 0));
+
   if coalesce(jsonb_array_length(coalesce(p_scores, '[]'::jsonb)), 0) > 3 then
     raise exception 'too many score rows';
   end if;
@@ -517,3 +522,23 @@ create policy "report own"
   with check ((select auth.uid()) = reporter_id);
 create index if not exists concept_reports_status_created_idx
   on public.concept_reports (status, created_at desc);
+-- One OPEN report per user per guide: collapses report-flooding by an authenticated
+-- user (the RLS insert policy alone places no bound). A duplicate insert hits this
+-- unique index; lib/catalog.js#reportConcept treats the 23505 conflict as success.
+create unique index if not exists concept_reports_one_open_per_user
+  on public.concept_reports (reporter_id, subject, concept_key)
+  where status = 'open';
+
+-- ---- GRANT-layer hardening (defense-in-depth) ------------------------------
+-- Supabase grants anon/authenticated full table DML by default; like scores/attempts
+-- (above), strip writes the app doesn't need at the GRANT layer so the RLS intent
+-- holds even if a policy is later added by mistake. All legitimate writes to these
+-- tables go through SECURITY DEFINER RPCs / the service-role admin client.
+--   - internal (RLS on, no policy): no browser write at all.
+revoke insert, update, delete, truncate on public.diagnostic_pool, public.security_events from anon, authenticated;
+--   - public-read content (writes service-role only): keep SELECT, drop writes.
+revoke insert, update, delete, truncate on public.concept_guides, public.concept_topics from anon, authenticated;
+--   - concept_reports: authenticated INSERTs its OWN report (RLS policy), so keep that
+--     one grant; revoke everything else (anon can't report; nobody updates/deletes).
+revoke update, delete, truncate on public.concept_reports from anon, authenticated;
+revoke insert on public.concept_reports from anon;

@@ -111,11 +111,7 @@ describe("POST /api/generate — request guard (CSRF / content-type)", () => {
   });
 
   it("allows a same-origin JSON request", async () => {
-    mockGroqReturning({ questions: [
-      { subject: "math", topic: "t", question: "q1" },
-      { subject: "physics", topic: "t", question: "q2" },
-      { subject: "chemistry", topic: "t", question: "q3" },
-    ] });
+    mockGroqReturning(validDiagnostic());
     const res = await POST(raw({ "Content-Type": "application/json", "Sec-Fetch-Site": "same-origin" }));
     expect(res.status).toBe(200);
   });
@@ -160,19 +156,20 @@ describe("POST /api/generate — validation", () => {
 });
 
 describe("POST /api/generate — happy paths", () => {
-  it("returns three diagnostic questions", async () => {
-    const payload = {
-      questions: [
-        { subject: "math", topic: "t", question: "q1" },
-        { subject: "physics", topic: "t", question: "q2" },
-        { subject: "chemistry", topic: "t", question: "q3" },
-      ],
-    };
-    mockGroqReturning(payload);
+  it("returns a full 9-question diagnostic (3 subjects × 3 tiers)", async () => {
+    mockGroqReturning(validDiagnostic());
     const res = await POST(req({ kind: "diagnostic" }));
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.questions).toHaveLength(3);
+    expect(json.questions).toHaveLength(9);
+  });
+
+  it("rejects a freshly-generated INVALID (partial) diagnostic with 500 instead of returning it", async () => {
+    // The route now gates the generated response with isValidDiagnostic (not just the
+    // pool write), so a truncated/partial set surfaces a retryable error.
+    mockGroqReturning({ questions: validDiagnostic().questions.filter((q) => q.subject !== "chemistry") });
+    const res = await POST(req({ kind: "diagnostic" }));
+    expect(res.status).toBe(500);
   });
 
   it("generates a practice question for a known subject", async () => {
@@ -308,12 +305,12 @@ describe("POST /api/generate — diagnostic pool", () => {
     },
   };
   for (const [label, badContent] of Object.entries(incompleteGenerated)) {
-    it(`does NOT store an invalid GENERATED set in the shared pool — ${label}`, async () => {
+    it(`rejects an invalid GENERATED set (500) and never writes it to the shared pool — ${label}`, async () => {
       const fetchMock = mockGroqReturning(badContent);
       const admin = fakeAdmin({ count: 0 });
       adminMock.getAdmin.mockReturnValue(admin);
       const res = await POST(req({ kind: "diagnostic" }));
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(500); // invalid set is gated, not returned
       expect(fetchMock).toHaveBeenCalled();
       expect(admin.calls.rpcs).toHaveLength(0); // invalid set never written to the pool
     });

@@ -10,18 +10,35 @@
 // Origins allow-listed for actual app dependencies:
 //   - style/font: Google Fonts (@import in app/globals.css)
 //   - connect: Supabase (REST/auth) + Vercel Speed Insights beacon
-//   - img: data:/blob: (diagnostic photo previews) + https: (OAuth avatars)
+//   - img: data:/blob: (diagnostic photo previews) + the OAuth providers' avatar CDNs
+//     (ProfileTab renders the signed-in user's avatar; a blocked host just falls back
+//     to initials via onError, so this is safe to pin)
+
+// Pin connect-src to THIS project's Supabase host when the env is known (it is at the
+// production build), instead of a platform-wide *.supabase.co wildcard. Falls back to
+// the wildcard when the env isn't set at build time (e.g. CI builds guest-mode with
+// empty secrets), so the build never breaks.
+const supabaseConnect = (() => {
+  try {
+    const h = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).host;
+    return h ? `https://${h} wss://${h}` : null;
+  } catch {
+    return null;
+  }
+})() || "https://*.supabase.co wss://*.supabase.co";
+
 const csp = [
   "default-src 'self'",
   "base-uri 'self'",
   "object-src 'none'",
   "frame-ancestors 'none'",
   "form-action 'self'",
-  "img-src 'self' data: blob: https:",
+  "upgrade-insecure-requests",
+  "img-src 'self' data: blob: https://*.googleusercontent.com https://avatars.githubusercontent.com https://cdn.discordapp.com",
   "font-src 'self' https://fonts.gstatic.com",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "script-src 'self' 'unsafe-inline'",
-  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://vitals.vercel-insights.com",
+  `connect-src 'self' ${supabaseConnect} https://vitals.vercel-insights.com`,
 ].join("; ");
 
 // Defense-in-depth security headers applied to every response.

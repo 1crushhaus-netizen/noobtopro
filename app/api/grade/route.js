@@ -87,7 +87,7 @@ export async function POST(req) {
     route: "/api/grade",
     subject,
     concept: safeConcept !== "(unspecified)" ? safeConcept : null,
-    text: `${work}\n${safeConcept}`,
+    text: `${safeQuestion}\n${work}\n${safeConcept}`,
   });
 
   const img = normalizeImage(image);

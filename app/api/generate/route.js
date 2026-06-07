@@ -86,17 +86,31 @@ export async function POST(req) {
         }
       }
 
-      // 2) Cold/insufficient pool -> generate fresh.
+      // 2) Cold/insufficient pool -> generate fresh. NINE multi-step questions are
+      //    well over the shared 1200-token default, so give the model more room
+      //    (mirrors /api/learn) — at 1200 a verbose set truncates mid-JSON and the
+      //    diagnostic fails, and since a truncated set never fills the pool, every
+      //    request would hit the same wall.
       const data = await groqJSON({
         system: DIAG_GEN_SYS,
         user: "Generate the three diagnostic questions now.",
+        maxTokens: 3000,
       });
+
+      // Don't hand the client a partial/invalid set (truncation, missing tier):
+      // surface a retryable error instead, matching the pool-read gate below.
+      if (!isValidDiagnostic(data)) {
+        return NextResponse.json(
+          { error: "Question generation is temporarily unavailable. Please try again." },
+          { status: 500 }
+        );
+      }
 
       // 3) Self-fill the pool (best-effort) via an atomic, advisory-locked,
       //    count-gated insert (try_add_diagnostic) — only valid full 3-subject
       //    sets, and concurrent cold-start fills can't overshoot DIAG_POOL_TARGET
       //    (the cap is enforced inside one serialized DB statement).
-      if (sb && isValidDiagnostic(data)) {
+      if (sb) {
         try {
           await sb.rpc("try_add_diagnostic", { p_content: data, p_target: DIAG_POOL_TARGET });
         } catch (e) {
