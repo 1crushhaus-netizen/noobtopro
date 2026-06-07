@@ -354,12 +354,15 @@ describe("totalPoints / phdIndex", () => {
   });
 });
 
-// 3-tier diagnostic baseline: combine a subject's three answers (easy/intermediate
-// /hard) into a 0-100 score, each reasoningScore weighted by its difficulty ANCHOR
-// (foundational 30 / intermediate 50 / advanced 70 ~= 3:5:7). Sum(anchor) = 150 for
-// the canonical 3-question set, so the closed form is round(Sum(anchor*score)/150).
+// Diagnostic baseline: combine a subject's answers into a 0-100 score, each
+// reasoningScore weighted by its difficulty ANCHOR (foundational 30 / intermediate 50 /
+// advanced 70). The divisor is max(Sum(submitted anchors), FULL=30+70=100): a richer set
+// (e.g. the 3-tier triples below, Sum=150) is a plain weighted mean, but a SINGLE/PARTIAL
+// submission is divided by the full tier weight so a missing tier counts as 0 (anti-gaming:
+// an easy-only submission can't reach 100). The live diagnostic is 2-tier (easy+hard).
 describe("diagnosticSubjectScore", () => {
-  // Helper: build the canonical easy/intermediate/hard triple.
+  // Helper: build a 3-tier easy/intermediate/hard set (Sum(anchor)=150 > FULL, so these
+  // remain a plain weighted mean — the denominator floor never bites a full set).
   const triple = (easy, mid, hard) => [
     { difficulty: "foundational", reasoningScore: easy },
     { difficulty: "intermediate", reasoningScore: mid },
@@ -407,23 +410,31 @@ describe("diagnosticSubjectScore", () => {
     expect(diagnosticSubjectScore(triple(150, 150, 150))).toBe(100);
   });
 
+  it("a single submitted tier cannot inflate the baseline (anti-gaming: missing tier = 0 credit)", () => {
+    // The exploit fix: divisor floored at the FULL tier weight (30+70=100), so a lone
+    // aced easy answer is 30·100/100 = 30 (NOT 30·100/30 = 100), and a lone aced hard is
+    // 70·100/100 = 70 — a client can't reach PhD rank by omitting the hard tier.
+    expect(diagnosticSubjectScore([{ difficulty: "foundational", reasoningScore: 100 }])).toBe(30);
+    expect(diagnosticSubjectScore([{ difficulty: "advanced", reasoningScore: 100 }])).toBe(70);
+  });
+
   it("unknown/missing difficulty falls back to the intermediate anchor (50) as its weight", () => {
-    // Single unknown-difficulty item: weight = 50, score 100 -> 5000/50 = 100.
+    // Single unknown-difficulty item: numerator weight 50, divisor floored to FULL=100 ->
+    // 5000/100 = 50 (the 50 confirms the intermediate fallback: 70 -> 70, 30 -> 30).
     expect(
       diagnosticSubjectScore([{ difficulty: "wat", reasoningScore: 100 }])
-    ).toBe(100);
-    // Pair "wat" (must weigh 50) acing with a foundational (30) zero:
-    // (50*100 + 30*0) / (50 + 30) = 5000/80 = 62.5 -> 63. This pins the fallback
-    // weight at 50: it would be 70 (->70) if treated as advanced, or the item
-    // would be dropped (->0) if unknown difficulty contributed no weight.
+    ).toBe(50);
+    // Pair "wat" (weight 50) acing + a foundational (30) zero: numerator 50*100 = 5000,
+    // divisor = max(50+30, 100) = 100 -> 50.
     expect(
       diagnosticSubjectScore([
         { difficulty: "wat", reasoningScore: 100 },
         { difficulty: "foundational", reasoningScore: 0 },
       ])
-    ).toBe(63);
-    // A missing difficulty key behaves the same as an unknown string (weight 50).
-    expect(diagnosticSubjectScore([{ reasoningScore: 80 }])).toBe(80);
+    ).toBe(50);
+    // A missing difficulty key behaves the same as an unknown string (weight 50):
+    // 50*80 = 4000, divisor max(50,100)=100 -> 40.
+    expect(diagnosticSubjectScore([{ reasoningScore: 80 }])).toBe(40);
   });
 
   it("empty array and non-array (null/undefined) -> 0", () => {

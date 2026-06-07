@@ -430,6 +430,26 @@ describe("POST /api/grade — image validation + vision forwarding", () => {
     expect(imgPart.image_url.url).toBe(`data:image/png;base64,${PNG_B64}`);
   });
 
+  it("does NOT dock an image-only practice answer (empty text + photo of work) — it reaches the vision grader", async () => {
+    // Regression: preGradeDock only inspects TEXT, so an image-only submission (empty
+    // text box, worked notes in the photo) must NOT be docked to a non-attempt — the
+    // route skips the dock when an image is attached and grades the photo instead.
+    const fetchMock = mockGroqReturning({
+      reasoningScore: 70, rubric: RUBRIC_50, strengths: [], improvements: [],
+      workedSolution: "solution", correctnessNote: "n", socraticHint: "h", microLesson: "m",
+      weakConcepts: [], newScoreSuggestion: 60,
+    });
+    const res = await POST(
+      req({ kind: "practice", subject: "math", question: "Q", targetConcept: "x", reasoning: "", image: { mime: "image/png", data: PNG_B64 } })
+    );
+    expect(res.status).toBe(200);
+    const j = await res.json();
+    expect(j.docked).toBeFalsy(); // empty text + image must NOT be docked
+    expect(fetchMock).toHaveBeenCalled(); // the (vision) grader ran
+    const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(sent.model).toBe("meta-llama/llama-4-scout-17b-16e-instruct");
+  });
+
   it("rejects arbitrary base64 bytes that are not a real image (magic-byte sniff)", async () => {
     const failFetch = vi.fn(() => { throw new Error("Groq must not be called for a non-image"); });
     vi.stubGlobal("fetch", failFetch);

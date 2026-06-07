@@ -110,8 +110,10 @@ export async function POST(req) {
 
   // DETERMINISTIC pre-grade dock (no LLM call): empty / "idk" / off-topic / gibberish
   // → forced low score + all-zero rubric, for guests too (the client then runs the
-  // same Elo update locally). Identical anti-gaming lever as /api/score.
-  const dock = preGradeDock(reasoning);
+  // same Elo update locally). Identical anti-gaming lever as /api/score. Skip the dock
+  // when a photo is attached — preGradeDock only inspects TEXT, so an image-only answer
+  // (worked notes in the photo, empty text box) must reach the vision grader.
+  const dock = img.image ? null : preGradeDock(reasoning);
 
   try {
     if (kind === "diagnostic") {

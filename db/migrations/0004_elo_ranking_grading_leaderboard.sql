@@ -75,6 +75,8 @@ alter table public.attempts add column if not exists rationale text;
 -- ---- 3. save_progress_for(): persist the rationale (length-capped) -------------
 -- Unchanged except the attempts insert now carries `rationale` (<=500 chars). Still
 -- service-role only; still SECURITY DEFINER; still one transaction (all-or-nothing).
+-- Delta migration — apply once, in order. Drop any prior overload first (see 0001a/0007).
+drop function if exists public.save_progress_for(uuid, jsonb, jsonb);
 create or replace function public.save_progress_for(p_user uuid, p_scores jsonb, p_attempt jsonb)
 returns void
 language plpgsql

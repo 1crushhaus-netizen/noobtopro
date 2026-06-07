@@ -105,6 +105,11 @@ grant execute on function public.delete_user_data() to authenticated;
 -- 3) Server-authoritative save RPC (service-role only). CREATE only — the old
 --    client-callable save_progress() is left in place until 0001b, so the old
 --    client keeps saving during the deploy.
+-- Apply ONCE, in order (this is a delta migration). Drop any prior overload first so an
+-- in-order replay rebuilds cleanly; note that re-applying THIS file in ISOLATION on a DB
+-- already at 0007 (which replaced this with a 4-arg overload) would still leave two
+-- overloads and make /api/score's call ambiguous — provision fresh DBs from db/schema.sql.
+drop function if exists public.save_progress_for(uuid, jsonb, jsonb);
 create or replace function public.save_progress_for(p_user uuid, p_scores jsonb, p_attempt jsonb)
 returns void
 language plpgsql

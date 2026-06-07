@@ -60,6 +60,15 @@ describe("preGradeDock — deterministic docking gate", () => {
     expect(preGradeDock("2+2=4")).toBeNull();
   });
 
+  it("does NOT dock a numeric/repetitive answer with a digit or operator (gibberish escape)", () => {
+    // Repeated-digit results and operator-bearing numeric answers are substantive — the
+    // gibberish distinct-character heuristic must not fire on them (regression for the
+    // 'x = 1111111' / '100000000' / '12121212' false-positives).
+    expect(preGradeDock("100000000")).toBeNull();
+    expect(preGradeDock("x = 1111111")).toBeNull();
+    expect(preGradeDock("12121212")).toBeNull();
+  });
+
   it("a dock verdict is a complete, grader-shaped low verdict", () => {
     const v = preGradeDock("idk");
     expect(v.reasoningScore).toBe(DOCK_SCORE);

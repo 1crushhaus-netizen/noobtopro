@@ -152,7 +152,7 @@ function LineChart({ values, yMax = 300, color = "#F2B441" }) {
       {grid.map((g, i) => (
         <g key={i}>
           <line x1={padL} x2={W - padR} y1={y(g)} y2={y(g)} stroke="rgba(255,255,255,.07)" strokeWidth="1" />
-          <text x={padL - 8} y={y(g)} dominantBaseline="central" textAnchor="end" fill="#5a6472" style={{ fontFamily: "var(--mono)", fontSize: 11 }}>
+          <text x={padL - 8} y={y(g)} dominantBaseline="central" textAnchor="end" fill="var(--muted)" style={{ fontFamily: "var(--mono)", fontSize: 11 }}>
             {Math.round(g)}
           </text>
         </g>
@@ -200,7 +200,7 @@ function BarChart({ items }) {
             <text x={cx} y={d.value >= 0 ? top - 6 : top + h + 13} textAnchor="middle" fill={fill} style={{ fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700 }}>
               {d.value > 0 ? "+" : ""}{d.value}
             </text>
-            <text x={cx} y={H - 8} textAnchor="middle" fill="#5a6472" style={{ fontFamily: "var(--mono)", fontSize: 11 }}>
+            <text x={cx} y={H - 8} textAnchor="middle" fill="var(--muted)" style={{ fontFamily: "var(--mono)", fontSize: 11 }}>
               {d.glyph}
             </text>
           </g>

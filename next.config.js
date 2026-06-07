@@ -37,7 +37,10 @@ const csp = [
   "img-src 'self' data: blob: https://*.googleusercontent.com https://avatars.githubusercontent.com https://cdn.discordapp.com",
   "font-src 'self' https://fonts.gstatic.com",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "script-src 'self' 'unsafe-inline'",
+  // va.vercel-scripts.com is the Vercel Speed Insights loader script host (used when the
+  // same-origin /_vercel path isn't available, e.g. a non-Vercel/self-hosted deploy); the
+  // beacon goes to vitals.vercel-insights.com (connect-src below).
+  "script-src 'self' 'unsafe-inline' https://va.vercel-scripts.com",
   `connect-src 'self' ${supabaseConnect} https://vitals.vercel-insights.com`,
 ].join("; ");
 
@@ -58,6 +61,9 @@ const securityHeaders = [
 
 const nextConfig = {
   reactStrictMode: true,
+  // Don't advertise the framework/version in an `X-Powered-By` response header
+  // (defense-in-depth: removes a free fingerprinting signal for attackers).
+  poweredByHeader: false,
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

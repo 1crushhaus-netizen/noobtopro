@@ -59,15 +59,23 @@ describe("isAdminUser — deny-by-default allowlist", () => {
     expect(isAdminUser({ id: "u-1", email: "person@example.com" })).toBe(false);
   });
 
-  it("returns true for an email in ADMIN_EMAILS (case-insensitive, env-list spaces tolerated)", () => {
+  it("returns true for a CONFIRMED email in ADMIN_EMAILS (case-insensitive, env-list spaces tolerated)", () => {
     process.env.ADMIN_EMAILS = "  Admin@Example.com , other@x.io ";
     // user email differs in case + has its own surrounding case differences
-    expect(isAdminUser({ id: "u-1", email: "ADMIN@example.COM" })).toBe(true);
+    expect(isAdminUser({ id: "u-1", email: "ADMIN@example.COM", email_confirmed_at: "2026-01-01T00:00:00Z" })).toBe(true);
+  });
+
+  it("rejects an UNCONFIRMED email even if it is in ADMIN_EMAILS (anti email-squatting)", () => {
+    process.env.ADMIN_EMAILS = "admin@example.com";
+    // No email_confirmed_at / confirmed_at → the email branch must not authorize.
+    expect(isAdminUser({ id: "u-1", email: "admin@example.com" })).toBe(false);
+    // confirmed_at (older field) is also accepted as confirmation.
+    expect(isAdminUser({ id: "u-1", email: "admin@example.com", confirmed_at: "2026-01-01T00:00:00Z" })).toBe(true);
   });
 
   it("returns false for an email NOT in ADMIN_EMAILS", () => {
     process.env.ADMIN_EMAILS = "admin@example.com";
-    expect(isAdminUser({ id: "u-1", email: "intruder@example.com" })).toBe(false);
+    expect(isAdminUser({ id: "u-1", email: "intruder@example.com", email_confirmed_at: "2026-01-01T00:00:00Z" })).toBe(false);
   });
 
   it("returns true for an id in ADMIN_USER_IDS (exact match)", () => {
@@ -166,7 +174,7 @@ describe("requireAdmin — bearer verification + authorization", () => {
 
   it("returns {user} (no error) for a verified user whose email is in ADMIN_EMAILS", async () => {
     process.env.ADMIN_EMAILS = "admin@example.com";
-    const verifiedUser = { id: "u-1", email: "Admin@Example.com" };
+    const verifiedUser = { id: "u-1", email: "Admin@Example.com", email_confirmed_at: "2026-01-01T00:00:00Z" };
     sbMock.getUser.mockResolvedValue({ data: { user: verifiedUser }, error: null });
 
     const res = await requireAdmin(fakeReq({ Authorization: "Bearer good-token" }));
