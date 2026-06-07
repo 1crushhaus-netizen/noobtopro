@@ -296,7 +296,7 @@ describe("POST /api/score practice — server-authoritative Elo score", () => {
       workedSolution: "Step 1 … Final answer: 7.",
     });
     const res = await POST(req(
-      { kind: "practice", subject: "math", question: "Q-pencils", targetConcept: "addition", difficulty: "foundational", reasoning: REASONING },
+      { kind: "practice", subject: "math", question: "Q-pencils", targetConcept: "addition", difficulty: "beginner", reasoning: REASONING },
       { authHeader: true }
     ));
     expect(res.status).toBe(200);
@@ -362,7 +362,7 @@ describe("POST /api/score practice — server-authoritative Elo score", () => {
 // ---- diagnostic: auth-optional batch baseline ------------------------------
 describe("POST /api/score diagnostic", () => {
   const answers = [
-    { subject: "math", question: "Qm-easy", difficulty: "foundational", reasoning: "Adding the two fractions over a common denominator of twelve gives seven twelfths." },
+    { subject: "math", question: "Qm-easy", difficulty: "beginner", reasoning: "Adding the two fractions over a common denominator of twelve gives seven twelfths." },
     { subject: "math", question: "Qm-hard", difficulty: "advanced", reasoning: "Differentiating with the chain rule and setting the result to zero locates the maximum." },
   ];
 
@@ -397,7 +397,7 @@ describe("POST /api/score diagnostic", () => {
 
   it("DOCKS a blank diagnostic answer with no Groq call but still grades the substantive one", async () => {
     const mixed = [
-      { subject: "math", question: "Qm-easy", difficulty: "foundational", reasoning: "   " }, // blank -> docked
+      { subject: "math", question: "Qm-easy", difficulty: "beginner", reasoning: "   " }, // blank -> docked
       answers[1], // substantive -> graded
     ];
     const fetchMock = mockGroq(DIAG_GRADE);
@@ -425,8 +425,8 @@ describe("POST /api/score diagnostic", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2); // 2 distinct slots, not 4
   });
 
-  it("rejects more answers than the diagnostic size (>6) with 400", async () => {
-    const many = Array.from({ length: 10 }, (_, i) => ({ subject: "math", question: `Q${i}`, difficulty: "foundational", reasoning: REASONING }));
+  it("rejects more answers than the diagnostic size (>9) with 400", async () => {
+    const many = Array.from({ length: 10 }, (_, i) => ({ subject: "math", question: `Q${i}`, difficulty: "beginner", reasoning: REASONING }));
     expect((await POST(req({ kind: "diagnostic", answers: many }))).status).toBe(400);
   });
 
@@ -460,7 +460,7 @@ describe("POST /api/score diagnostic", () => {
     const PNG = { mime: "image/png", data: "iVBORw0KGgo=" };
     const sixImages = [];
     for (const s of ["math", "physics", "chemistry"]) {
-      for (const d of ["foundational", "advanced"]) {
+      for (const d of ["beginner", "advanced"]) {
         sixImages.push({ subject: s, question: `Q-${s}-${d}`, difficulty: d, reasoning: REASONING, image: PNG });
       }
     }

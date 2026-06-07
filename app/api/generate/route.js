@@ -1,39 +1,13 @@
 import { NextResponse } from "next/server";
-import { groqJSON, DIAG_GEN_SYS, PRACTICE_GEN_SYS } from "@/lib/groq";
-import { ORDER, clampScore, DIAGNOSTIC_DIFFICULTIES } from "@/lib/scoring";
+import { groqJSON, PRACTICE_GEN_SYS } from "@/lib/groq";
+import { ORDER, clampScore } from "@/lib/scoring";
 import { topicSlugsFor, normalizeTopic } from "@/lib/taxonomy";
 import { checkRateLimit, clientKey } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
-import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
+import { buildDiagnostic } from "@/lib/diagnosticBank";
 
 export const dynamic = "force-dynamic";
-
-// Diagnostic pool: the diagnostic is a static, level-neutral baseline (no per-user
-// input), so it is safe to standardize across users — the same philosophy the app
-// already uses for shared concept guides. We pool a handful of distinct sets, then
-// serve them randomly with NO Groq call; below the target the pool self-fills.
-const DIAG_POOL_TARGET = 12;
-
-// A diagnostic is only usable if it has, for EVERY subject, one question at EACH
-// difficulty tier (foundational/advanced) — 6 valid questions, 2 per subject.
-// Never serve or store a partial set. ORDER.includes is prototype-safe.
-function isValidDiagnostic(content) {
-  if (!content || !Array.isArray(content.questions)) return false;
-  const seen = new Set(); // "subject:difficulty" pairs with a non-empty question
-  for (const q of content.questions) {
-    if (
-      q &&
-      ORDER.includes(q.subject) &&
-      DIAGNOSTIC_DIFFICULTIES.includes(q.difficulty) &&
-      typeof q.question === "string" &&
-      q.question.trim()
-    ) {
-      seen.add(`${q.subject}:${q.difficulty}`);
-    }
-  }
-  return ORDER.every((s) => DIAGNOSTIC_DIFFICULTIES.every((d) => seen.has(`${s}:${d}`)));
-}
 
 export async function POST(req) {
   // Block forced cross-site requests (CSRF-style cost/quota DoS) and non-JSON bodies.
@@ -64,62 +38,10 @@ export async function POST(req) {
 
   try {
     if (kind === "diagnostic") {
-      const sb = getSupabaseAdmin(); // null when SUPABASE_SERVICE_ROLE_KEY isn't set -> always generate
-
-      // 1) Serve from the shared pool once it's warm — zero Groq tokens.
-      if (sb) {
-        try {
-          const { count } = await sb.from("diagnostic_pool").select("id", { count: "exact", head: true });
-          if (typeof count === "number" && count >= DIAG_POOL_TARGET) {
-            const offset = Math.floor(Math.random() * count);
-            const { data: row } = await sb
-              .from("diagnostic_pool")
-              .select("content")
-              .order("id", { ascending: true })
-              .range(offset, offset)
-              .maybeSingle();
-            if (row && isValidDiagnostic(row.content)) {
-              return NextResponse.json({ ...row.content, pooled: true });
-            }
-          }
-        } catch (e) {
-          console.error("[/api/generate] pool read", e); // fall through to generation
-        }
-      }
-
-      // 2) Cold/insufficient pool -> generate fresh. SIX multi-step questions still
-      //    exceed the shared 1200-token default, so give the model headroom (mirrors
-      //    /api/learn) — at 1200 a verbose set truncates mid-JSON and the diagnostic
-      //    fails, and since a truncated set never fills the pool, every request would
-      //    hit the same wall.
-      const data = await groqJSON({
-        system: DIAG_GEN_SYS,
-        user: "Generate the six diagnostic questions now.",
-        maxTokens: 2200,
-      });
-
-      // Don't hand the client a partial/invalid set (truncation, missing tier):
-      // surface a retryable error instead, matching the pool-read gate below.
-      if (!isValidDiagnostic(data)) {
-        return NextResponse.json(
-          { error: "Question generation is temporarily unavailable. Please try again." },
-          { status: 500 }
-        );
-      }
-
-      // 3) Self-fill the pool (best-effort) via an atomic, advisory-locked,
-      //    count-gated insert (try_add_diagnostic) — only valid full 3-subject
-      //    sets, and concurrent cold-start fills can't overshoot DIAG_POOL_TARGET
-      //    (the cap is enforced inside one serialized DB statement).
-      if (sb) {
-        try {
-          await sb.rpc("try_add_diagnostic", { p_content: data, p_target: DIAG_POOL_TARGET });
-        } catch (e) {
-          console.error("[/api/generate] pool write", e); // non-fatal
-        }
-      }
-
-      return NextResponse.json(data);
+      // The diagnostic is the CURATED, standardized placement bank (lib/diagnosticBank.js):
+      // 9 reasoning-rich questions (3 subjects × beginner/intermediate/hard), served with
+      // ZERO Groq calls and no pool — everyone gets the same calibrated set.
+      return NextResponse.json(buildDiagnostic());
     }
 
     if (kind !== "practice") {

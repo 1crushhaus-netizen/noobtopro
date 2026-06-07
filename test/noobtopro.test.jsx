@@ -45,25 +45,28 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-// The 2-tier diagnostic: every subject × {easy, hard} (6 questions). Listed out of
-// order on purpose — beginDiagnostic re-orders them subject-major, easy→hard.
+// The 3-tier diagnostic: every subject × {beginner, intermediate, hard} (9 questions).
+// Listed out of order on purpose — beginDiagnostic re-orders them subject-major, easy→hard.
 const DIAGNOSTIC = {
   questions: [
     { subject: "physics", topic: "t", difficulty: "advanced", question: "PHYS-ADV" },
-    { subject: "math", topic: "t", difficulty: "foundational", question: "MATH-FND" },
+    { subject: "math", topic: "t", difficulty: "beginner", question: "MATH-BEG" },
     { subject: "math", topic: "t", difficulty: "advanced", question: "MATH-ADV" },
-    { subject: "physics", topic: "t", difficulty: "foundational", question: "PHYS-FND" },
+    { subject: "physics", topic: "t", difficulty: "beginner", question: "PHYS-BEG" },
     { subject: "chemistry", topic: "t", difficulty: "advanced", question: "CHEM-ADV" },
-    { subject: "chemistry", topic: "t", difficulty: "foundational", question: "CHEM-FND" },
+    { subject: "chemistry", topic: "t", difficulty: "intermediate", question: "CHEM-INT" },
+    { subject: "math", topic: "t", difficulty: "intermediate", question: "MATH-INT" },
+    { subject: "chemistry", topic: "t", difficulty: "beginner", question: "CHEM-BEG" },
+    { subject: "physics", topic: "t", difficulty: "intermediate", question: "PHYS-INT" },
   ],
 };
 
 // The order beginDiagnostic presents them in: subject-major (math, physics,
-// chemistry), each easy→hard (foundational, advanced).
+// chemistry), each beginner→intermediate→advanced.
 const DIAGNOSTIC_ORDER = [
-  "MATH-FND", "MATH-ADV",
-  "PHYS-FND", "PHYS-ADV",
-  "CHEM-FND", "CHEM-ADV",
+  "MATH-BEG", "MATH-INT", "MATH-ADV",
+  "PHYS-BEG", "PHYS-INT", "PHYS-ADV",
+  "CHEM-BEG", "CHEM-INT", "CHEM-ADV",
 ];
 
 async function attachImageToCurrentComposer(container) {
@@ -75,7 +78,7 @@ async function attachImageToCurrentComposer(container) {
 }
 
 describe("Noobtopro — diagnostic image previews are revoked on completion (leak fix)", () => {
-  it("grades the 6 answers in ONE batched /api/score request and revokes every preview", async () => {
+  it("grades the 9 answers in ONE batched /api/score request and revokes every preview", async () => {
     const scoresPayload = {
       math: { score: 55, weakConcepts: [], comment: "", rubric: { conceptual_understanding: 3, logical_structure: 3, strategy: 3, execution_accuracy: 3, communication: 3 } },
       physics: { score: 40, weakConcepts: [], comment: "", rubric: { conceptual_understanding: 2, logical_structure: 2, strategy: 2, execution_accuracy: 2, communication: 2 } },
@@ -92,8 +95,8 @@ describe("Noobtopro — diagnostic image previews are revoked on completion (lea
     const { container } = render(<Noobtopro />);
     fireEvent.click(await screen.findByRole("button", { name: /prove it/i }));
 
-    // Step through all 6 questions (subject-major, easy→hard). Attach an image to
-    // each so there are 6 previews; "Next question" for Q1–Q5, "Get ranked" for Q6.
+    // Step through all 9 questions (subject-major, beginner→hard). Attach an image to
+    // each so there are 9 previews; "Next question" for Q1–Q8, "Get ranked" for Q9.
     for (let i = 0; i < DIAGNOSTIC_ORDER.length; i++) {
       const isLast = i === DIAGNOSTIC_ORDER.length - 1;
       await screen.findByText(DIAGNOSTIC_ORDER[i]);
@@ -106,22 +109,22 @@ describe("Noobtopro — diagnostic image previews are revoked on completion (lea
     // Lands on the dashboard once grading completes.
     await screen.findByText("Where you stand");
 
-    // The fix: grading is ONE batched server request carrying all 6 answers, not the
+    // The fix: grading is ONE batched server request carrying all 9 answers, not the
     // old per-question parallel client burst that could 429 the whole diagnostic.
     const scoreCalls = fetchMock.mock.calls.filter(([p]) => p === "/api/score");
     expect(scoreCalls).toHaveLength(1);
     const body = JSON.parse(scoreCalls[0][1].body);
     expect(body.kind).toBe("diagnostic");
-    expect(body.answers).toHaveLength(6);
+    expect(body.answers).toHaveLength(9);
 
     // Each subject ring is self-describing for screen readers (subject in the label).
     expect(screen.getByRole("img", { name: /Mathematics: Score \d+ of 100/ })).toBeTruthy();
     expect(screen.getByRole("img", { name: /Chemistry: Score \d+ of 100/ })).toBeTruthy();
 
-    // Six previews were created; all six must be revoked on completion (no leak).
-    expect(URL.createObjectURL).toHaveBeenCalledTimes(6);
-    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(6);
-    for (let i = 0; i < 6; i++) {
+    // Nine previews were created; all nine must be revoked on completion (no leak).
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(9);
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(9);
+    for (let i = 0; i < 9; i++) {
       expect(URL.revokeObjectURL).toHaveBeenCalledWith(`blob:p${i}`);
     }
   });
@@ -206,5 +209,39 @@ describe("Noobtopro — beginDiagnostic rejects an incomplete question set", () 
     expect(await screen.findByText(/could not generate a full diagnostic/i)).toBeTruthy();
     // Did NOT advance into the diagnostic (no question rendered).
     expect(screen.queryByText(DIAGNOSTIC.questions[0].question)).toBe(null);
+  });
+});
+
+describe("Noobtopro — time-locked 'I don't know' skip", () => {
+  it("locks the skip for 10s, then advances the diagnostic without grading (no Groq waste)", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async (path) => {
+      if (path === "/api/generate") return jsonRes(DIAGNOSTIC);
+      if (path === "/api/score") return jsonRes({ scores: {}, persisted: false, attempt: null });
+      return jsonRes({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await act(async () => { render(<Noobtopro />); await vi.advanceTimersByTimeAsync(0); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /prove it/i })); await vi.advanceTimersByTimeAsync(0); });
+
+    // Q1 (subject-major, beginner first) is shown.
+    expect(screen.getByText("MATH-BEG")).toBeTruthy();
+    // You can't advance an EMPTY answer via the normal button (it's disabled)...
+    expect(screen.getByRole("button", { name: /next question/i }).disabled).toBe(true);
+    // ...and the "I don't know" skip is LOCKED for the first 10 seconds.
+    const skip = () => screen.getByRole("button", { name: /i don't know/i });
+    expect(skip().disabled).toBe(true);
+
+    // After the 10-second lock it unlocks.
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    expect(skip().disabled).toBe(false);
+
+    // Clicking it advances to Q2 (math intermediate) — and never grades Q1.
+    await act(async () => { fireEvent.click(skip()); await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByText("MATH-INT")).toBeTruthy();
+    expect(fetchMock.mock.calls.filter(([p]) => p === "/api/score")).toHaveLength(0);
+
+    vi.useRealTimers();
   });
 });
