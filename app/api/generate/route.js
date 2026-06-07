@@ -15,8 +15,8 @@ export const dynamic = "force-dynamic";
 const DIAG_POOL_TARGET = 12;
 
 // A diagnostic is only usable if it has, for EVERY subject, one question at EACH
-// difficulty tier (foundational/intermediate/advanced) — 9 valid questions, 3 per
-// subject. Never serve or store a partial set. ORDER.includes is prototype-safe.
+// difficulty tier (foundational/advanced) — 6 valid questions, 2 per subject.
+// Never serve or store a partial set. ORDER.includes is prototype-safe.
 function isValidDiagnostic(content) {
   if (!content || !Array.isArray(content.questions)) return false;
   const seen = new Set(); // "subject:difficulty" pairs with a non-empty question
@@ -86,15 +86,15 @@ export async function POST(req) {
         }
       }
 
-      // 2) Cold/insufficient pool -> generate fresh. NINE multi-step questions are
-      //    well over the shared 1200-token default, so give the model more room
-      //    (mirrors /api/learn) — at 1200 a verbose set truncates mid-JSON and the
-      //    diagnostic fails, and since a truncated set never fills the pool, every
-      //    request would hit the same wall.
+      // 2) Cold/insufficient pool -> generate fresh. SIX multi-step questions still
+      //    exceed the shared 1200-token default, so give the model headroom (mirrors
+      //    /api/learn) — at 1200 a verbose set truncates mid-JSON and the diagnostic
+      //    fails, and since a truncated set never fills the pool, every request would
+      //    hit the same wall.
       const data = await groqJSON({
         system: DIAG_GEN_SYS,
-        user: "Generate the three diagnostic questions now.",
-        maxTokens: 3000,
+        user: "Generate the six diagnostic questions now.",
+        maxTokens: 2200,
       });
 
       // Don't hand the client a partial/invalid set (truncation, missing tier):

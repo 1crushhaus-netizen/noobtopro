@@ -454,10 +454,9 @@ describe("diagnosticSubjectScore", () => {
 });
 
 describe("DIAGNOSTIC_DIFFICULTIES / DIFFICULTY_LABELS", () => {
-  it("DIAGNOSTIC_DIFFICULTIES is the easy->hard band order", () => {
+  it("DIAGNOSTIC_DIFFICULTIES is the easy->hard band order (2 tiers, 6-question diagnostic)", () => {
     expect(DIAGNOSTIC_DIFFICULTIES).toEqual([
       "foundational",
-      "intermediate",
       "advanced",
     ]);
   });

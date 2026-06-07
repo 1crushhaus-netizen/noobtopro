@@ -45,28 +45,25 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-// The 3-tier diagnostic: every subject × every difficulty (9 questions). Listed
-// out of order on purpose — beginDiagnostic re-orders them subject-major, easy→hard.
+// The 2-tier diagnostic: every subject × {easy, hard} (6 questions). Listed out of
+// order on purpose — beginDiagnostic re-orders them subject-major, easy→hard.
 const DIAGNOSTIC = {
   questions: [
     { subject: "physics", topic: "t", difficulty: "advanced", question: "PHYS-ADV" },
     { subject: "math", topic: "t", difficulty: "foundational", question: "MATH-FND" },
-    { subject: "chemistry", topic: "t", difficulty: "intermediate", question: "CHEM-INT" },
     { subject: "math", topic: "t", difficulty: "advanced", question: "MATH-ADV" },
     { subject: "physics", topic: "t", difficulty: "foundational", question: "PHYS-FND" },
     { subject: "chemistry", topic: "t", difficulty: "advanced", question: "CHEM-ADV" },
-    { subject: "math", topic: "t", difficulty: "intermediate", question: "MATH-INT" },
-    { subject: "physics", topic: "t", difficulty: "intermediate", question: "PHYS-INT" },
     { subject: "chemistry", topic: "t", difficulty: "foundational", question: "CHEM-FND" },
   ],
 };
 
 // The order beginDiagnostic presents them in: subject-major (math, physics,
-// chemistry), each easy→hard (foundational, intermediate, advanced).
+// chemistry), each easy→hard (foundational, advanced).
 const DIAGNOSTIC_ORDER = [
-  "MATH-FND", "MATH-INT", "MATH-ADV",
-  "PHYS-FND", "PHYS-INT", "PHYS-ADV",
-  "CHEM-FND", "CHEM-INT", "CHEM-ADV",
+  "MATH-FND", "MATH-ADV",
+  "PHYS-FND", "PHYS-ADV",
+  "CHEM-FND", "CHEM-ADV",
 ];
 
 async function attachImageToCurrentComposer(container) {
@@ -78,7 +75,7 @@ async function attachImageToCurrentComposer(container) {
 }
 
 describe("Noobtopro — diagnostic image previews are revoked on completion (leak fix)", () => {
-  it("grades the 9 answers in ONE batched /api/score request and revokes every preview", async () => {
+  it("grades the 6 answers in ONE batched /api/score request and revokes every preview", async () => {
     const scoresPayload = {
       math: { score: 55, weakConcepts: [], comment: "", rubric: { conceptual_understanding: 3, logical_structure: 3, strategy: 3, execution_accuracy: 3, communication: 3 } },
       physics: { score: 40, weakConcepts: [], comment: "", rubric: { conceptual_understanding: 2, logical_structure: 2, strategy: 2, execution_accuracy: 2, communication: 2 } },
@@ -95,8 +92,8 @@ describe("Noobtopro — diagnostic image previews are revoked on completion (lea
     const { container } = render(<Noobtopro />);
     fireEvent.click(await screen.findByRole("button", { name: /prove it/i }));
 
-    // Step through all 9 questions (subject-major, easy→hard). Attach an image to
-    // each so there are 9 previews; "Next question" for Q1–Q8, "Get ranked" for Q9.
+    // Step through all 6 questions (subject-major, easy→hard). Attach an image to
+    // each so there are 6 previews; "Next question" for Q1–Q5, "Get ranked" for Q6.
     for (let i = 0; i < DIAGNOSTIC_ORDER.length; i++) {
       const isLast = i === DIAGNOSTIC_ORDER.length - 1;
       await screen.findByText(DIAGNOSTIC_ORDER[i]);
@@ -109,22 +106,22 @@ describe("Noobtopro — diagnostic image previews are revoked on completion (lea
     // Lands on the dashboard once grading completes.
     await screen.findByText("Where you stand");
 
-    // The fix: grading is ONE batched server request carrying all 9 answers, not the
-    // old 9-parallel-call burst that could 429 the whole diagnostic.
+    // The fix: grading is ONE batched server request carrying all 6 answers, not the
+    // old per-question parallel client burst that could 429 the whole diagnostic.
     const scoreCalls = fetchMock.mock.calls.filter(([p]) => p === "/api/score");
     expect(scoreCalls).toHaveLength(1);
     const body = JSON.parse(scoreCalls[0][1].body);
     expect(body.kind).toBe("diagnostic");
-    expect(body.answers).toHaveLength(9);
+    expect(body.answers).toHaveLength(6);
 
     // Each subject ring is self-describing for screen readers (subject in the label).
     expect(screen.getByRole("img", { name: /Mathematics: Score \d+ of 100/ })).toBeTruthy();
     expect(screen.getByRole("img", { name: /Chemistry: Score \d+ of 100/ })).toBeTruthy();
 
-    // Nine previews were created; all nine must be revoked on completion (no leak).
-    expect(URL.createObjectURL).toHaveBeenCalledTimes(9);
-    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(9);
-    for (let i = 0; i < 9; i++) {
+    // Six previews were created; all six must be revoked on completion (no leak).
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(6);
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(6);
+    for (let i = 0; i < 6; i++) {
       expect(URL.revokeObjectURL).toHaveBeenCalledWith(`blob:p${i}`);
     }
   });
@@ -194,10 +191,10 @@ describe("Noobtopro — submitPractice run-token guard (stale grade after Restar
 });
 
 describe("Noobtopro — beginDiagnostic rejects an incomplete question set", () => {
-  it("surfaces an error (and stays on the intro) when /api/generate returns fewer than 9 questions", async () => {
+  it("surfaces an error (and stays on the intro) when /api/generate returns fewer than 6 questions", async () => {
     // Defense-in-depth client guard: even if a partial set slips through, beginDiagnostic
     // must not enter the diagnostic with a short set — it errors instead.
-    const partial = { questions: DIAGNOSTIC.questions.slice(0, 8) }; // 8 of 9
+    const partial = { questions: DIAGNOSTIC.questions.slice(0, 5) }; // 5 of 6
     vi.stubGlobal("fetch", vi.fn(async (path) => {
       if (path === "/api/generate") return jsonRes(partial);
       return jsonRes({});
