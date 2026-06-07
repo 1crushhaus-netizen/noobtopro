@@ -17,35 +17,12 @@ import {
 } from "@/lib/scoring";
 import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData, loadReviews } from "@/lib/store";
 import { getSupabase, isSupabaseConfigured, signInWithProvider, signOutUser, PROVIDERS } from "@/lib/supabase";
-import ProgressDashboard from "@/components/ProgressDashboard";
+import Icon from "@/components/Icon";
+import Dashboard from "@/components/Dashboard";
 import SignIn from "@/components/SignIn";
-import ProfileTab from "@/components/ProfileTab";
 import LearnTab from "@/components/LearnTab";
 import AdminDashboard from "@/components/AdminDashboard";
 import ScoreBreakdown, { ErrorList, hasReasoningError } from "@/components/ScoreBreakdown";
-
-/* ----------------------------- icons (inline, no deps) ----------------------------- */
-function Icon({ name, size = 16 }) {
-  const c = {
-    width: size,
-    height: size,
-    viewBox: "0 0 24 24",
-    fill: "none",
-    stroke: "currentColor",
-    strokeWidth: 2,
-    strokeLinecap: "round",
-    strokeLinejoin: "round",
-  };
-  if (name === "arrow") return <svg {...c}><path d="M5 12h14M13 6l6 6-6 6" /></svg>;
-  if (name === "back") return <svg {...c}><path d="M19 12H5M11 18l-6-6 6-6" /></svg>;
-  if (name === "x") return <svg {...c}><path d="M6 6l12 12M18 6 6 18" /></svg>;
-  if (name === "clip") return <svg {...c}><path d="M21.4 11.05 12.25 20.2a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>;
-  if (name === "bulb") return <svg {...c}><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.3h6c0-1 .4-1.8 1-2.3A7 7 0 0 0 12 2Z" /></svg>;
-  if (name === "refresh") return <svg {...c}><path d="M21 12a9 9 0 1 1-2.64-6.36M21 4v5h-5" /></svg>;
-  if (name === "spark") return <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.9 6.1L20 10l-6.1 1.9L12 18l-1.9-6.1L4 10l6.1-1.9z" /></svg>;
-  if (name === "google") return <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor"><path d="M21.8 10.04H12v3.96h5.62c-.25 1.34-1 2.48-2.13 3.24v2.69h3.45c2.02-1.86 3.18-4.6 3.18-7.85 0-.73-.07-1.43-.2-2.08z" /><path d="M12 22c2.7 0 4.96-.9 6.62-2.43l-3.45-2.69c-.96.64-2.18 1.02-3.17 1.02-2.6 0-4.8-1.76-5.59-4.12H2.84v2.78A10 10 0 0 0 12 22z" /><path d="M6.41 13.78a6 6 0 0 1 0-3.56V7.44H2.84a10 10 0 0 0 0 9.12z" /><path d="M12 5.98c1.47 0 2.79.51 3.83 1.5l2.86-2.86A9.6 9.6 0 0 0 12 2 10 10 0 0 0 2.84 7.44l3.57 2.78C7.2 7.74 9.4 5.98 12 5.98z" /></svg>;
-  return null;
-}
 
 /* ----------------------------- helpers ----------------------------- */
 async function api(path, body) {
@@ -255,7 +232,10 @@ function Loader({ subject }) {
 /* ----------------------------- app ----------------------------- */
 export default function Noobtopro() {
   const [stage, setStage] = useState("intro"); // intro | signin | diagnostic | scoring | dashboard | practice
-  const [view, setView] = useState("practice"); // practice | learn | progress | profile
+  const [view, setView] = useState("practice"); // practice | learn | dashboard
+  // True while a Dashboard slide-over drawer is open, so the page background can be
+  // made inert (proper modal focus containment). Set via Dashboard.onOverlayActiveChange.
+  const [overlayActive, setOverlayActive] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [showAuthNote, setShowAuthNote] = useState(false);
@@ -1014,9 +994,10 @@ export default function Noobtopro() {
     };
   }, [showSaveModal]);
 
-  // While the modal is open, make the rest of the page inert so keyboard/screen-
-  // reader users can't reach background controls (proper modal focus containment).
-  const bgInert = showSaveModal && !user ? true : undefined;
+  // While the save modal or a dashboard drawer is open, make the rest of the page
+  // inert so keyboard/screen-reader users can't reach background controls (proper
+  // modal focus containment).
+  const bgInert = (showSaveModal && !user) || overlayActive ? true : undefined;
 
   /* ----------------------------- render ----------------------------- */
   return (
@@ -1088,24 +1069,21 @@ export default function Noobtopro() {
       </header>
 
       {(user || scores) && stage !== "signin" && (
-        <nav className="np-nav" inert={bgInert}>
+        <nav className={"np-nav" + (view === "dashboard" && user ? " np-nav--wide" : "")} inert={bgInert}>
           <button className={"np-tab" + (view === "practice" ? " active" : "")} onClick={() => setView("practice")}>Practice</button>
           {scores && (
             <button className={"np-tab" + (view === "learn" ? " active" : "")} onClick={() => setView("learn")}>Learn</button>
           )}
-          {scores && (
-            <button className={"np-tab" + (view === "progress" ? " active" : "")} onClick={() => setView("progress")}>Progress</button>
-          )}
-          {user && (
-            <button className={"np-tab" + (view === "profile" ? " active" : "")} onClick={() => setView("profile")}>Profile</button>
-          )}
+          {/* One merged Dashboard tab (was Progress + Profile). Shown whenever the
+              nav shows; a guest who clicks it gets the sign-in gate. */}
+          <button className={"np-tab" + (view === "dashboard" ? " active" : "")} onClick={() => setView("dashboard")}>Dashboard</button>
           {user && isAdmin && (
             <button className={"np-tab" + (view === "admin" ? " active" : "")} onClick={() => setView("admin")}>Admin</button>
           )}
         </nav>
       )}
 
-      <main className="np-main" inert={bgInert}>
+      <main className={"np-main" + (view === "dashboard" && user ? " np-main--wide" : "")} inert={bgInert}>
         {showAuthNote && (
           <div className="np-banner fade-up">
             <span>Google sign-in runs through Supabase. Add your Supabase URL + anon key and enable the Google provider by following the README ("Supabase setup"). The app works fully as a guest in the meantime.</span>
@@ -1134,17 +1112,21 @@ export default function Noobtopro() {
           />
         ) : view === "admin" && user && isAdmin ? (
           <AdminDashboard adminApi={authApi} />
-        ) : view === "profile" && user ? (
-          <ProfileTab
+        ) : view === "dashboard" ? (
+          <Dashboard
             user={user}
             scores={scores}
             history={history}
             loadLeaderboard={() => authApi("/api/leaderboard", {})}
+            loadReviews={loadReviews}
             onStartDiagnostic={() => { setView("practice"); beginDiagnostic(); }}
             onPractice={(s) => { setView("practice"); startPractice(s); }}
+            onLearn={openLearn}
             onSignOut={handleSignOut}
             onReset={resetProgress}
-            onViewProgress={() => setView("progress")}
+            onSignIn={() => (isSupabaseConfigured ? openSignIn() : setShowAuthNote(true))}
+            onClose={() => setView("practice")}
+            onOverlayActiveChange={setOverlayActive}
           />
         ) : view === "learn" && scores ? (
           <LearnTab
@@ -1163,14 +1145,6 @@ export default function Noobtopro() {
             onPracticeQuestion={startPracticeWithQuestion}
             onRegenerate={regenerateLearnQuestion}
             onPractice={(s) => { setView("practice"); startPractice(s); }}
-          />
-        ) : view === "progress" && scores ? (
-          <ProgressDashboard
-            scores={scores}
-            history={history}
-            onPractice={(s) => { setView("practice"); startPractice(s); }}
-            onLearn={openLearn}
-            loadReviews={loadReviews}
           />
         ) : (
           <>
@@ -1453,7 +1427,7 @@ export default function Noobtopro() {
                           <button className="np-btn np-primary" onClick={() => startPractice(pSubject)} disabled={busy}>
                             <Icon name="refresh" size={15} /> Next problem
                           </button>
-                          <button className="np-ghost" onClick={() => setView("progress")}>See progress over time</button>
+                          <button className="np-ghost" onClick={() => setView("dashboard")}>See your dashboard</button>
                         </div>
                       </div>
                     )}

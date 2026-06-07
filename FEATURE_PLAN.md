@@ -2,6 +2,8 @@
 
 **Status: IMPLEMENTED.** The features planned here — the OAuth sign-in menu (`components/SignIn.jsx`), the Profile tab (`components/ProfileTab.jsx`), the guest-first diagnostic, and guest→account migration — are all shipped and live (see README §2 and §9; PRs #9, #14). This document is retained as the original plan / decision record; the README is the source of truth for current behavior.
 
+> **Superseded (later):** the standalone **Profile** tab (`ProfileTab.jsx`) and the **Progress** tab (`ProgressDashboard.jsx`) were **merged into one `components/Dashboard.jsx` "Dashboard" tab** — a no-scroll bento grid with the trend charts + answer review in slide-over drawers and a guest sign-in gate. References below to `ProfileTab.jsx`/`ProgressDashboard.jsx`/the `"profile"`/`"progress"` views are historical; see README §12.
+
 ---
 
 ## 1. Goals

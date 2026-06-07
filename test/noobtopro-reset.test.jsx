@@ -19,6 +19,7 @@ const store = vi.hoisted(() => ({
   saveProgress: vi.fn(async () => ({ history: [] })),
   migrateGuestToAccount: vi.fn(async () => ({ migrated: false })),
   deleteAllUserData: vi.fn(async () => ({ ok: true })),
+  loadReviews: vi.fn(async () => ({ reviews: [] })),
 }));
 vi.mock("@/lib/store", () => store);
 
@@ -70,13 +71,13 @@ async function flush() {
 }
 
 describe("Restart logo (reset)", () => {
-  it("signed-in: keeps persisted progress — Profile still shows stats after clicking the logo", async () => {
+  it("signed-in: keeps persisted progress — Dashboard still shows stats after clicking the logo", async () => {
     supa.user = USER;
     render(<Noobtopro />);
 
     // Mount hydrate loads the account's scores → dashboard.
     await screen.findByText("Where you stand");
-    fireEvent.click(screen.getByRole("button", { name: /^profile$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^dashboard$/i }));
     expect(await screen.findByText(/PhD-level intelligence/i)).toBeTruthy(); // stats view
 
     // Click the Restart logo, then let the re-hydrate settle.
@@ -91,9 +92,9 @@ describe("Restart logo (reset)", () => {
     expect(store.deleteAllUserData).not.toHaveBeenCalled();
     expect(store.resetAll).not.toHaveBeenCalled();
 
-    // Re-open Profile: the persisted stats must still be there (pre-fix this showed
+    // Re-open Dashboard: the persisted stats must still be there (pre-fix this showed
     // the "not ranked"/"no diagnostic" empty state because scores were blanked).
-    fireEvent.click(screen.getByRole("button", { name: /^profile$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^dashboard$/i }));
     expect(await screen.findByText(/PhD-level intelligence/i)).toBeTruthy();
     expect(screen.getByText(/Total points/i)).toBeTruthy();
   });

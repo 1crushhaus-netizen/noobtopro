@@ -11,7 +11,7 @@
 //   - style/font: Google Fonts (@import in app/globals.css)
 //   - connect: Supabase (REST/auth) + Vercel Speed Insights beacon
 //   - img: data:/blob: (diagnostic photo previews) + the OAuth providers' avatar CDNs
-//     (ProfileTab renders the signed-in user's avatar; a blocked host just falls back
+//     (the Dashboard renders the signed-in user's avatar; a blocked host just falls back
 //     to initials via onError, so this is safe to pin)
 
 // Pin connect-src to THIS project's Supabase host when the env is known (it is at the
