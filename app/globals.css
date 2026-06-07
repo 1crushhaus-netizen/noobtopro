@@ -254,3 +254,20 @@ body {
 .np-avatarfallback { display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.06); font-weight: 700; font-size: 20px; }
 .np-profilename { font-size: 18px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .np-profileemail { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- admin dashboard ---- */
+.np-admin-row { padding: 14px 16px; margin-bottom: 10px; }
+.np-admin-rowhead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.np-admin-rowhead strong { font-size: 15px; }
+.np-admin-badge { font-family: var(--mono); font-size: 11px; letter-spacing: .3px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.np-admin-neutral { color: var(--muted); }
+.np-admin-ok { color: var(--phys); border-color: rgba(91,214,196,.4); }
+.np-admin-warn { color: var(--math); border-color: rgba(242,180,65,.4); }
+.np-admin-danger { color: var(--chem); border-color: rgba(255,126,116,.45); }
+.np-admin-meta { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.np-admin-preview { margin-top: 8px; font-size: 14px; color: var(--text); line-height: 1.5; opacity: .9; }
+.np-admin-sample { font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; word-break: break-word; background: rgba(255,255,255,.03); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.np-admin-hint { margin-top: 6px; font-size: 12.5px; color: var(--muted); font-style: italic; }
+.np-admin-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.np-admin-empty { color: var(--muted); padding: 18px 16px; margin-bottom: 10px; }
+.np-ghost.np-admin-danger { color: var(--chem); }

@@ -4,6 +4,7 @@ import { clampScore, ORDER } from "@/lib/scoring";
 import { rateLimit, clientKey } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
 
 export const dynamic = "force-dynamic";
 
@@ -155,6 +156,7 @@ export async function POST(req) {
 
   const rl = rateLimit(clientKey(req));
   if (!rl.ok) {
+    reportRateLimit({ req, route: "/api/grade" });
     return NextResponse.json(
       { error: "Too many requests. Please slow down and try again shortly." },
       { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
@@ -194,6 +196,15 @@ export async function POST(req) {
     return NextResponse.json({ error: `Unknown subject "${subject}".` }, { status: 400 });
   }
 
+  // Flag (don't block) obvious prompt-injection in the learner's reasoning/concept.
+  reportInjection({
+    req,
+    route: "/api/grade",
+    subject,
+    concept: safeConcept !== "(unspecified)" ? safeConcept : null,
+    text: `${work}\n${safeConcept}`,
+  });
+
   const img = normalizeImage(image);
   if (!img.ok) return NextResponse.json({ error: img.error }, { status: 400 });
 
@@ -203,6 +214,7 @@ export async function POST(req) {
   if (img.image) {
     const imgRl = rateLimit(`${clientKey(req)}:img`, { max: 10 });
     if (!imgRl.ok) {
+      reportRateLimit({ req, route: "/api/grade" });
       return NextResponse.json(
         { error: "Too many image grades. Please slow down and try again shortly." },
         { status: 429, headers: { "Retry-After": String(imgRl.retryAfter) } }

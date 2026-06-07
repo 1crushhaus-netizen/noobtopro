@@ -434,3 +434,47 @@ end;
 $$;
 revoke all on function public.try_add_diagnostic(jsonb, int) from public, anon, authenticated;
 grant execute on function public.try_add_diagnostic(jsonb, int) to service_role;
+
+-- ---- admin / abuse monitoring ----------------------------------------------
+-- security_events: server-logged warnings surfaced in the admin dashboard
+-- (prompt-injection attempts, rate-limit/abuse spikes, user reports). INTERNAL:
+-- RLS on, NO policy (service-role only — same lock as diagnostic_pool). NEVER
+-- written by the browser; the server logs it via the service-role admin client.
+create table if not exists public.security_events (
+  id bigint generated always as identity primary key,
+  created_at timestamptz not null default now(),
+  kind text not null check (kind in ('prompt_injection','rate_limit','invalid_input','report','other')),
+  severity text not null default 'low' check (severity in ('low','medium','high')),
+  route text,
+  ip text,
+  user_id uuid,                          -- usually null (the public routes are unauthenticated)
+  subject text,
+  concept text,
+  sample text,                           -- capped matched snippet — never the full payload
+  detail jsonb,
+  status text not null default 'open' check (status in ('open','reviewed','dismissed'))
+);
+alter table public.security_events enable row level security;
+create index if not exists security_events_status_created_idx
+  on public.security_events (status, created_at desc);
+
+-- concept_reports: a signed-in user's report about a public guide. RLS lets a user
+-- INSERT only their OWN report; reads are admin-only (service-role; NO select policy).
+-- The user-facing "report" button ships with the Concept Hub browse UI; the table is
+-- created now so the admin dashboard can render reports.
+create table if not exists public.concept_reports (
+  id bigint generated always as identity primary key,
+  created_at timestamptz not null default now(),
+  subject text not null check (subject in ('math','physics','chemistry')),
+  concept_key text not null,
+  reporter_id uuid not null references auth.users on delete cascade,
+  reason text check (reason is null or char_length(reason) <= 1000),
+  status text not null default 'open' check (status in ('open','reviewed','dismissed'))
+);
+alter table public.concept_reports enable row level security;
+drop policy if exists "report own" on public.concept_reports;
+create policy "report own"
+  on public.concept_reports for insert to authenticated
+  with check ((select auth.uid()) = reporter_id);
+create index if not exists concept_reports_status_created_idx
+  on public.concept_reports (status, created_at desc);

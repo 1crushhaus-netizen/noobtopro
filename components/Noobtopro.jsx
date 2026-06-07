@@ -17,6 +17,7 @@ import ProgressDashboard from "@/components/ProgressDashboard";
 import SignIn from "@/components/SignIn";
 import ProfileTab from "@/components/ProfileTab";
 import LearnTab from "@/components/LearnTab";
+import AdminDashboard from "@/components/AdminDashboard";
 
 /* ----------------------------- icons (inline, no deps) ----------------------------- */
 function Icon({ name, size = 16 }) {
@@ -65,6 +66,31 @@ async function api(path, body) {
     }
     throw new Error(msg);
   }
+  return data;
+}
+
+// Like api(), but attaches the signed-in user's Supabase access token so the
+// server can verify admin identity (the /api/admin/* routes re-verify on every
+// call). Used only by the Admin tab.
+async function adminApi(path, body) {
+  const sb = getSupabase();
+  let token = null;
+  if (sb) {
+    const { data } = await sb.auth.getSession();
+    token = (data && data.session && data.session.access_token) || null;
+  }
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body || {}),
+  });
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    data = {};
+  }
+  if (!res.ok || data.error) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
 }
 
@@ -202,6 +228,7 @@ export default function Noobtopro() {
   const [showAuthNote, setShowAuthNote] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [user, setUser] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false); // server-verified via /api/admin/me; gates the Admin tab
 
   const [questions, setQuestions] = useState([]);
   const [qi, setQi] = useState(0);
@@ -320,11 +347,26 @@ export default function Noobtopro() {
     pImgRef.current = pImg;
   });
 
+  // Ask the server whether the signed-in user is an admin (deny-by-default). The
+  // result only REVEALS the Admin tab — every admin action re-verifies server-side.
+  async function checkAdmin() {
+    try {
+      const d = await adminApi("/api/admin/me");
+      setIsAdmin(!!(d && d.isAdmin));
+    } catch {
+      setIsAdmin(false);
+    }
+  }
+
   useEffect(() => {
     const sb = getSupabase();
     hydrate();
     if (!sb) return;
-    sb.auth.getUser().then(({ data }) => setUser((data && data.user) || null)).catch(() => setUser(null));
+    sb.auth.getUser().then(({ data }) => {
+      const u = (data && data.user) || null;
+      setUser(u);
+      if (u) checkAdmin();
+    }).catch(() => setUser(null));
     const { data: sub } = sb.auth.onAuthStateChange((event, session) => {
       setUser((session && session.user) || null);
       // Only reload data when the identity actually changes. TOKEN_REFRESHED /
@@ -334,6 +376,7 @@ export default function Noobtopro() {
         setShowSaveModal(false);
         setStage((p) => (p === "signin" ? "dashboard" : p)); // leave the sign-in menu
         hydrate(); // migrates guest progress, then loads the account
+        checkAdmin(); // reveal the Admin tab if this account is an admin
       } else if (event === "SIGNED_OUT") {
         // Signing out abandons any in-progress diagnostic/practice. Free its image
         // previews and clear the composer state, then drop to "intro" so the
@@ -369,6 +412,7 @@ export default function Noobtopro() {
         setLearnContent(null);
         setLearnQuestion(null);
         setLearnError("");
+        setIsAdmin(false); // hide the Admin tab immediately on sign-out
         // Clear the local guest blob on sign-out so the prior user's scores/weak
         // concepts aren't exposed to the next person on a shared device.
         resetAll();
@@ -895,6 +939,9 @@ export default function Noobtopro() {
           {user && (
             <button className={"np-tab" + (view === "profile" ? " active" : "")} onClick={() => setView("profile")}>Profile</button>
           )}
+          {user && isAdmin && (
+            <button className={"np-tab" + (view === "admin" ? " active" : "")} onClick={() => setView("admin")}>Admin</button>
+          )}
         </nav>
       )}
 
@@ -925,6 +972,8 @@ export default function Noobtopro() {
             }}
             onBack={closeSignIn}
           />
+        ) : view === "admin" && user && isAdmin ? (
+          <AdminDashboard adminApi={adminApi} />
         ) : view === "profile" && user ? (
           <ProfileTab
             user={user}
