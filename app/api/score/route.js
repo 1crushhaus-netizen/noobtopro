@@ -171,7 +171,7 @@ async function handlePractice(req, body) {
     route: "/api/score",
     subject,
     concept: safeConcept !== "(unspecified)" ? safeConcept : null,
-    text: `${work}\n${safeConcept}`,
+    text: `${safeQuestion}\n${work}\n${safeConcept}`,
   });
 
   const img = normalizeImage(image);
@@ -423,9 +423,6 @@ async function handleDiagnostic(req, body) {
       scores[s] = { score, weakConcepts, comment: (hardest && hardest.comment) || "", rubric };
     }
 
-    const totalAfter = totalPoints(scores);
-    const phdAfter = phdIndex(scores);
-
     // Auto-grow the concept hub from the baseline's weak concepts (non-blocking).
     for (const s of ORDER) {
       if (scores[s] && scores[s].weakConcepts.length) registerWeakConcepts(s, scores[s].weakConcepts);
@@ -435,6 +432,15 @@ async function handleDiagnostic(req, body) {
       // sb was resolved and null-checked up front (so we never grade for a user we
       // can't persist for); reuse it here.
       const t = nowIso();
+      // Snapshot total/phd over the user's FULL post-write score map: a subject whose
+      // grades all failed keeps its EXISTING score (the upsert only writes submitted
+      // subjects), so computing over `scores` alone would understate the totals.
+      const { data: existingRows } = await sb.from("scores").select("subject, score").eq("user_id", uid);
+      const merged = {};
+      for (const r of existingRows || []) merged[r.subject] = { score: r.score };
+      for (const s of ORDER) if (scores[s]) merged[s] = { score: scores[s].score };
+      const totalAfter = totalPoints(merged);
+      const phdAfter = phdIndex(merged);
       const p_scores = ORDER.filter((s) => scores[s]).map((s) => ({
         subject: s,
         score: scores[s].score,

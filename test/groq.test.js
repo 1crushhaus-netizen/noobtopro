@@ -71,6 +71,29 @@ describe("groqJSON", () => {
     expect(out).toEqual({ a: 1 });
   });
 
+  it("returns the REAL envelope, not a stray/empty leading object (largest balanced block wins)", async () => {
+    // Regression: the old scanner returned the FIRST balanced object, so a leading
+    // "{}" or "{\"a\":1}" would win over the real, larger payload.
+    vi.stubGlobal("fetch", vi.fn(async () => reply('{} {"reasoningScore":80,"rubric":{"x":1}}')));
+    const out = await groqJSON({ system: "s", user: "u" });
+    expect(out).toEqual({ reasoningScore: 80, rubric: { x: 1 } });
+  });
+
+  it("THROWS on a truncated envelope instead of returning an inner fragment (no silent wrong object)", async () => {
+    // A grade truncated after the nested rubric: the old scanner returned the rubric
+    // sub-object (-> silent score 0). Now the unbalanced outer object is detected and
+    // the call fails (routing to the generic error / retry path). Mock returns the
+    // truncated body on BOTH the json-mode attempt and the no-json-mode retry.
+    vi.stubGlobal("fetch", vi.fn(async () => reply('{"reasoningScore":80,"rubric":{"conceptual_understanding":3}')));
+    await expect(groqJSON({ system: "s", user: "u" })).rejects.toThrow(/JSON/i);
+  });
+
+  it("preserves a backtick inside a JSON string value (no fence-strip corruption)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => reply('{"microLesson":"use `code` here","score":70}')));
+    const out = await groqJSON({ system: "s", user: "u" });
+    expect(out).toEqual({ microLesson: "use `code` here", score: 70 });
+  });
+
   it("falls back to a non-JSON-mode retry when the first response is unparseable", async () => {
     const fetchMock = vi
       .fn()

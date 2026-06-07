@@ -222,7 +222,7 @@ function Loader({ subject }) {
     return () => clearInterval(t);
   }, []);
   return (
-    <div className="np-card fade-up" style={{ textAlign: "center", padding: "48px 24px" }}>
+    <div className="np-card fade-up" role="status" aria-live="polite" style={{ textAlign: "center", padding: "48px 24px" }}>
       <div className="np-pulse" style={{ fontFamily: "var(--mono)", fontSize: 13, letterSpacing: 1, color: "var(--muted)" }}>
         {subject ? subject.toUpperCase() : "EVALUATING"}
       </div>
@@ -742,7 +742,10 @@ export default function Noobtopro() {
     setStage("practice");
     setBusy(true);
     try {
-      const s = scores[subject];
+      // A subject may be missing from `scores` (e.g. a partial-baseline diagnostic
+      // where one subject's grades all failed) — fall back to a beginner default so
+      // practicing it just generates an easy question instead of crashing.
+      const s = scores?.[subject] || { score: 0, weakConcepts: [] };
       const data = await api("/api/generate", {
         kind: "practice",
         subject,
@@ -813,7 +816,9 @@ export default function Noobtopro() {
     setError("");
     setBusy(true);
     try {
-      const prev = scores[pSubject];
+      // Default for a subject not yet in scores (e.g. practicing an un-baselined
+      // subject after a partial diagnostic) — guards the guest blend path below.
+      const prev = scores?.[pSubject] || { score: 0, weakConcepts: [], comment: "", rubric: null };
       if (user) {
         // Signed-in: SERVER-AUTHORITATIVE. The server grades, computes the new score
         // from the user's STORED level, and persists it for the verified uid; the
@@ -1009,7 +1014,7 @@ export default function Noobtopro() {
           </div>
         )}
         {error && (
-          <div className="np-error fade-up">
+          <div className="np-error fade-up" role="alert">
             <span>{error}</span>
             <button className="np-ghost" onClick={() => setError("")}><Icon name="x" size={14} /> dismiss</button>
           </div>

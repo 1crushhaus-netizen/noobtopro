@@ -65,7 +65,9 @@ export async function POST(req) {
 
   // Generation is the most expensive route (a fresh concept = a full Groq guide
   // call). Apply a tighter per-IP budget than the default.
-  const rl = rateLimit(clientKey(req), { max: 15 });
+  // Own bucket (":learn") so this expensive route's tighter 15/min is an INDEPENDENT
+  // budget, not shared with the 30/min generate/grade/score buckets (mirrors :diag/:img).
+  const rl = rateLimit(`${clientKey(req)}:learn`, { max: 15 });
   if (!rl.ok) {
     reportRateLimit({ req, route: "/api/learn" });
     return NextResponse.json(

@@ -192,3 +192,22 @@ describe("Noobtopro — submitPractice run-token guard (stale grade after Restar
     expect(screen.getByRole("button", { name: /prove it/i })).toBeTruthy();
   });
 });
+
+describe("Noobtopro — beginDiagnostic rejects an incomplete question set", () => {
+  it("surfaces an error (and stays on the intro) when /api/generate returns fewer than 9 questions", async () => {
+    // Defense-in-depth client guard: even if a partial set slips through, beginDiagnostic
+    // must not enter the diagnostic with a short set — it errors instead.
+    const partial = { questions: DIAGNOSTIC.questions.slice(0, 8) }; // 8 of 9
+    vi.stubGlobal("fetch", vi.fn(async (path) => {
+      if (path === "/api/generate") return jsonRes(partial);
+      return jsonRes({});
+    }));
+
+    render(<Noobtopro />);
+    fireEvent.click(await screen.findByRole("button", { name: /prove it/i }));
+
+    expect(await screen.findByText(/could not generate a full diagnostic/i)).toBeTruthy();
+    // Did NOT advance into the diagnostic (no question rendered).
+    expect(screen.queryByText(DIAGNOSTIC.questions[0].question)).toBe(null);
+  });
+});

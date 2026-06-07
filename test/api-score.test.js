@@ -53,7 +53,7 @@ function mockGroq(payload, { failFirstN = 0, failStatus = 500 } = {}) {
 // Fake service-role client: from("scores").select().eq() resolves to {data,error};
 // rpc(fn,args) records the call and resolves to {error}. All calls captured.
 function fakeAdmin({ scoresRows = [], scoresError = null, rpcError = null } = {}) {
-  const calls = { rpc: [], from: [] };
+  const calls = { rpc: [], from: [], eq: [] };
   const sb = {
     rpc: vi.fn(async (fn, args) => {
       calls.rpc.push({ fn, args });
@@ -63,7 +63,10 @@ function fakeAdmin({ scoresRows = [], scoresError = null, rpcError = null } = {}
       calls.from.push(table);
       const chain = {
         select: () => chain,
-        eq: () => chain,
+        eq: (col, val) => {
+          calls.eq.push([col, val]); // capture RLS-scoping filters for assertions
+          return chain;
+        },
         then: (resolve, reject) => Promise.resolve({ data: scoresRows, error: scoresError }).then(resolve, reject),
       };
       return chain;
@@ -177,6 +180,9 @@ describe("POST /api/score practice — server-authoritative score", () => {
     expect(save.args.p_user).toBe("u1"); // bound to the VERIFIED uid
     expect(save.args.p_scores[0].score).toBe(expected);
     expect(save.args.p_scores[0].subject).toBe("math");
+    // The stored-prev read MUST be scoped to the verified uid (defense-in-depth
+    // alongside RLS) — otherwise a cross-user prev could leak into the blend.
+    expect(calls.eq).toContainEqual(["user_id", "u1"]);
   });
 
   it("IGNORES a client-supplied score / newScore — the trust gap is closed", async () => {
