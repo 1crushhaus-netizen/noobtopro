@@ -1,35 +1,26 @@
 -- ===========================================================================
--- Migration 0001 — server-authoritative scoring + per-subject reasoning rubric
+-- Migration 0001a — server-authoritative scoring: ADDITIVE phase
 --
--- DELTA migration: brings a live database that ALREADY has the PR #29–#32 schema
--- (concept hub, diagnostic pool, admin tables) up to the server-authoritative-scoring
--- state. It does NOT (re)create those objects — to provision a FRESH database, run the
--- canonical db/schema.sql, not this file. Apply in ONE transaction (the Supabase SQL
--- editor / connector wraps it). Idempotent: safe to re-run.
---
--- Rollback (if needed before the new client ships): recreate the client-callable
--- save_progress(jsonb,jsonb) from git history, restore the "own scores"/"own attempts"
--- for-all policies, and re-grant insert/update/delete to authenticated. Easier: revert
--- the deploy. (No data migration is involved, so rollback is policy/function-only.)
---
--- DEPLOY ORDERING — this migration is BREAKING for the OLD client:
---   The OLD deployed client writes scores/attempts via the client-callable
---   save_progress RPC + own-row RLS. This migration removes both. Apply it
---   TOGETHER WITH (or immediately before) deploying the new client that routes
---   signed-in writes through /api/score. Between the two, signed-in users cannot
---   save progress (reads + guest mode are unaffected). For a prototype with no
---   live data this window is harmless; sequence it for any real traffic.
+-- Apply this BEFORE (or as part of) deploying the new client. It is 100%
+-- BACKWARD-COMPATIBLE with the OLD deployed client: it only ADDS things
+--   - the scores.rubric column (old client ignores it),
+--   - the service-role-only save_progress_for() RPC (unused until the new client),
+--   - and converts migrate_guest_data/delete_user_data to SECURITY DEFINER
+--     (still self-scoped to auth.uid(); they keep working for the old client).
+-- It does NOT drop save_progress or change RLS, so the old client keeps saving.
+-- After the new client is live, apply 0001b_scoring_lockdown.sql to close the
+-- self-assert gap. Idempotent: safe to re-run. (Pairs with db/schema.sql, the
+-- canonical fresh-provision script.)
 -- ===========================================================================
 
 begin;
 
--- 1) Per-subject reasoning rubric column (additive, safe for the old client). -----
+-- 1) Per-subject reasoning rubric column (additive).
 alter table public.scores add column if not exists rubric jsonb;
 
--- 2) Convert the self-scoped client RPCs to SECURITY DEFINER so they can still
---    write once the tables go SELECT-only (step 4). They capture auth.uid() and
---    only touch the caller's own rows, so authenticated callers stay self-scoped. --
---    (Re-running the full bodies from schema.sql keeps this file self-contained.)
+-- 2) Convert the self-scoped client RPCs to SECURITY DEFINER so they keep working
+--    once the tables go SELECT-only (0001b). They capture auth.uid() and only touch
+--    the caller's own rows, so authenticated callers stay self-scoped.
 create or replace function public.migrate_guest_data(p_scores jsonb, p_attempts jsonb)
 returns boolean
 language plpgsql
@@ -111,8 +102,9 @@ $$;
 revoke all on function public.delete_user_data() from public, anon;
 grant execute on function public.delete_user_data() to authenticated;
 
--- 3) Server-authoritative save RPC (service-role only); drop the client-callable one.
-drop function if exists public.save_progress(jsonb, jsonb);
+-- 3) Server-authoritative save RPC (service-role only). CREATE only — the old
+--    client-callable save_progress() is left in place until 0001b, so the old
+--    client keeps saving during the deploy.
 create or replace function public.save_progress_for(p_user uuid, p_scores jsonb, p_attempt jsonb)
 returns void
 language plpgsql
@@ -173,24 +165,5 @@ end;
 $$;
 revoke all on function public.save_progress_for(uuid, jsonb, jsonb) from public, anon, authenticated;
 grant execute on function public.save_progress_for(uuid, jsonb, jsonb) to service_role;
-
--- 4) Lock scores/attempts to SELECT-only for authenticated (no direct client writes).
-drop policy if exists "own scores" on public.scores;
-drop policy if exists "read own scores" on public.scores;
-create policy "read own scores"
-  on public.scores for select to authenticated
-  using ((select auth.uid()) = user_id);
-
-drop policy if exists "own attempts" on public.attempts;
-drop policy if exists "read own attempts" on public.attempts;
-create policy "read own attempts"
-  on public.attempts for select to authenticated
-  using ((select auth.uid()) = user_id);
-
--- 5) Defense-in-depth: revoke default client write grants (SELECT stays, RLS-gated).
---    The DEFINER write functions (save_progress_for/migrate_guest_data/delete_user_data)
---    bypass these grants, so the app keeps working.
-revoke insert, update, delete, truncate on public.scores   from anon, authenticated;
-revoke insert, update, delete, truncate on public.attempts from anon, authenticated;
 
 commit;
