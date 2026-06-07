@@ -450,6 +450,30 @@ $$;
 revoke all on function public.promote_or_insert_guide(text, text, jsonb, text, text, boolean) from public, anon, authenticated;
 grant execute on function public.promote_or_insert_guide(text, text, jsonb, text, text, boolean) to service_role;
 
+-- Auto-heal a STALE auto-grown guide (PR 5): overwrite a non-curated `ready` guide in
+-- place, preserving visibility/source/status. /api/learn calls this when a cache hit is
+-- a non-curated guide whose content lacks the `whyItWorks` proof field (added in PR 5),
+-- so each stale guide regenerates AT MOST ONCE then is healed. CURATED guides are
+-- author-vetted and refreshed ONLY by the seed (seed_curated_guide). service-role only.
+create or replace function public.refresh_guide(
+  p_subject text, p_concept text, p_content jsonb, p_topic text, p_level text
+) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  k  text := _concept_key(p_concept);
+  t  text := case when exists (select 1 from public.concept_topics where subject = p_subject and slug = p_topic)
+                  then p_topic else 'general_' || p_subject end;
+  lv text := case when p_level in ('beginner','foundational','intermediate','advanced','phd') then p_level else null end;
+begin
+  if p_subject not in ('math','physics','chemistry') or k = '' or p_content is null then return; end if;
+  update public.concept_guides
+     set content = p_content, topic = t, level_band = lv, updated_at = now()
+   where subject = p_subject and concept_key = k and status = 'ready' and source <> 'curated';
+end;
+$$;
+revoke all on function public.refresh_guide(text, text, jsonb, text, text) from public, anon, authenticated;
+grant execute on function public.refresh_guide(text, text, jsonb, text, text) to service_role;
+
 -- Concept Hub PUBLIC SEED (PR 4): the sanctioned BATCH public-publish path (alongside
 -- the admin "approve" action). Upserts a CURATED, PUBLIC, READY guide for a core
 -- concept; idempotent + re-runnable (re-running refreshes content). On conflict it also

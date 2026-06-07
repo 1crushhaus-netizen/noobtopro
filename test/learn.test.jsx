@@ -60,6 +60,17 @@ describe("LearnTab", () => {
     expect(onPractice).toHaveBeenCalledWith("math");
   });
 
+  it("renders the 'Why it works' proof/derivation section when present (PR 5 depth)", () => {
+    const content = {
+      subject: "math", concept: "the pythagorean theorem", overview: "o", keyIdeas: ["k"],
+      whyItWorks: "Arrange four copies of the triangle in a square of side (a+b); equate areas to get a^2 + b^2 = c^2.",
+      socraticQuestions: [], pitfalls: [], tryThis: "",
+    };
+    render(<LearnTab scores={scores} active={{ subject: "math", concept: "the pythagorean theorem" }} content={content} busy={false} error="" onSelect={() => {}} onPractice={() => {}} />);
+    expect(screen.getByText(/why it works/i)).toBeTruthy();
+    expect(screen.getByText(/equate areas to get/i)).toBeTruthy();
+  });
+
   const guide = { subject: "physics", concept: "energy transformation", overview: "o", keyIdeas: [], socraticQuestions: [], pitfalls: [], tryThis: "think about conservation" };
 
   it("shows the cached 'try this' problem and practices it WITHOUT generating a new question", () => {
