@@ -9,9 +9,11 @@ import {
   band,
   RUBRIC_KEYS,
   RUBRIC_LABELS,
+  RUBRIC_SHORT,
   RUBRIC_MAX,
   lowestRubricDimensions,
 } from "@/lib/scoring";
+import ScoreBreakdown, { ErrorList } from "@/components/ScoreBreakdown";
 
 // "Review your answers" — lazily loads the learner's past graded answers (signed-in:
 // their own attempt_reviews via RLS; guest: from local history) and renders each as an
@@ -86,12 +88,13 @@ function ReviewList({ loadReviews, onPractice, onLearn }) {
                 )}
                 {rv.rubric && (
                   <div style={{ marginTop: 10 }}>
-                    {RUBRIC_KEYS.map((k) => (
-                      <div key={k} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-                        <span className="np-statsub" style={{ width: 130 }}>{RUBRIC_LABELS[k]}</span>
-                        <span style={{ fontFamily: "var(--mono)", color }}>{Math.max(0, Math.min(RUBRIC_MAX, Number(rv.rubric[k]) || 0))}/{RUBRIC_MAX}</span>
-                      </div>
-                    ))}
+                    <ScoreBreakdown rubric={rv.rubric} total={rv.reasoningScore} color={color} />
+                  </div>
+                )}
+                {Array.isArray(fb.errors) && fb.errors.length > 0 && (
+                  <div className="np-card np-errors" style={{ marginTop: 10 }}>
+                    <div className="np-cardicon" style={{ color: "var(--math)" }}>Where your reasoning broke</div>
+                    <ErrorList errors={fb.errors} />
                   </div>
                 )}
                 {Array.isArray(fb.strengths) && fb.strengths.length > 0 && (
@@ -222,7 +225,9 @@ function MiniBar({ value, color }) {
 // charts above). Axes = the 5 rubric dimensions (0–RUBRIC_MAX); ONE polygon per
 // subject so the learner compares their reasoning profile across subjects.
 function RadarChart({ subjects }) {
-  const W = 600, H = 360;
+  // Sized for the 9 reasoning axes — a touch more room so the diagonal spoke labels
+  // (abbreviated via RUBRIC_SHORT) don't collide.
+  const W = 640, H = 400;
   const cx = W / 2, cy = H / 2 + 4, R = 108;
   const axes = RUBRIC_KEYS;
   const N = axes.length;
@@ -259,13 +264,15 @@ function RadarChart({ subjects }) {
       ))}
       {axes.map((k, i) => {
         const [ex, ey] = coord(i, 1);
-        const [lx, ly] = coord(i, 1.2);
+        const [lx, ly] = coord(i, 1.26);
         const anchor = Math.abs(lx - cx) < 6 ? "middle" : lx > cx ? "start" : "end";
         return (
           <g key={k}>
             <line x1={cx} y1={cy} x2={ex} y2={ey} stroke="rgba(255,255,255,.10)" strokeWidth="1" />
-            <text x={lx} y={ly} textAnchor={anchor} dominantBaseline="central" fill="#7a8494" style={{ fontFamily: "var(--ui)", fontSize: 11 }}>
-              {RUBRIC_LABELS[k]}
+            {/* Abbreviated spoke label (full names live in the breakdown panel + the
+                accessible text summary below), so 9 axes stay legible. */}
+            <text x={lx} y={ly} textAnchor={anchor} dominantBaseline="central" fill="#7a8494" style={{ fontFamily: "var(--ui)", fontSize: 10 }}>
+              {RUBRIC_SHORT[k] || RUBRIC_LABELS[k]}
             </text>
           </g>
         );

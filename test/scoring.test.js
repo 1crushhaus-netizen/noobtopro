@@ -11,6 +11,10 @@ import {
   DIFFICULTY_LABELS,
   RUBRIC_KEYS,
   RUBRIC_MAX,
+  RUBRIC_WEIGHTS,
+  RUBRIC_WEIGHT_SUM,
+  scoreFromRubric,
+  contributionBreakdown,
   normalizeRubric,
   diagnosticSubjectRubric,
   blendRubric,
@@ -479,61 +483,106 @@ describe("DIAGNOSTIC_DIFFICULTIES / DIFFICULTY_LABELS", () => {
   });
 });
 
+// Helper: a complete 9-axis rubric (every key = v), overridden by `over`.
+const rub = (v, over = {}) => Object.fromEntries(RUBRIC_KEYS.map((k) => [k, over[k] != null ? over[k] : v]));
+
 describe("rubric constants", () => {
-  it("RUBRIC_KEYS is the 5 dimensions in display order, RUBRIC_MAX is 4", () => {
+  it("RUBRIC_KEYS is the 9 chain-link axes in display order, RUBRIC_MAX is 4", () => {
     expect(RUBRIC_KEYS).toEqual([
-      "conceptual_understanding",
-      "logical_structure",
-      "strategy",
-      "execution_accuracy",
-      "communication",
+      "comprehension", "principle", "justification", "strategy",
+      "logic", "execution_method", "computation", "verification", "communication",
     ]);
     expect(RUBRIC_MAX).toBe(4);
   });
+
+  it("RUBRIC_WEIGHTS is keyed EXACTLY to RUBRIC_KEYS (a missing weight would NaN the score) and sums to 25", () => {
+    expect(Object.keys(RUBRIC_WEIGHTS).sort()).toEqual([...RUBRIC_KEYS].sort());
+    expect(RUBRIC_WEIGHT_SUM).toBe(25);
+    for (const k of RUBRIC_KEYS) expect(Number.isFinite(RUBRIC_WEIGHTS[k])).toBe(true);
+  });
 });
 
-describe("normalizeRubric", () => {
-  it("clamps each dimension to an INTEGER in [0,4] and fills missing ones with 0", () => {
-    const out = normalizeRubric({ conceptual_understanding: 3, logical_structure: 9, strategy: -2, execution_accuracy: 2.6 });
-    expect(out).toEqual({
-      conceptual_understanding: 3,
-      logical_structure: 4, // clamped down
-      strategy: 0, // clamped up
-      execution_accuracy: 3, // rounded
-      communication: 0, // missing -> 0
-    });
+describe("scoreFromRubric (transparent weighted headline)", () => {
+  it("all-4s → 100, all-0s → 0", () => {
+    expect(scoreFromRubric(rub(4))).toBe(100);
+    expect(scoreFromRubric(rub(0))).toBe(0);
   });
 
-  it("returns an all-zero complete object for null/garbage input (never NaN)", () => {
-    expect(normalizeRubric(null)).toEqual({
-      conceptual_understanding: 0,
-      logical_structure: 0,
-      strategy: 0,
-      execution_accuracy: 0,
-      communication: 0,
-    });
+  it("equals Σ(weight·value) directly because ΣW·MAX = 100", () => {
+    expect(scoreFromRubric(rub(0, { principle: 4 }))).toBe(20); // 5·4
+    expect(scoreFromRubric(rub(0, { computation: 4 }))).toBe(4); // 1·4 — a slip axis is worth almost nothing
+  });
+
+  it("is a pure function of the rubric — never NaN, even for garbage / prototype keys", () => {
+    for (const g of [null, undefined, "x", 42, {}, JSON.parse('{"__proto__":{"principle":4}}')]) {
+      const s = scoreFromRubric(g);
+      expect(Number.isInteger(s)).toBe(true);
+      expect(s).toBeGreaterThanOrEqual(0);
+      expect(s).toBeLessThanOrEqual(100);
+    }
+  });
+});
+
+describe("contributionBreakdown (legible — points sum to the headline)", () => {
+  it("each axis's points = weight·value and they ADD UP to the total", () => {
+    const r = rub(4, { computation: 1 }); // sound method + a decimal slip
+    const { items, total } = contributionBreakdown(r);
+    expect(total).toBe(97);
+    expect(items.reduce((a, i) => a + i.points, 0)).toBe(97);
+    const principle = items.find((i) => i.key === "principle");
+    expect(principle.points).toBe(20); // 5·4
+    expect(principle.max).toBe(20); // worth 20 pts at 4/4
+  });
+});
+
+describe("normalizeRubric (9 axes + legacy coercion)", () => {
+  it("clamps each axis to an INTEGER in [0,4], fills missing with 0, over the new keys", () => {
+    const out = normalizeRubric({ principle: 3, logic: 9, strategy: -2, computation: 2.6 });
+    expect(out.principle).toBe(3);
+    expect(out.logic).toBe(4); // clamped down
+    expect(out.strategy).toBe(0); // clamped up
+    expect(out.computation).toBe(3); // rounded
+    expect(out.communication).toBe(0); // missing -> 0
+    expect(Object.keys(out).sort()).toEqual([...RUBRIC_KEYS].sort());
+  });
+
+  it("returns an all-zero complete object for null/garbage (never NaN)", () => {
+    const z = normalizeRubric(null);
+    for (const k of RUBRIC_KEYS) expect(z[k]).toBe(0);
     for (const k of RUBRIC_KEYS) expect(Number.isFinite(normalizeRubric("x")[k])).toBe(true);
+  });
+
+  it("coerces a stored LEGACY 5-axis rubric onto the new axes (no DB migration needed)", () => {
+    const out = normalizeRubric({ conceptual_understanding: 4, logical_structure: 3, strategy: 2, execution_accuracy: 2, communication: 4 });
+    expect(out.principle).toBe(4); // conceptual_understanding → principle
+    expect(out.justification).toBe(4); // derived ← conceptual_understanding
+    expect(out.logic).toBe(3); // logical_structure → logic
+    expect(out.strategy).toBe(2);
+    expect(out.execution_method).toBe(2); // execution_accuracy → execution_method
+    expect(out.computation).toBe(2); // derived ← execution_accuracy
+    expect(out.verification).toBe(3); // derived ← round(mean(logic 3, exec 2)) = 2.5 → 3
+    expect(out.communication).toBe(4);
+    expect(out.comprehension).toBe(0); // no old analog → 0
   });
 });
 
 describe("diagnosticSubjectRubric", () => {
-  it("difficulty-weights the per-question rubrics (advanced counts ~7 vs foundational ~3)", () => {
-    // foundational all-1s, advanced all-4s. Weighted mean leans toward the harder
-    // question (anchor 70) over the easy one (anchor 30): (30*1 + 70*4)/(100) = 3.1.
+  it("difficulty-weights the per-question rubrics (advanced ~70 vs foundational ~30)", () => {
     const out = diagnosticSubjectRubric([
-      { difficulty: "foundational", rubric: { conceptual_understanding: 1, logical_structure: 1, strategy: 1, execution_accuracy: 1, communication: 1 } },
-      { difficulty: "advanced", rubric: { conceptual_understanding: 4, logical_structure: 4, strategy: 4, execution_accuracy: 4, communication: 4 } },
+      { difficulty: "foundational", rubric: rub(1) },
+      { difficulty: "advanced", rubric: rub(4) },
     ]);
+    // (30*1 + 70*4)/100 = 3.1 on every axis.
     for (const k of RUBRIC_KEYS) expect(out[k]).toBeCloseTo(3.1, 5);
   });
 
-  it("keeps FLOAT resolution (not rounded to int) and clamps to [0,4]", () => {
+  it("keeps FLOAT resolution (not rounded) and clamps to [0,4]", () => {
     const out = diagnosticSubjectRubric([
-      { difficulty: "intermediate", rubric: { conceptual_understanding: 2, logical_structure: 3, strategy: 0, execution_accuracy: 0, communication: 0 } },
-      { difficulty: "intermediate", rubric: { conceptual_understanding: 3, logical_structure: 4, strategy: 0, execution_accuracy: 0, communication: 0 } },
+      { difficulty: "intermediate", rubric: rub(0, { principle: 2, logic: 3 }) },
+      { difficulty: "intermediate", rubric: rub(0, { principle: 3, logic: 4 }) },
     ]);
-    expect(out.conceptual_understanding).toBeCloseTo(2.5, 5); // equal weights -> mean
-    expect(out.logical_structure).toBeCloseTo(3.5, 5);
+    expect(out.principle).toBeCloseTo(2.5, 5);
+    expect(out.logic).toBeCloseTo(3.5, 5);
   });
 
   it("returns null when there is nothing to aggregate", () => {
@@ -542,36 +591,43 @@ describe("diagnosticSubjectRubric", () => {
   });
 
   it("falls back to the intermediate anchor for an unknown difficulty band", () => {
-    const out = diagnosticSubjectRubric([{ difficulty: "???", rubric: { conceptual_understanding: 2 } }]);
-    expect(out.conceptual_understanding).toBeCloseTo(2, 5); // single item -> its own value
+    const out = diagnosticSubjectRubric([{ difficulty: "???", rubric: { principle: 2 } }]);
+    expect(out.principle).toBeCloseTo(2, 5);
   });
 });
 
 describe("blendRubric", () => {
   it("seeds from the attempt when there is no prior rubric", () => {
-    const out = blendRubric(null, { conceptual_understanding: 3, logical_structure: 2, strategy: 1, execution_accuracy: 0, communication: 4 });
-    expect(out).toEqual({ conceptual_understanding: 3, logical_structure: 2, strategy: 1, execution_accuracy: 0, communication: 4 });
+    const next = rub(0, { principle: 3, logic: 2, strategy: 1, communication: 4 });
+    expect(blendRubric(null, next)).toEqual(next);
   });
 
   it("EWMA-nudges the prior toward the attempt (default alpha 0.35), keeping floats", () => {
-    const prev = { conceptual_understanding: 2, logical_structure: 2, strategy: 2, execution_accuracy: 2, communication: 2 };
-    const next = { conceptual_understanding: 4, logical_structure: 4, strategy: 4, execution_accuracy: 4, communication: 4 };
-    const out = blendRubric(prev, next); // 2 + 0.35*(4-2) = 2.7
+    const out = blendRubric(rub(2), rub(4)); // 2 + 0.35*(4-2) = 2.7
     for (const k of RUBRIC_KEYS) expect(out[k]).toBeCloseTo(2.7, 5);
   });
 
-  it("clamps the result to [0,4] and tolerates garbage prev dimensions", () => {
-    const out = blendRubric({ conceptual_understanding: "bad", logical_structure: 99 }, { conceptual_understanding: 4, logical_structure: 4, strategy: 4, execution_accuracy: 4, communication: 4 }, 1);
-    expect(out.conceptual_understanding).toBeCloseTo(4, 5); // garbage prev -> seeds from target
-    expect(out.logical_structure).toBeLessThanOrEqual(4);
+  it("migrates a LEGACY prev onto the new axes via the float coercion", () => {
+    const out = blendRubric(
+      { conceptual_understanding: 2, logical_structure: 2, strategy: 2, execution_accuracy: 2, communication: 2 },
+      rub(4)
+    );
+    expect(out.principle).toBeCloseTo(2.7, 5); // 2 + .35*(4-2)
+    expect(out.comprehension).toBeCloseTo(1.4, 5); // no legacy analog → 0 + .35*(4-0)
+  });
+
+  it("clamps to [0,4] and tolerates garbage prev axes", () => {
+    const out = blendRubric({ principle: "bad", logic: 99 }, rub(4), 1);
+    expect(out.principle).toBeCloseTo(4, 5); // garbage prev coerces to 0 → 0 + 1*(4-0) = 4
+    expect(out.logic).toBeLessThanOrEqual(4);
   });
 });
 
 describe("lowestRubricDimensions", () => {
-  it("returns the n lowest dimension keys, ties broken by display order", () => {
-    const rubric = { conceptual_understanding: 3, logical_structure: 1, strategy: 1, execution_accuracy: 4, communication: 2 };
-    expect(lowestRubricDimensions(rubric, 1)).toEqual(["logical_structure"]);
-    expect(lowestRubricDimensions(rubric, 2)).toEqual(["logical_structure", "strategy"]);
+  it("returns the n lowest axis keys, ties broken by display order", () => {
+    const rubric = rub(3, { strategy: 1, logic: 1, verification: 4 });
+    expect(lowestRubricDimensions(rubric, 1)).toEqual(["strategy"]); // strategy precedes logic in display order
+    expect(lowestRubricDimensions(rubric, 2)).toEqual(["strategy", "logic"]);
   });
 
   it("returns [] for a missing/empty rubric", () => {

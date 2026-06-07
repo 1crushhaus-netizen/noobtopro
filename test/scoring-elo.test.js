@@ -6,11 +6,11 @@ import {
   defaultDifficultyForBand,
   rankFor,
   RANKS,
-  reconcileReasoningScore,
-  rubricImpliedScore,
+  scoreFromRubric,
   explainRankMove,
   ELO_K_PROVISIONAL,
   ELO_K_STABLE,
+  RUBRIC_KEYS,
   normalizeRubric,
 } from "@/lib/scoring";
 import { preGradeDock } from "@/lib/preGrade";
@@ -99,25 +99,24 @@ describe("rankFor (5 fixed bands now, percentile-ready)", () => {
   });
 });
 
-describe("reconcileReasoningScore (consistency / anti-gaming)", () => {
-  const consistent = { conceptual_understanding: 3, logical_structure: 3, strategy: 3, execution_accuracy: 3, communication: 3 };
-  const allZero = { conceptual_understanding: 0, logical_structure: 0, strategy: 0, execution_accuracy: 0, communication: 0 };
+describe("scoreFromRubric (transparent headline, anti-gaming)", () => {
+  const rub = (v, over = {}) => Object.fromEntries(RUBRIC_KEYS.map((k) => [k, over[k] != null ? over[k] : v]));
 
-  it("leaves a rubric-consistent score alone", () => {
-    expect(reconcileReasoningScore(75, consistent)).toBe(75); // implied 75, gap 0
+  it("all-zero → 0, all-4s → 100 (no reconciliation slack)", () => {
+    expect(scoreFromRubric(rub(0))).toBe(0);
+    expect(scoreFromRubric(rub(4))).toBe(100);
   });
-  it("pulls a contradicting high score down toward the rubric", () => {
-    const out = reconcileReasoningScore(90, allZero); // implied 0
-    expect(out).toBeLessThan(90);
-    expect(out).toBeLessThanOrEqual(25); // within the tolerance band of 0
+  it("a jargon-salad (no real reasoning, some communication) stays in the single digits", () => {
+    expect(scoreFromRubric(rub(0, { communication: 2 }))).toBeLessThan(10);
   });
-  it("pulls a contradicting low score up toward an excellent rubric", () => {
-    const out = reconcileReasoningScore(5, { conceptual_understanding: 4, logical_structure: 4, strategy: 4, execution_accuracy: 4, communication: 4 });
-    expect(out).toBeGreaterThan(5);
+  it("a clean method with one arithmetic slip OUTSCORES a right-looking answer with broken logic", () => {
+    const soundSlip = rub(4, { computation: 1 }); // wrong final number, sound chain
+    const luckyRight = rub(2, { principle: 1, justification: 0, logic: 1, computation: 4, verification: 0 }); // right number, broken reasoning
+    expect(scoreFromRubric(soundSlip)).toBeGreaterThan(scoreFromRubric(luckyRight));
   });
-  it("falls back to the rubric-implied score for a null/garbage score", () => {
-    expect(reconcileReasoningScore(null, consistent)).toBe(rubricImpliedScore(consistent));
-    expect(reconcileReasoningScore("x", allZero)).toBe(0);
+  it("never NaN for a null/garbage rubric", () => {
+    expect(scoreFromRubric(null)).toBe(0);
+    expect(Number.isInteger(scoreFromRubric("x"))).toBe(true);
   });
 });
 
@@ -134,15 +133,16 @@ describe("explainRankMove", () => {
 });
 
 // GOLD SET — a tiny, hand-specified fixture run through the FULL deterministic pipeline
-// (dock → reconcile → Elo) on every change. Catches drift in the engine constants /
-// dock heuristics / reconciliation without needing a Groq key (so it runs in CI).
-describe("gold set — deterministic dock+reconcile+Elo pipeline", () => {
-  // Run an attempt the way /api/score does, minus the LLM: a docked input yields the
-  // dock verdict; otherwise the (provided) model grade is reconciled, then Elo applies.
-  function pipeline({ reasoning, prevRating, band, attemptCount, modelScore, modelRubric }) {
+// (dock → score-from-rubric → Elo) on every change. Catches drift in the engine constants
+// / dock heuristics / the weighted-mean headline without needing a Groq key (runs in CI).
+describe("gold set — deterministic dock+score+Elo pipeline", () => {
+  const rub = (v, over = {}) => Object.fromEntries(RUBRIC_KEYS.map((k) => [k, over[k] != null ? over[k] : v]));
+  // Run an attempt the way /api/score does, minus the LLM: a docked input yields the dock
+  // verdict; otherwise the score is the TRANSPARENT weighted mean of the rubric, then Elo applies.
+  function pipeline({ reasoning, prevRating, band, attemptCount, modelRubric }) {
     const dock = preGradeDock(reasoning);
     const rubric = dock ? dock.rubric : normalizeRubric(modelRubric);
-    const score = dock ? dock.reasoningScore : reconcileReasoningScore(modelScore, rubric);
+    const score = dock ? dock.reasoningScore : scoreFromRubric(rubric);
     const { newRating } = eloUpdate({
       rating: prevRating,
       difficulty: defaultDifficultyForBand(band),
@@ -155,11 +155,11 @@ describe("gold set — deterministic dock+reconcile+Elo pipeline", () => {
   const cases = [
     // A blank answer DOCKS and DROPS an established rating (anti-"idk").
     { name: "blank docks and drops", in: { reasoning: "   ", prevRating: 60, band: "intermediate", attemptCount: 5 }, expect: { docked: true, dropped: true } },
-    // A strong answer on an above-level item climbs.
-    { name: "strong on hard climbs", in: { reasoning: "I derived it via the chain rule and verified the boundary case, 2x.", prevRating: 50, band: "advanced", attemptCount: 5, modelScore: 90, modelRubric: { conceptual_understanding: 4, logical_structure: 4, strategy: 4, execution_accuracy: 3, communication: 4 } }, expect: { docked: false, climbed: true } },
-    // A buzzword answer whose model score contradicts an all-zero rubric is reconciled DOWN,
-    // and then loses rating at an at-level item.
-    { name: "contradiction reconciled then drops", in: { reasoning: "Quantum entropy eigen-flux resonance governs everything here obviously.", prevRating: 55, band: "intermediate", attemptCount: 10, modelScore: 85, modelRubric: { conceptual_understanding: 0, logical_structure: 0, strategy: 0, execution_accuracy: 0, communication: 1 } }, expect: { docked: false, scoreAtMost: 30, dropped: true } },
+    // A strong answer (high rubric) on an above-level item climbs.
+    { name: "strong on hard climbs", in: { reasoning: "I derived it via the chain rule and verified the boundary case, 2x.", prevRating: 50, band: "advanced", attemptCount: 5, modelRubric: rub(4, { computation: 3 }) }, expect: { docked: false, climbed: true } },
+    // A buzzword answer scores its high-weight reasoning axes 0, so the weighted-mean
+    // headline is tiny — and then it loses rating at an at-level item (no reconcile needed).
+    { name: "jargon salad scores low then drops", in: { reasoning: "Quantum entropy eigen-flux resonance governs everything here obviously.", prevRating: 55, band: "intermediate", attemptCount: 10, modelRubric: rub(0, { communication: 1 }) }, expect: { docked: false, scoreAtMost: 30, dropped: true } },
   ];
 
   for (const c of cases) {

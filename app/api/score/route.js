@@ -38,7 +38,7 @@ import {
   DIAGNOSTIC_DIFFICULTIES,
   eloUpdate,
   defaultDifficultyForBand,
-  reconcileReasoningScore,
+  scoreFromRubric,
   explainRankMove,
 } from "@/lib/scoring";
 import { normalizeTopic } from "@/lib/taxonomy";
@@ -48,7 +48,7 @@ import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireUser } from "@/lib/adminAuth";
 import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
-import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, normalizeFeedbackList, capSolution } from "@/lib/gradeInput";
+import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, normalizeFeedbackList, capSolution, normalizeErrors, normalizeSolve } from "@/lib/gradeInput";
 
 export const dynamic = "force-dynamic";
 
@@ -285,19 +285,25 @@ async function handlePractice(req, body) {
             `Learner's current level: ${prevScore}/100\n\n` +
             `Learner's reasoning:\n"""${work}"""`,
           image: img.image,
-          maxTokens: 2000, // room for strengths + improvements + the worked solution
+          maxTokens: 3000, // room for the grader's solve block + strengths/improvements + typed errors + worked solution
         });
 
     const attemptRubric = normalizeRubric(data?.rubric);
-    // 3) Reconcile the headline score with its rubric (consistency / anti-gaming).
-    const reasoningScore = reconcileReasoningScore(data?.reasoningScore, attemptRubric);
+    // 3) The headline is the TRANSPARENT weighted mean of the rubric axes (process-first,
+    //    path-independent — final-answer correctness never enters here). A dock carries its
+    //    own forced low score (DOCK_SCORE), so use it directly rather than the all-zero mean.
+    const reasoningScore = dock ? data.reasoningScore : scoreFromRubric(attemptRubric);
     const weakConcepts = normalizeWeakConcepts(data?.weakConcepts);
-    // Post-grade feedback: what was good, how to reach 100, and — only on a SUBSTANTIVE
-    // (non-docked) attempt — the full worked solution. A dock returns workedSolution=""
-    // so a non-attempt ("idk"/blank) can never extract the answer.
+    // Post-grade feedback: what was good, how to reach 100, the grader's own worked
+    // solution (compute-first) used to type the learner's errors, the typed error list,
+    // and — only on a SUBSTANTIVE (non-docked) attempt — the full worked solution. A dock
+    // returns workedSolution="" and no errors/solve, so a non-attempt can't extract the answer.
     const strengths = normalizeFeedbackList(data?.strengths);
     const improvements = normalizeFeedbackList(data?.improvements);
     const workedSolution = dock ? "" : capSolution(data?.workedSolution);
+    const solve = dock ? null : normalizeSolve(data?.solve);
+    const errors = dock ? [] : normalizeErrors(data?.errors);
+    const finalAnswerMatches = dock ? false : data?.finalAnswerMatches === true;
     const correctnessNote = typeof data?.correctnessNote === "string" ? data.correctnessNote : "";
     const socraticHint = typeof data?.socraticHint === "string" ? data.socraticHint : "";
     const microLesson = typeof data?.microLesson === "string" ? data.microLesson : "";
@@ -356,7 +362,7 @@ async function handlePractice(req, body) {
         target_concept: safeConcept,
         difficulty: safeDifficulty,
         rubric: attemptRubric,
-        feedback: { strengths, improvements, workedSolution, correctnessNote, socraticHint, microLesson },
+        feedback: { strengths, improvements, workedSolution, correctnessNote, socraticHint, microLesson, solve, errors, finalAnswerMatches },
       },
     });
     if (saveErr) throw saveErr;
@@ -369,6 +375,9 @@ async function handlePractice(req, body) {
     return NextResponse.json({
       reasoningScore,
       rubric: attemptRubric, // per-attempt 0–4 bars for the feedback panel
+      solve, // the grader's own worked solution (compute-first; null on a dock)
+      errors, // typed error taxonomy (Socratic prompts on reasoning errors)
+      finalAnswerMatches, // diagnostic only — did the learner's final answer match the grader's
       strengths, // what the answer did well
       improvements, // specific, actionable steps to reach 100
       workedSolution, // full solution, revealed post-grade (empty on a dock)
@@ -506,15 +515,17 @@ async function handleDiagnostic(req, body) {
               `Question: ${it.question}\n\n` +
               `Learner's reasoning:\n"""${it.reasoning}"""`,
             image: it.image,
+            maxTokens: 1800, // room for the grader's solve block + 9-axis rubric + typed errors
           });
       const rubric = normalizeRubric(data?.rubric);
-      // The dock verdict carries `reasoningScore`; the grader carries `score`. Reconcile
-      // either against the rubric so the baseline score can't contradict the bars.
-      const rawScore = it.dock ? data.reasoningScore : data?.score;
+      // The dock carries its own forced low reasoningScore; the live grade's headline is
+      // the TRANSPARENT weighted mean of the rubric axes (path-independent — the grader no
+      // longer emits a score). Baseline aggregation (diagnosticSubjectScore) uses these.
+      const reasoningScore = it.dock ? data.reasoningScore : scoreFromRubric(rubric);
       return {
         subject: it.subject,
         difficulty: it.difficulty,
-        reasoningScore: reconcileReasoningScore(rawScore, rubric),
+        reasoningScore,
         rubric,
         weakConcepts: normalizeWeakConcepts(data?.weakConcepts),
         comment: typeof data?.comment === "string" ? data.comment : "",

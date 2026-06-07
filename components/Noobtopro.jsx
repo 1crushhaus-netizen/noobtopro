@@ -4,7 +4,6 @@ import React, { useState, useRef, useEffect } from "react";
 import {
   SUBJECTS,
   ORDER,
-  RUBRIC_LABELS,
   SCALE_NOTE,
   band,
   blendRubric,
@@ -23,6 +22,7 @@ import SignIn from "@/components/SignIn";
 import ProfileTab from "@/components/ProfileTab";
 import LearnTab from "@/components/LearnTab";
 import AdminDashboard from "@/components/AdminDashboard";
+import ScoreBreakdown, { ErrorList, hasReasoningError } from "@/components/ScoreBreakdown";
 
 /* ----------------------------- icons (inline, no deps) ----------------------------- */
 function Icon({ name, size = 16 }) {
@@ -162,16 +162,6 @@ function Ring({ value, color, size = 96, stroke = 9, label }) {
         {Math.round(value)}
       </text>
     </svg>
-  );
-}
-
-function SegBar({ value, color }) {
-  return (
-    <div style={{ display: "flex", gap: 4 }}>
-      {[0, 1, 2, 3].map((i) => (
-        <div key={i} style={{ height: 7, flex: 1, borderRadius: 3, background: i < value ? color : "rgba(255,255,255,.09)", transition: "background .4s ease" }} />
-      ))}
-    </div>
   );
 }
 
@@ -933,6 +923,9 @@ export default function Noobtopro() {
               correctnessNote: r.correctnessNote || "",
               socraticHint: r.socraticHint || "",
               microLesson: r.microLesson || "",
+              solve: r.docked ? null : r.solve || null,
+              errors: r.docked ? [] : r.errors || [],
+              finalAnswerMatches: !!r.finalAnswerMatches,
             },
           },
         });
@@ -1331,15 +1324,12 @@ export default function Noobtopro() {
                             <div className="np-feedlabel">Reasoning quality this attempt</div>
                             <div className="np-feedscore">{feedback.reasoningScore}<span style={{ color: "var(--muted)", fontSize: 18 }}>/100</span></div>
                           </div>
-                          <div className="np-rubric">
-                            {Object.keys(RUBRIC_LABELS).map((k) => (
-                              <div key={k} className="np-rubrow">
-                                <span className="np-rublabel">{RUBRIC_LABELS[k]}</span>
-                                <SegBar value={(feedback.rubric && feedback.rubric[k]) || 0} color={SUBJECTS[pSubject].color} />
-                              </div>
-                            ))}
-                          </div>
+                          <div className="np-feedsub">Your <em>reasoning</em> is scored — not the final answer. The breakdown below shows exactly how.</div>
                         </div>
+
+                        {/* How this score is computed — per-axis value × weight = points, summing
+                            transparently to the headline (no hidden factor). */}
+                        <ScoreBreakdown rubric={feedback.rubric} total={feedback.reasoningScore} color={SUBJECTS[pSubject].color} open />
 
                         {/* Why your rank moved — the persisted, deterministic explanation. */}
                         {feedback.rationale && (
@@ -1373,13 +1363,24 @@ export default function Noobtopro() {
                           </div>
                         )}
 
+                        {/* Where your reasoning breaks — typed errors, ordered most-costly
+                            first. A reasoning error LEADS with a Socratic question (you catch it
+                            yourself); slips/conceptual errors state the fix directly. */}
+                        {Array.isArray(feedback.errors) && feedback.errors.length > 0 && (
+                          <div className="np-card np-errors">
+                            <div className="np-cardicon" style={{ color: "var(--math)" }}><Icon name="bulb" size={16} /> Where your reasoning breaks</div>
+                            <ErrorList errors={feedback.errors} />
+                          </div>
+                        )}
+
                         {/* Worked solution — revealed only AFTER grading a substantive attempt
-                            (a docked non-answer returns ""). Collapsed by default so it doesn't
-                            spoil a retry at a glance. */}
+                            (a docked non-answer returns ""). Collapsed by default; when a reasoning
+                            error is present it's a deliberate "reveal anyway" so the Socratic
+                            question above comes first (desirable difficulty). */}
                         {feedback.workedSolution && (
                           <details className="np-card np-lesson">
                             <summary className="np-cardicon" style={{ color: SUBJECTS[pSubject].color, cursor: "pointer" }}>
-                              <Icon name="bulb" size={16} /> Worked solution (reveal the full answer)
+                              <Icon name="bulb" size={16} /> {hasReasoningError(feedback.errors) ? "Reveal the full solution anyway" : "Worked solution (reveal the full answer)"}
                             </summary>
                             <div className="np-lessontext" style={{ whiteSpace: "pre-wrap", marginTop: 10 }}>{feedback.workedSolution}</div>
                           </details>

@@ -5,10 +5,11 @@ import { _resetRateLimits } from "@/lib/rateLimit";
 // Substantive, multi-word reasoning the deterministic pre-grade dock lets through to
 // the (mocked) grader. Short/"idk"/single-word answers are docked with no Groq call.
 const REASONING = "I applied the limit definition and simplified the expression step by step.";
-// A rubric whose mean implies a 0–100 score equal to ~25*mean, so reconcileReasoningScore
-// is a NO-OP for a model score near that value (lets the old score assertions stand).
-const RUBRIC_50 = { conceptual_understanding: 2, logical_structure: 2, strategy: 2, execution_accuracy: 2, communication: 2 };
-const RUBRIC_100 = { conceptual_understanding: 4, logical_structure: 4, strategy: 4, execution_accuracy: 4, communication: 4 };
+// Complete 9-axis rubrics. The headline is now scoreFromRubric (weighted mean, ΣW=25):
+// all-2 → 50, all-4 → 100. The grader emits no headline; the server derives it.
+const mkRubric = (v) => ({ comprehension: v, principle: v, justification: v, strategy: v, logic: v, execution_method: v, computation: v, verification: v, communication: v });
+const RUBRIC_50 = mkRubric(2); // scoreFromRubric → 50
+const RUBRIC_100 = mkRubric(4); // scoreFromRubric → 100
 
 // Build a POST Request the route handler can consume.
 function req(bodyObjOrString) {
@@ -272,11 +273,9 @@ describe("POST /api/grade — model output is normalized", () => {
     expect(json.score).toBe(100);
   });
 
-  it("normalizes a malformed practice grade (reasoningScore reconciled, rubric clamped)", async () => {
+  it("normalizes a malformed practice grade (rubric clamped; headline = transparent weighted mean)", async () => {
     mockGroqReturning({
-      reasoningScore: "not-a-number",
-      rubric: { conceptual_understanding: 9, logical_structure: -3 },
-      // newScoreSuggestion intentionally omitted
+      rubric: { principle: 9, logic: -3 }, // out of range; other axes missing
       correctnessNote: "n",
       socraticHint: "h",
       microLesson: "m",
@@ -294,13 +293,12 @@ describe("POST /api/grade — model output is normalized", () => {
     );
     expect(res.status).toBe(200);
     const json = await res.json();
-    // Unparseable score → reconcile falls back to the rubric-implied score. Rubric is
-    // {ce:4, ls:0, others:0} → mean 0.8 → ~20.
-    expect(json.reasoningScore).toBe(20);
-    expect(json.rubric.conceptual_understanding).toBe(4); // 9 -> clamped to 4
-    expect(json.rubric.logical_structure).toBe(0); // -3 -> clamped to 0
+    expect(json.rubric.principle).toBe(4); // 9 -> clamped to 4
+    expect(json.rubric.logic).toBe(0); // -3 -> clamped to 0
     expect(json.rubric.strategy).toBe(0); // missing -> 0
-    expect(json.newScoreSuggestion).toBe(null); // omitted -> null (client Elo keeps prev)
+    // scoreFromRubric: only principle scores (weight 5 × value 4) = 20 points.
+    expect(json.reasoningScore).toBe(20);
+    expect(json.newScoreSuggestion).toBe(20); // = the axis-derived score (no separate model number)
   });
 
   it("caps oversized free-text before sending it upstream", async () => {
@@ -391,8 +389,8 @@ describe("POST /api/grade — difficulty band threading (diagnostic)", () => {
   it("threads a valid difficulty band into the grader prompt and returns the normalized {score, weakConcepts} shape", async () => {
     const fetchMock = mockGroqReturning({
       subject: "math",
-      score: 150, // out of range -> must clamp to 100
-      rubric: RUBRIC_100, // rubric-consistent so reconcile leaves the clamped 100 alone
+      score: 150, // a stray model score is now IGNORED — the headline is derived from the rubric
+      rubric: RUBRIC_100, // all-4 → scoreFromRubric = 100
       weakConcepts: ["limits", "  ", "epsilon-delta"],
       comment: "ok",
     });
@@ -401,7 +399,7 @@ describe("POST /api/grade — difficulty band threading (diagnostic)", () => {
     // The captured upstream prompt carries the difficulty band line.
     expect(sentUserMessage(fetchMock)).toMatch(/difficulty band: advanced/i);
     const json = await res.json();
-    expect(json.score).toBe(100); // clamped
+    expect(json.score).toBe(100); // = scoreFromRubric(all-4)
     expect(json.weakConcepts).toEqual(["limits", "epsilon-delta"]); // blank dropped
   });
 
