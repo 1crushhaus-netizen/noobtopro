@@ -23,7 +23,13 @@ vi.mock("@/lib/abuseDetection", () => ({ reportInjection: vi.fn(), reportRateLim
 
 import { POST } from "@/app/api/score/route";
 import { _resetRateLimits } from "@/lib/rateLimit";
-import { eloUpdate, reconcileReasoningScore, defaultDifficultyForBand, normalizeRubric } from "@/lib/scoring";
+import { eloUpdate, scoreFromRubric, defaultDifficultyForBand, normalizeRubric } from "@/lib/scoring";
+
+// Complete 9-axis rubric helper (the grader emits these; the server derives the headline).
+const mkRubric = (v, over = {}) => ({
+  comprehension: v, principle: v, justification: v, strategy: v, logic: v,
+  execution_method: v, computation: v, verification: v, communication: v, ...over,
+});
 
 // Substantive, multi-word reasoning that the deterministic pre-grade dock lets through
 // to the real grader (so the Groq mock IS exercised). Short/"idk" answers are docked.
@@ -90,29 +96,30 @@ function fakeAdmin({ scoresRows = [], scoresError = null, rpcError = null, attem
 }
 
 const PRACTICE_GRADE = {
-  reasoningScore: 80,
-  rubric: { conceptual_understanding: 3, logical_structure: 3, strategy: 3, execution_accuracy: 2, communication: 4 },
+  rubric: mkRubric(3, { execution_method: 2, comprehension: 4, communication: 4 }),
+  solve: { principle: "p", steps: ["s1"], finalAnswer: "42", units: "m" },
+  errors: [{ type: "execution-slip", step: "last line", severity: "minor", what: "decimal slip", feedbackMode: "point", message: "100/32=3.125", socraticPrompt: "" }],
+  finalAnswerMatches: false,
   correctnessNote: "Close, recheck the last step.",
   socraticHint: "What happens at the boundary?",
   microLesson: "The chain rule composes rates of change.",
   weakConcepts: ["chain rule"],
-  newScoreSuggestion: 60,
 };
 const DIAG_GRADE = {
   subject: "math",
-  score: 70,
-  rubric: { conceptual_understanding: 3, logical_structure: 3, strategy: 3, execution_accuracy: 3, communication: 3 },
+  rubric: mkRubric(3),
   weakConcepts: ["vectors"],
   comment: "Solid attempt.",
 };
 
-// The score /api/score computes for one practice attempt, using the REAL functions.
+// The score /api/score computes for one practice attempt, using the REAL functions: the
+// headline is the TRANSPARENT weighted mean of the rubric (scoreFromRubric), then Elo applies.
 function expectedPracticeScore({ prevScore, grade, band = "intermediate", itemDifficulty = null, attemptCount = 0 }) {
   const rubric = normalizeRubric(grade.rubric);
-  const reconciled = reconcileReasoningScore(grade.reasoningScore, rubric);
+  const reasoningScore = scoreFromRubric(rubric);
   const difficulty = itemDifficulty == null ? defaultDifficultyForBand(band) : itemDifficulty;
-  const { newRating } = eloUpdate({ rating: prevScore, difficulty, outcome: reconciled / 100, attemptCount });
-  return { newScore: newRating, reconciled };
+  const { newRating } = eloUpdate({ rating: prevScore, difficulty, outcome: reasoningScore / 100, attemptCount });
+  return { newScore: newRating, reasoningScore };
 }
 
 beforeEach(() => {
@@ -190,11 +197,12 @@ describe("POST /api/score practice — server-authoritative Elo score", () => {
     expect(res.status).toBe(200);
     const j = await res.json();
 
-    const { newScore } = expectedPracticeScore({ prevScore: 40, grade: PRACTICE_GRADE, band: "intermediate" });
+    const { newScore, reasoningScore } = expectedPracticeScore({ prevScore: 40, grade: PRACTICE_GRADE, band: "intermediate" });
     expect(j.newScore).toBe(newScore);
     expect(j.delta).toBe(newScore - 40);
     expect(j.subjectScore.score).toBe(newScore);
-    expect(j.reasoningScore).toBe(80); // reconcile leaves a rubric-consistent score alone
+    expect(j.reasoningScore).toBe(reasoningScore); // the transparent weighted mean of the rubric axes
+    expect(j.errors).toEqual(PRACTICE_GRADE.errors); // typed errors plumbed through
     expect(j.socraticHint).toBe(PRACTICE_GRADE.socraticHint);
     expect(typeof j.rationale).toBe("string");
     expect(j.rationale.length).toBeGreaterThan(0);
@@ -367,7 +375,7 @@ describe("POST /api/score diagnostic", () => {
     expect(j.persisted).toBe(false);
     expect(j.attempt).toBe(null);
     expect(j.scores.math.score).toBeGreaterThan(0);
-    expect(Object.keys(j.scores.math.rubric)).toHaveLength(5); // per-subject rubric profile
+    expect(Object.keys(j.scores.math.rubric)).toHaveLength(9); // per-subject 9-axis rubric profile
     expect(fetchMock).toHaveBeenCalledTimes(2); // one grade per answer (2 tiers)
   });
 
