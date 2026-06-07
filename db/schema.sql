@@ -542,3 +542,65 @@ revoke insert, update, delete, truncate on public.concept_guides, public.concept
 --     one grant; revoke everything else (anon can't report; nobody updates/deletes).
 revoke update, delete, truncate on public.concept_reports from anon, authenticated;
 revoke insert on public.concept_reports from anon;
+
+-- ---- durable rate limiter --------------------------------------------------
+-- DURABLE, per-account (or per-IP) rate limiting shared across all serverless
+-- instances — replacing the in-memory per-instance limiter (which multiplied the
+-- effective limit by the instance count and was IP-spoofable). Each bucket is a
+-- fixed window: rate_limit_hit() atomically increments and returns whether the call
+-- is allowed. lib/rateLimit.js#checkRateLimit calls this with the service-role
+-- client and falls back to the in-memory limiter when the service-role key is unset
+-- (local/dev/CI). INTERNAL: RLS on, NO policy (service-role only), never browser-read.
+create table if not exists public.rate_limits (
+  bucket text primary key,                 -- e.g. "acct:<uid>", "<ip>", "<ip>:diag"
+  hits int not null default 0,
+  reset_at timestamptz not null,
+  updated_at timestamptz not null default now()
+);
+alter table public.rate_limits enable row level security;  -- no policy => service-role only
+revoke insert, update, delete, truncate on public.rate_limits from anon, authenticated;
+
+-- Atomic fixed-window counter. Increments the bucket (resetting if its window has
+-- rolled over) and reports allowance in ONE statement, so concurrent lambdas can't
+-- race the read/modify/write. SECURITY DEFINER + service-role only.
+create or replace function public.rate_limit_hit(p_bucket text, p_max int, p_window_seconds int)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_now timestamptz := now();
+  v_window int := greatest(1, coalesce(p_window_seconds, 60));
+  v_max int := greatest(1, coalesce(p_max, 30));
+  v_hits int;
+  v_reset timestamptz;
+begin
+  if p_bucket is null or p_bucket = '' then
+    raise exception 'bucket required';
+  end if;
+  insert into public.rate_limits (bucket, hits, reset_at, updated_at)
+  values (left(p_bucket, 200), 1, v_now + make_interval(secs => v_window), v_now)
+  on conflict (bucket) do update
+    set hits = case when public.rate_limits.reset_at <= v_now then 1 else public.rate_limits.hits + 1 end,
+        reset_at = case when public.rate_limits.reset_at <= v_now then v_now + make_interval(secs => v_window) else public.rate_limits.reset_at end,
+        updated_at = v_now
+  returning hits, reset_at into v_hits, v_reset;
+
+  -- Opportunistic prune (~2% of calls via a clock-based sampler) of long-expired rows
+  -- so the table stays bounded without a cron dependency. Never touches live buckets.
+  if (extract(milliseconds from clock_timestamp())::bigint % 50) = 0 then
+    delete from public.rate_limits
+     where ctid in (select ctid from public.rate_limits where reset_at < v_now - interval '1 hour' limit 200);
+  end if;
+
+  return jsonb_build_object(
+    'allowed', v_hits <= v_max,
+    'remaining', greatest(0, v_max - v_hits),
+    'reset_at', v_reset,
+    'retry_after', case when v_hits <= v_max then 0 else greatest(1, ceil(extract(epoch from (v_reset - v_now))))::int end
+  );
+end;
+$$;
+revoke all on function public.rate_limit_hit(text, int, int) from public, anon, authenticated;
+grant execute on function public.rate_limit_hit(text, int, int) to service_role;

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { rateLimit, clientKey } from "@/lib/rateLimit";
+import { checkRateLimit, clientKey } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
 import { requireAdmin } from "@/lib/adminAuth";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
@@ -21,7 +21,7 @@ export async function POST(req) {
   if (isWrongContentType(req)) {
     return NextResponse.json({ error: "Content-Type must be application/json." }, { status: 415 });
   }
-  const rl = rateLimit(clientKey(req));
+  const rl = await checkRateLimit(clientKey(req));
   if (!rl.ok) {
     return NextResponse.json(
       { error: "Too many requests. Please slow down and try again shortly." },

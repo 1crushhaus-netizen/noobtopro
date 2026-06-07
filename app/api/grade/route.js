@@ -1,7 +1,7 @@
 import { NextResponse, after } from "next/server";
 import { groqJSON, DIAG_GRADE_SYS, PRACTICE_GRADE_SYS } from "@/lib/groq";
 import { clampScore, ORDER, normalizeRubric } from "@/lib/scoring";
-import { rateLimit, clientKey } from "@/lib/rateLimit";
+import { checkRateLimit, clientKey } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
@@ -39,7 +39,7 @@ export async function POST(req) {
     return NextResponse.json({ error: "Content-Type must be application/json." }, { status: 415 });
   }
 
-  const rl = rateLimit(clientKey(req));
+  const rl = await checkRateLimit(clientKey(req));
   if (!rl.ok) {
     reportRateLimit({ req, route: "/api/grade" });
     return NextResponse.json(
@@ -97,7 +97,7 @@ export async function POST(req) {
   // request can fan out to multiple multimodal calls each carrying ~3 MB. Apply a
   // separate, stricter per-IP budget on top of the general limit.
   if (img.image) {
-    const imgRl = rateLimit(`${clientKey(req)}:img`, { max: 10 });
+    const imgRl = await checkRateLimit(`${clientKey(req)}:img`, { max: 10 });
     if (!imgRl.ok) {
       reportRateLimit({ req, route: "/api/grade" });
       return NextResponse.json(

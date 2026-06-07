@@ -39,7 +39,7 @@ import {
   phdIndex,
   DIAGNOSTIC_DIFFICULTIES,
 } from "@/lib/scoring";
-import { rateLimit, clientKey } from "@/lib/rateLimit";
+import { checkRateLimit, clientKey } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireUser } from "@/lib/adminAuth";
@@ -122,7 +122,7 @@ export async function POST(req) {
     return NextResponse.json({ error: "Content-Type must be application/json." }, { status: 415 });
   }
 
-  const rl = rateLimit(clientKey(req));
+  const rl = await checkRateLimit(clientKey(req));
   if (!rl.ok) {
     reportRateLimit({ req, route: "/api/score" });
     return NextResponse.json(
@@ -149,6 +149,18 @@ async function handlePractice(req, body) {
   const auth = await requireUser(req);
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const uid = auth.user.id;
+
+  // Durable PER-ACCOUNT cap (follows the user across IPs/devices, shared across
+  // instances) on top of the pre-auth per-IP gate — a single account can't burn the
+  // Groq budget by rotating IPs.
+  const acctRl = await checkRateLimit(`acct:${uid}:practice`, { max: 45 });
+  if (!acctRl.ok) {
+    reportRateLimit({ req, route: "/api/score" });
+    return NextResponse.json(
+      { error: "Too many requests. Please slow down and try again shortly." },
+      { status: 429, headers: { "Retry-After": String(acctRl.retryAfter) } }
+    );
+  }
 
   const sb = getSupabaseAdmin();
   if (!sb) return NextResponse.json({ error: "Scoring is temporarily unavailable." }, { status: 503 });
@@ -177,7 +189,7 @@ async function handlePractice(req, body) {
   const img = normalizeImage(image);
   if (!img.ok) return NextResponse.json({ error: img.error }, { status: 400 });
   if (img.image) {
-    const imgRl = rateLimit(`${clientKey(req)}:img`, { max: 10 });
+    const imgRl = await checkRateLimit(`${clientKey(req)}:img`, { max: 10 });
     if (!imgRl.ok) {
       reportRateLimit({ req, route: "/api/score" });
       return NextResponse.json(
@@ -289,7 +301,7 @@ async function handlePractice(req, body) {
 async function handleDiagnostic(req, body) {
   // Stricter budget FIRST: one diagnostic request fans out to up to 6 Groq grades, so
   // reject an over-budget request before any auth round-trip or grading.
-  const diagRl = rateLimit(`${clientKey(req)}:diag`, { max: 4 });
+  const diagRl = await checkRateLimit(`${clientKey(req)}:diag`, { max: 4 });
   if (!diagRl.ok) {
     reportRateLimit({ req, route: "/api/score" });
     return NextResponse.json(
@@ -306,6 +318,16 @@ async function handleDiagnostic(req, body) {
     const auth = await requireUser(req);
     if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
     uid = auth.user.id;
+    // Durable PER-ACCOUNT diagnostic cap (across IPs/instances), on top of the per-IP
+    // :diag budget above.
+    const acctRl = await checkRateLimit(`acct:${uid}:diag`, { max: 6 });
+    if (!acctRl.ok) {
+      reportRateLimit({ req, route: "/api/score" });
+      return NextResponse.json(
+        { error: "Too many diagnostics. Please slow down and try again shortly." },
+        { status: 429, headers: { "Retry-After": String(acctRl.retryAfter) } }
+      );
+    }
     // Resolve the service-role client UP FRONT: if persistence is impossible, fail
     // before spending Groq tokens on a baseline we couldn't save.
     sb = getSupabaseAdmin();
@@ -358,7 +380,7 @@ async function handleDiagnostic(req, body) {
   const imgCount = items.filter((i) => i.image).length;
   if (imgCount) {
     let imgRl;
-    for (let i = 0; i < imgCount; i++) imgRl = rateLimit(`${clientKey(req)}:img`, { max: 10 });
+    for (let i = 0; i < imgCount; i++) imgRl = await checkRateLimit(`${clientKey(req)}:img`, { max: 10 });
     if (!imgRl.ok) {
       reportRateLimit({ req, route: "/api/score" });
       return NextResponse.json(

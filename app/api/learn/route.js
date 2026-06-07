@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { groqJSON, LEARN_SYS } from "@/lib/groq";
 import { ORDER } from "@/lib/scoring";
-import { rateLimit, clientKey } from "@/lib/rateLimit";
+import { checkRateLimit, clientKey } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
 import { getSupabaseAdmin, conceptKey } from "@/lib/supabaseAdmin";
 import { normalizeTopic, topicSlugsFor } from "@/lib/taxonomy";
@@ -67,7 +67,7 @@ export async function POST(req) {
   // call). Apply a tighter per-IP budget than the default.
   // Own bucket (":learn") so this expensive route's tighter 15/min is an INDEPENDENT
   // budget, not shared with the 30/min generate/grade/score buckets (mirrors :diag/:img).
-  const rl = rateLimit(`${clientKey(req)}:learn`, { max: 15 });
+  const rl = await checkRateLimit(`${clientKey(req)}:learn`, { max: 15 });
   if (!rl.ok) {
     reportRateLimit({ req, route: "/api/learn" });
     return NextResponse.json(

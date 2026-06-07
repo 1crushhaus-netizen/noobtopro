@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { groqJSON, DIAG_GEN_SYS, PRACTICE_GEN_SYS } from "@/lib/groq";
 import { ORDER, clampScore, DIAGNOSTIC_DIFFICULTIES } from "@/lib/scoring";
-import { rateLimit, clientKey } from "@/lib/rateLimit";
+import { checkRateLimit, clientKey } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
@@ -43,7 +43,7 @@ export async function POST(req) {
     return NextResponse.json({ error: "Content-Type must be application/json." }, { status: 415 });
   }
 
-  const rl = rateLimit(clientKey(req));
+  const rl = await checkRateLimit(clientKey(req));
   if (!rl.ok) {
     reportRateLimit({ req, route: "/api/generate" });
     return NextResponse.json(

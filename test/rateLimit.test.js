@@ -1,14 +1,35 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+
+// Mock the Supabase client so the DURABLE path can be tested without a real DB.
+// createClient returns a fake whose rpc() each test configures.
+const supa = vi.hoisted(() => ({ rpc: vi.fn() }));
+vi.mock("@supabase/supabase-js", () => ({
+  createClient: () => ({ rpc: (...a) => supa.rpc(...a) }),
+}));
+
 import {
   rateLimit,
   clientKey,
+  checkRateLimit,
   _resetRateLimits,
+  _resetRateLimitClient,
   _rateLimitSize,
   MAX_TRACKED_KEYS,
 } from "@/lib/rateLimit";
 
+const SAVED = { url: process.env.NEXT_PUBLIC_SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY };
 beforeEach(() => {
   _resetRateLimits();
+  _resetRateLimitClient();
+  supa.rpc.mockReset();
+  // Default: no service-role store -> checkRateLimit falls back to in-memory.
+  delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+});
+afterEach(() => {
+  if (SAVED.url === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+  else process.env.NEXT_PUBLIC_SUPABASE_URL = SAVED.url;
+  if (SAVED.key === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  else process.env.SUPABASE_SERVICE_ROLE_KEY = SAVED.key;
 });
 
 describe("rateLimit", () => {
@@ -54,6 +75,42 @@ describe("rateLimit", () => {
     for (let i = 0; i < n; i++) rateLimit(`flood-${i}`, { now: 1000 });
     expect(_rateLimitSize()).toBeLessThanOrEqual(MAX_TRACKED_KEYS);
     expect(_rateLimitSize()).toBeGreaterThan(0);
+  });
+});
+
+describe("checkRateLimit (durable, with in-memory fallback)", () => {
+  it("falls back to the in-memory limiter when no service-role store is configured", async () => {
+    // No SUPABASE_SERVICE_ROLE_KEY -> never calls the RPC; behaves like rateLimit().
+    const opts = { max: 1, windowMs: 1000, now: 0 };
+    expect((await checkRateLimit("k", opts)).ok).toBe(true);
+    expect((await checkRateLimit("k", opts)).ok).toBe(false); // in-memory accumulated
+    expect(supa.rpc).not.toHaveBeenCalled();
+  });
+
+  it("uses the durable rate_limit_hit RPC when the service-role store is configured", async () => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://x.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "svc";
+    _resetRateLimitClient();
+    supa.rpc.mockResolvedValue({ data: { allowed: false, remaining: 0, retry_after: 7 }, error: null });
+
+    const res = await checkRateLimit("acct:u1:practice", { max: 45, windowMs: 60_000 });
+    expect(res).toMatchObject({ ok: false, retryAfter: 7, durable: true });
+    expect(supa.rpc).toHaveBeenCalledWith("rate_limit_hit", {
+      p_bucket: "acct:u1:practice",
+      p_max: 45,
+      p_window_seconds: 60,
+    });
+  });
+
+  it("falls back to in-memory when the durable RPC errors (still protected)", async () => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://x.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "svc";
+    _resetRateLimitClient();
+    supa.rpc.mockResolvedValue({ data: null, error: { message: "boom" } });
+
+    const opts = { max: 1, windowMs: 1000, now: 0 };
+    expect((await checkRateLimit("k", opts)).ok).toBe(true); // first -> in-memory allows
+    expect((await checkRateLimit("k", opts)).ok).toBe(false); // second -> in-memory blocks
   });
 });
 
