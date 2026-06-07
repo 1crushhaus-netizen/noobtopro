@@ -279,12 +279,81 @@ body {
 .np-savetitle { font-weight: 600; }
 .np-savedesc { font-size: 13px; color: var(--muted); margin-top: 2px; }
 
-/* ---- profile ---- */
-.np-profilehead { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+/* ---- profile / dashboard identity (avatar + name + email) ---- */
 .np-avatar { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; border: 1px solid var(--line); flex: 0 0 auto; }
 .np-avatarfallback { display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.06); font-weight: 700; font-size: 20px; }
 .np-profilename { font-size: 18px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .np-profileemail { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- merged Dashboard (bento grid) ----
+   Wide, space-efficient grid that fits all the always-visible stats on one
+   1920×1080 screen with no page scroll. The view widens the centered column
+   (.np-main--wide / .np-nav--wide, applied only on the dashboard view) so the
+   12-col grid has room; trend charts + answer review live in slide-over drawers. */
+.np-main--wide, .np-nav--wide { max-width: 1560px; }
+
+.np-dash { display: grid; gap: 14px; grid-template-columns: repeat(12, 1fr); align-items: start; }
+.np-dash-identity { grid-column: span 8; display: flex; align-items: center; gap: 14px; }
+.np-dash-rankchip { font-family: var(--mono); font-size: 12px; letter-spacing: .3px; color: var(--text); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; white-space: nowrap; background: rgba(255,255,255,.04); }
+.np-dash-kpis { grid-column: span 4; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.np-dash-kpis .np-statcard { padding: 14px; }
+.np-dash-kpis .np-statnum { font-size: 26px; }
+.np-dash-radar { grid-column: span 5; }
+.np-dash-mid { grid-column: span 3; display: flex; flex-direction: column; gap: 14px; }
+.np-dash-lead { grid-column: span 4; }
+.np-dash-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 2px; }
+.np-dash-actbtn { width: auto; }
+.np-dash-panel { padding: 16px; }
+.np-dash-subrow { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.np-dash-subrow:last-child { margin-bottom: 0; }
+.np-dash-sublabel { width: 84px; font-size: 14px; }
+.np-dash-focus { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.np-dash-focusrow { display: flex; align-items: center; gap: 8px; }
+
+/* ---- dashboard slide-over drawers (trends + answer review) ----
+   Portaled to <body> (outside the inert background); ARIA dialog with Escape,
+   focus-trap, scroll-lock, focus-restore. */
+.np-drawer-backdrop {
+  position: fixed; inset: 0; z-index: 110;
+  display: flex; justify-content: flex-end;
+  background: rgba(5, 7, 11, .6);
+  backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  animation: npBackdropIn .22s ease both;
+}
+.np-drawer {
+  position: relative; height: 100%; width: min(760px, 94vw); margin-left: auto;
+  background: var(--panel); border-left: 1px solid var(--line);
+  box-shadow: -24px 0 60px rgba(0, 0, 0, .5);
+  display: flex; flex-direction: column;
+  animation: npDrawerIn .28s cubic-bezier(.2, .7, .2, 1) both;
+}
+.np-drawer-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 20px; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
+.np-drawer-close { color: var(--muted); }
+.np-drawer-body { padding: 18px 20px 28px; overflow-y: auto; flex: 1 1 auto; }
+@keyframes npDrawerIn { from { transform: translateX(100%); } to { transform: none; } }
+
+/* ---- dashboard guest gate (blurred preview + sign-in prompt) ----
+   Scoped to the dashboard body (NOT a full-screen modal) so the nav stays usable
+   for a guest who'd rather keep exploring. */
+.np-dash-gatewrap { position: relative; min-height: 440px; }
+.np-dash-gateblur { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; filter: blur(5px); opacity: .45; pointer-events: none; user-select: none; }
+.np-dash-gatecard {
+  position: absolute; inset: 0; margin: auto;
+  width: 100%; max-width: 440px; height: max-content;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 18px;
+  padding: 30px 26px 22px; box-shadow: 0 24px 60px rgba(0, 0, 0, .5);
+}
+
+/* Dashboard collapses to a single column (and the page may scroll) below the
+   widescreen breakpoint — the no-scroll guarantee is a 1920×1080 desktop goal. */
+@media (max-width: 1024px) {
+  .np-dash { grid-template-columns: 1fr; }
+  .np-dash-identity, .np-dash-kpis, .np-dash-radar, .np-dash-mid, .np-dash-lead, .np-dash-actions { grid-column: 1 / -1; }
+}
+@media (max-width: 560px) {
+  .np-dash-kpis { grid-template-columns: 1fr; }
+  .np-dash-gateblur { grid-template-columns: 1fr; }
+}
 
 /* ---- admin dashboard ---- */
 .np-admin-row { padding: 14px 16px; margin-bottom: 10px; }
