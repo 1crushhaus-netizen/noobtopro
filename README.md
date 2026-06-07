@@ -10,7 +10,7 @@
 > 3. **Follow the dev loop in §15** (branch → PR → CI "Test and build" → address Greptile → merge → verify) for every change.
 > 4. **Keep this README up to date.** When you change architecture, env vars, the data model, status, or conventions, update the relevant section in the same PR. A stale hand-off doc is worse than none — the next session relies on it being accurate.
 >
-> New here? Jump to [**Where to start (next task: Concept Hub public seed + de-dup — PR 4)**](#where-to-start-next-task-concept-hub-public-seed--de-dup--pr-4).
+> New here? Jump to [**Where to start (next task: Concept Hub v1.1 + percentile rank tiers)**](#where-to-start-next-task-concept-hub-v11--percentile-rank-tiers).
 
 **Prove what you know. Climb from noob to pro.**
 
@@ -18,7 +18,7 @@
 
 ## Table of contents
 
-- ⭐ [**Where to start (next task: Concept Hub public seed + de-dup — PR 4)**](#where-to-start-next-task-concept-hub-public-seed--de-dup--pr-4)
+- ⭐ [**Where to start (next task: Concept Hub v1.1 + percentile rank tiers)**](#where-to-start-next-task-concept-hub-v11--percentile-rank-tiers)
 1. [What it is & why](#1-what-it-is--why)
 2. [Current status & live links](#2-current-status--live-links)
 3. [Quickstart](#3-quickstart)
@@ -93,7 +93,7 @@ Score bands (global scale): **0–20** Absolute beginner · **20–40** Foundati
 - ✅ **Shared caches active** (`SUPABASE_SERVICE_ROLE_KEY` set): the concept-guide cache (each guide generated once, with a bundled "try this" question) and the baseline-diagnostic pool — both reused across users to cut Groq spend. Grading runs on the cheaper `openai/gpt-oss-120b` (`GROQ_GRADE_MODEL`).
 
 **In progress:**
-- 🛠️ **Concept Hub** — the universal, categorized, auto-growing concept directory (see "Where to start"). **Backend shipped** (taxonomy + public read-only catalog + grader auto-grow + **curation-only** promotion). **Admin curation is live** (PR #30: approve→public / hide / delete + abuse warnings). The **browse UI + user report button are built** (behind `NEXT_PUBLIC_ENABLE_CONCEPT_HUB`): the Learn tab becomes the searchable curated catalog; unapproved guides are admin-only (marked `*`). **Remaining (PR 4 in "Where to start"): a public seed system** so the hub is the same vetted catalog for everyone from day one (today the curation-only model leaves a fresh user's hub empty), plus canonical de-dup. Further v1.1: open the hub to undiagnosed guests, `pg_trgm` fuzzy search, `tags[]` (see §17).
+- ✅ **Concept Hub** — the universal, categorized concept directory. **Backend + admin curation + browse UI all shipped** (behind `NEXT_PUBLIC_ENABLE_CONCEPT_HUB`): the Learn tab is the searchable curated catalog; **curation-only** public model. **Public seed shipped (PR 4):** the `service_role`-only `seed_curated_guide` RPC + `scripts/seed-concept-hub.mjs` batch-publish a curated guide per of the 36 taxonomy topics — **9 curated guides are seeded live across all 3 subjects** (so the hub is non-empty for everyone) and `node scripts/seed-concept-hub.mjs` fills the rest. Conservative `dedupe_pending_stubs` housekeeping. **v1.1:** open the hub to undiagnosed guests, `pg_trgm` fuzzy de-dup, `tags[]` (§17).
 
 **Built but not yet activated (config only):**
 - ⏳ **GitHub / Discord sign-in** — code is env-toggleable and ready; needs the OAuth apps + Supabase provider config + `NEXT_PUBLIC_ENABLE_*` flags (see `AUTH_PROVIDERS.md`).
@@ -125,13 +125,17 @@ Other commands: `npm test` (run tests once), `npm run test:watch`, `npm run buil
 
 ---
 
-## Where to start (next task: Concept Hub public seed + de-dup — PR 4)
+## Where to start (next task: Concept Hub v1.1 + percentile rank tiers)
 
 > **Shipped & live (all merged):** Concept Hub (PR #29–#31) · "Prove it" diagnostic (PR #32) · **server-authoritative scoring + reasoning radar** (PR #34/#35) · **fleet-audit fixes** (PR #36) · **diagnostic → 6 questions** (PR #37) · **durable per-account rate limiter** (PR #38). **Live DB migrations applied:** `0001a`, `0001b`, `0002`, `0003`.
 >
-> **Implemented in the open PR (branch `feat/elo-ranking-grading-leaderboard`):** **PR 3 — Elo ranking + explainable anti-gaming grading + anonymous leaderboard** (migration `0004` applied to the live project; advisors clean; **419 tests** green; a multi-agent adversarial security review found **0 P0/P1/P2, 0 merge-blockers**). See §2, §10, §11. **One task remains: PR 4.**
+> **Implemented in the two open PRs** (both built to the owner's chosen design — the `ranking-grading-direction` + `leaderboard-privacy-decision` memories; both gated by a multi-agent adversarial review):
+> - **PR 3** (branch `feat/elo-ranking-grading-leaderboard`) — **Elo ranking + explainable anti-gaming grading + anonymous leaderboard** (migration `0004`; **0 P0/P1/P2, 0 blockers**). §2, §10, §11.
+> - **PR 4** (branch `feat/concept-hub-public-seed`, stacked on PR 3) — **Concept Hub public seed + canonical de-dup** (migration `0005`; **9 curated guides seeded live across all 3 subjects** so the hub is non-empty for everyone). §8, §17.
+>
+> Both: migrations applied to the live project, advisors clean (only the accepted INFO `rls_enabled_no_policy` on `item_difficulty`), **425 tests** + build green. **The handoff backlog is now the v1.1 follow-ons (§17): percentile-recut rank tiers, the full 36-topic seed run, `pg_trgm` fuzzy de-dup.**
 
-**PR 4 is the remaining task** (PR 3 is built — the spec below is retained for reference). The owner has **already chosen the design** (also captured in the `ranking-grading-direction` + `leaderboard-privacy-decision` auto-memories). **Build to it; don't re-litigate.** PR 4 touches the public-publish path, so follow the security dev-loop at the end of this section.
+**Both PR 3 and PR 4 specs below are retained for reference (DONE).** The next session's work is the v1.1 backlog ([§17](#17-roadmap--known-limitations)).
 
 ### ✅ PR 3 (DONE — in the open PR) — Elo ranking + consistent/explainable grading + 5 ranks + Profile leaderboard
 This replaced the demonstrative score with a real, gaming-resistant rating. Four parts, all shipped:
@@ -148,12 +152,12 @@ This replaced the demonstrative score with a real, gaming-resistant rating. Four
 
 **Files PR 3 touched (as built):** `lib/scoring.js` (`eloUpdate`/`eloExpected`/`eloK`/`defaultDifficultyForBand`/`rankFor`/`RANKS`/`reconcileReasoningScore`/`rubricImpliedScore`/`explainRankMove`, all pure) · `lib/preGrade.js` (NEW docking gate) · `lib/groq.js` (anchored-exemplar prompts + temperature-0 grading) · `app/api/generate/route.js` (`topicSlug` classification) · `app/api/grade/route.js` + `app/api/score/route.js` (dock + reconcile + Elo + bucket calibration + rationale) · `app/api/leaderboard/route.js` (NEW) · `db/schema.sql` + `db/migrations/0004_*.sql` (`item_difficulty` table + `bump_item_difficulty`, `leaderboard_tiers`, `attempts.rationale`, `save_progress_for` +rationale) · `components/{Noobtopro,ProfileTab,ProgressDashboard}.jsx` (guest Elo, rank badge, anonymous leaderboard, "why your rank moved") · `lib/store.js` (hydrate `rationale`).
 
-### PR 4 — Concept Hub: public seed + consistency
-Make the hub **the same vetted catalog for everyone** from day one. Today it's **curation-only** (nothing is public until an admin approves), so a fresh user sees an empty hub.
-- **Public seed system:** a repeatable script/RPC that batch-generates a curated baseline guide for the core concepts of each of the 36 taxonomy topics and publishes them (`source='curated'`, `visibility='public'`, `status='ready'`) — the only sanctioned public-publish path. Make it idempotent and re-runnable.
-- **Consistency / canonical de-dup:** merge near-identical auto-grown concepts (the live data already clusters, e.g. multiple "energy"/"equilibrium" variants) so users don't see duplicates; the guides are already generated-once-and-shared, so this is about the *catalog*, not per-user variance.
+### ✅ PR 4 (DONE — in the stacked PR) — Concept Hub: public seed + canonical de-dup
+Makes the hub **the same vetted catalog for everyone** from day one (the curation-only model otherwise leaves a fresh user's hub empty). As built:
+- **Public seed system (`seed_curated_guide` RPC + `scripts/seed-concept-hub.mjs`):** the **sole sanctioned BATCH public-publish path** (alongside the admin "approve" action) — `service_role`-only, idempotent + re-runnable, upserts `source='curated', visibility='public', status='ready'`. `lib/taxonomy.js#SEED_CONCEPTS` defines one canonical core concept per of the **36 topics**; the script generates each via Groq (reusing `groqJSON`/`LEARN_SYS`) and publishes it. **A 9-concept representative set (3 per subject) is already seeded on the live project** so the hub is non-empty now; the owner runs `node scripts/seed-concept-hub.mjs` (with the Groq + service-role keys) to fill all 36.
+- **Canonical de-dup:** because the hub is **curation-only**, the PUBLIC catalog only ever shows curated guides — so it's canonical by construction (no duplicate public rows). `dedupe_pending_stubs()` (`service_role`-only) is conservative housekeeping that collapses redundant content-less grader PENDING stubs subsumed by a ready guide (never touches a ready/public row). **Fuzzy/semantic merge of distinct-keyed near-duplicates** (e.g. "energy" vs "conservation of energy") needs `pg_trgm`/embeddings and is the **v1.1** follow-on (§17).
 
-**Key files for PR 4:** `lib/taxonomy.js` (the 36 topics) · `db/schema.sql` (`concept_guides`, `promote_or_insert_guide` / a new curated-publish RPC) · `app/api/learn/route.js` + `lib/catalog.js` (browse) · `components/LearnTab.jsx`.
+**Files PR 4 touched (as built):** `lib/taxonomy.js` (`SEED_CONCEPTS`/`allSeedConcepts`) · `db/schema.sql` + `db/migrations/0005_*.sql` (`seed_curated_guide`, `dedupe_pending_stubs`) · `scripts/seed-concept-hub.mjs` (NEW) · `test/seed-concepts.test.js` + `test/schema-invariants.test.js`. (The browse UI `components/LearnTab.jsx` + `lib/catalog.js` already render whatever the public catalog contains — no change needed once it's seeded.)
 
 ### How to work (dev loop §15) — `/api/score` + the leaderboard are security-sensitive
 They are the app's trust boundary for scores and the first surface that exposes one user's data to another. Re-review at every change like the admin dashboard. Be ruthlessly objective; treat README/code claims of "intended / safe / verified / fixed" as **not evidence** and confirm each against the actual source **and the live DB**. Run a focused adversarial **security review** before merge (forged/missing/expired token; can a client self-assert a rank or read another user's private data; can the leaderboard leak email/per-attempt rows; `save_progress_for`/new RPCs callable by anyone but service-role; cost-amplification on the Groq fan-out; secret leakage), fanning out finder agents and **verifying every finding** against source (sub-agents hallucinate). Run the Supabase **advisors** and inspect live **RLS / policies / grants / function ACLs**. **Note:** Greptile's trial review limit is exhausted — a manual/self review is the only gate. Classify findings **P0–P3**, list explicit merge-blockers; for DB changes edit `db/schema.sql` **and** add a numbered `db/migrations/NNNN_*.sql`, apply it to the live project, then re-check advisors.
@@ -225,14 +229,16 @@ lib/
   conceptKey.js        Pure concept→cache-key normalizer (client-safe; SQL-parity with _concept_key)
   supabase.js          Browser Supabase client + auth helpers + PROVIDERS
   supabaseAdmin.js     Server-only service-role client (concept cache); re-exports conceptKey
-  taxonomy.js          Concept-hub Subject→Topic taxonomy (36 slugs; mirrors concept_topics)
+  taxonomy.js          Concept-hub Subject→Topic taxonomy (36 slugs; mirrors concept_topics) + SEED_CONCEPTS (one core concept per topic, for the public seed)
   contentSafety.js     isConceptSafe() gate for public concept-hub entries
   requestGuard.js      Same-origin (Sec-Fetch) + JSON content-type gate for the API routes
   adminAuth.js         Server-only: verify Supabase JWT + deny-by-default admin allowlist
   abuseDetection.js    Server-only: prompt-injection heuristic + security_events logging
 db/
   schema.sql           CANONICAL database DDL (tables, RLS, all RPCs) — run this to provision
-  migrations/          Delta migrations vs a live DB: 0001a additive (applied), 0001b lockdown (post-deploy)
+  migrations/          Numbered delta migrations vs a live DB (0001a … 0005); all applied to the live project
+scripts/
+  seed-concept-hub.mjs Concept Hub PUBLIC SEED (PR 4): batch-generate + publish a curated guide per of the 36 topics (run once, with keys)
 test/                  Vitest suite (see §13)
 .github/workflows/ci.yml   CI: "Test and build" (npm test → npm run build)
 next.config.js         reactStrictMode + security headers
@@ -306,7 +312,9 @@ To stand up the database from scratch (or reproduce it), **run `db/schema.sql` i
 - **`bump_item_difficulty(p_subject, p_topic, p_band, p_delta, p_seed)`** *(Elo calibration)* — atomic, clamped, FK-guarded upsert that nudges a `(subject, topic, band)` bucket's difficulty by the Elo `diffDelta` and increments `attempts` (seed-lazy from `p_seed` on first touch). Concurrent attempts commute (additive deltas), so no advisory lock is needed. `SECURITY DEFINER`, **`service_role`-only**. Returns the new difficulty; a non-taxonomy topic returns `null` (never violates the FK).
 - **`leaderboard_tiers(p_uid uuid)`** *(anonymous leaderboard)* — `SECURITY DEFINER`, **`service_role`-only**, called by `/api/leaderboard` with the JWT-verified uid. Returns a jsonb of per-subject + `overall` **aggregate counts across the 5 rank bands** + the caller's own `{ band, score, above }`. Exposes **no** user identity (no email/name/user_id, no per-attempt rows) — the anonymity holds at the SQL layer. Qualifying users = those with ≥1 `scores` row.
 - **`register_concepts(p_subject, p_concepts jsonb)`** *(concept hub)* — auto-grow: registers the grader's (server-normalized) weak concepts as **`pending` stubs** (hidden until generated). `SECURITY DEFINER`, `service_role`-only; `on conflict do nothing` so it never disturbs an existing row; a **best-effort global cap (50k pending stubs)** bounds catalog growth. Called non-blocking (`after()`) from `/api/grade`.
-- **`promote_or_insert_guide(p_subject, p_concept, p_content, p_topic, p_level, p_safe)`** *(concept hub)* — on a `/api/learn` generation: **promotes** a `pending` grader stub to `ready`, else inserts a fresh user-originated guide. **Either way the guide is stored `visibility='hidden'`** (curation-only): cached + servable to a direct opener but **never publicly browsable**. `p_safe` is retained for backward-compat but **no longer grants public visibility** (only a manual `source='curated'` seed is public). **Never overwrites an existing `ready` guide** (first-writer-wins). `SECURITY DEFINER`, `service_role`-only.
+- **`promote_or_insert_guide(p_subject, p_concept, p_content, p_topic, p_level, p_safe)`** *(concept hub)* — on a `/api/learn` generation: **promotes** a `pending` grader stub to `ready`, else inserts a fresh user-originated guide. **Either way the guide is stored `visibility='hidden'`** (curation-only): cached + servable to a direct opener but **never publicly browsable**. `p_safe` is retained for backward-compat but **no longer grants public visibility** (only a `source='curated'` seed is public). **Never overwrites an existing `ready` guide** (first-writer-wins). `SECURITY DEFINER`, `service_role`-only.
+- **`seed_curated_guide(p_subject, p_topic, p_concept, p_content, p_level)`** *(concept hub — PR 4)* — the sanctioned **BATCH public-publish path** (alongside the admin "approve" action): upserts a `source='curated', visibility='public', status='ready'` guide. **Idempotent + re-runnable** (re-running refreshes content); on conflict it also promotes any prior hidden row for the key to the curated public catalog. `SECURITY DEFINER`, **`service_role`-only** — a signed-in user can never self-publish, so the curation-only model holds (no automated/client path makes content public). Called by `scripts/seed-concept-hub.mjs` for each `SEED_CONCEPTS` entry.
+- **`dedupe_pending_stubs()`** *(concept hub — PR 4)* — conservative housekeeping: deletes content-less grader **`pending` stubs** already subsumed by a `ready` guide in the same `(subject, topic)` (the stub's key is a substring of the ready guide's key). Touches **no** `ready`/`public`/`curated` row; a concept re-stubs if a later grade re-registers it. `SECURITY DEFINER`, `service_role`-only. (Fuzzy semantic merge of distinct-keyed near-duplicates is the v1.1 `pg_trgm` follow-on.)
 - **`_concept_key(text)`** *(concept hub)* — SQL re-implementation of `conceptKey()` with **byte-for-byte parity**: both strip control/zero-width/BOM chars (the set where JS `\s`/`trim()` and Postgres `\s` disagree) and truncate to 200 by **code point** (`left()` ↔ `Array.from().slice()`). Pinned by `test/conceptKey.test.js` golden vectors + a live-DB equality check, so grader-registered keys always match generated ones.
 - *(The hub's **reads** are browser-direct against the publicly-readable `concept_guides`/`concept_topics` via PostgREST — no RPC, no Groq.)*
 
@@ -414,7 +422,7 @@ Components: **SignIn** (provider buttons), **ProfileTab** (identity + stats + co
 
 ## 13. Testing
 
-**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **419 tests across 31 files**, all passing.
+**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **425 tests across 32 files**, all passing.
 
 | File | Covers |
 |---|---|
@@ -430,6 +438,7 @@ Components: **SignIn** (provider buttons), **ProfileTab** (identity + stats + co
 | `test/api-grade.test.js` | validation, MIME/base64, score/rubric normalization, difficulty-band threading, **valid-image → vision-model forwarding**, **request-guard 403/415**, non-leaking 500 |
 | `test/api-learn.test.js` | validation, normalization, **cache hit/miss via `promote_or_insert_guide` / key-normalization (real `conceptKey`) / LLM-topic validation**, **request-guard 403/415**, tryThisQuestion shaping |
 | `test/taxonomy.test.js` | the 36-topic Subject→Topic tree: 12/subject incl. `general_*`, `isValidTopic`/`normalizeTopic` (case-tolerant, prototype-safe, cross-subject reject), labels/slugs |
+| `test/seed-concepts.test.js` | the **public seed** coverage: `SEED_CONCEPTS` covers every taxonomy topic exactly once (36), each slug valid for its subject, concepts non-empty + ≤200 chars, `allSeedConcepts` flattens to 36 rows |
 | `test/contentSafety.test.js` | `isConceptSafe` accepts STEM labels (incl. accented/Greek); rejects links/emails/markup/blocklist/over-long/symbol-dominated **+ expanded TLDs + zero-width-split evasion** |
 | `test/conceptKey.test.js` | `conceptKey` JS↔SQL parity golden vectors: control/zero-width/BOM strip, surrounding-quote strip, **code-point-safe 200-char truncation** (surrogate-safe) |
 | `test/schema-invariants.test.js` | static guard on `db/schema.sql`: **curation-only invariant** (`promote_or_insert_guide` always `hidden`, never `public`; grader stubs `pending`; read policy = `public`+`ready`) + **`_concept_key` control/zero-width/BOM strip + `left(…,200)`** parity markers |
@@ -501,9 +510,10 @@ History of what's shipped is in `git log` (PRs #2–#29): flatten-for-Vercel, au
 - Set `SUPABASE_SERVICE_ROLE_KEY` → turns on the shared concept-guide cache.
 - Configure + enable GitHub & Discord providers → flip `NEXT_PUBLIC_ENABLE_*`.
 
-**Concept Hub (in progress — see "Where to start"):**
-- v1 remaining: the hub **browse UI** (`LearnTab` rebuild + `lib/catalog.js`, behind `NEXT_PUBLIC_ENABLE_CONCEPT_HUB`) and the **curated seed** generation + **moderation report/hide/regenerate** flow.
-- v1.1: **`pg_trgm`** fuzzy/typo-tolerant search (available, not yet installed — ships as its own `create extension` migration; v1 uses plain `ILIKE`); a curated **`tags[]`** cross-cutting facet; a **canonical-merge** tool to de-duplicate near-identical concepts (the live data already has clusters like 4 energy / 3 equilibrium — v1 clusters them by topic) — see PR 4 in "Where to start". `times_opened` is stored but inert until a batched popularity counter is designed.
+**Concept Hub (v1 shipped — including the PR 4 public seed):**
+- ✅ **Public seed shipped (PR 4):** `seed_curated_guide` (the sanctioned, `service_role`-only, idempotent batch public-publish path) + `scripts/seed-concept-hub.mjs` over `SEED_CONCEPTS` (one core concept per of the 36 topics). **9 curated guides are seeded on the live project** across all 3 subjects; **run `node scripts/seed-concept-hub.mjs` (with the Groq + service-role keys) to publish all 36.** `dedupe_pending_stubs` does conservative pending-stub housekeeping.
+- **PR 4 security stance:** the seed is the only *batch* public-publish path and is `service_role`-only (verified against the live ACLs: EXECUTE only to `postgres`+`service_role`); `dedupe_pending_stubs` only ever deletes `status='pending'` rows; both are `SECURITY DEFINER` with `search_path` pinned; migration `0005` added **no** new advisor. The curation-only invariant holds (a signed-in user cannot self-publish). XSS-safe: seeded content is rendered React-escaped by the existing `LearnTab`, same as any guide.
+- v1.1: **`pg_trgm`** fuzzy/typo-tolerant search (available, not yet installed — ships as its own `create extension` migration; v1 uses plain `ILIKE`); a curated **`tags[]`** cross-cutting facet; **fuzzy/semantic canonical-merge** to de-duplicate distinct-keyed near-identical concepts (e.g. "energy" vs "conservation of energy" — v1 relies on the curated catalog being canonical by construction + `dedupe_pending_stubs`); open the hub to undiagnosed guests. `times_opened` is stored but inert until a batched popularity counter is designed.
 
 **Product / model:**
 - ✅ **Item-as-opponent Elo shipped (PR 3).** `eloUpdate` (§11) is the live, non-additive engine; item difficulty self-calibrates per `(subject, topic, band)` bucket (`item_difficulty`). **Remaining:** the **percentile-recut rank tiers** (flip `rankFor` to consume `opts.cutoffs` once there's a user base — the engine + leaderboard counts are already architected for it); per-**item** (vs band-bucket) difficulty; and tuning the constants (`ELO_SCALE`, `ELO_K_*`, `RECONCILE_TOLERANCE`) against logged attempts + the gold set (`test/scoring-elo.test.js`).

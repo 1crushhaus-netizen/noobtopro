@@ -35,6 +35,30 @@ describe("db/schema.sql — curation-only invariant (auto-grown guides are never
   it("the public read policy only exposes visibility='public' AND status='ready'", () => {
     expect(schema).toContain("using (visibility = 'public' and status = 'ready')");
   });
+
+  it("seed_curated_guide is the ONLY function that publishes (visibility='public'), and is service-role only", () => {
+    // PR 4: the sanctioned BATCH public-publish path. It DOES set visibility='public'
+    // (unlike promote_or_insert_guide), but is service-role only — so a signed-in user
+    // can never self-publish to the hub (the curation-only model holds: seed + admin
+    // approve are the only public paths; nothing automated/client-callable goes public).
+    const body = fnBody("seed_curated_guide");
+    expect(body).toContain("security definer");
+    expect(body).toContain("'public'"); // it is the public path
+    expect(body).toMatch(/'curated'/);
+    expect(schema).toContain("revoke all on function public.seed_curated_guide(text, text, text, jsonb, text) from public, anon, authenticated");
+    expect(schema).toContain("grant execute on function public.seed_curated_guide(text, text, text, jsonb, text) to service_role");
+    expect(schema).not.toMatch(/grant execute on function public\.seed_curated_guide\([^)]*\) to authenticated/);
+    // No OTHER concept-guide write function may emit 'public' (promote_or_insert_guide stays hidden).
+    expect(fnBody("promote_or_insert_guide")).not.toContain("'public'");
+  });
+
+  it("dedupe_pending_stubs only deletes status='pending' rows (never public/ready/curated), service-role only", () => {
+    const body = fnBody("dedupe_pending_stubs");
+    expect(body).toContain("security definer");
+    expect(body).toContain("g.status = 'pending'"); // only pending stubs are eligible for deletion
+    expect(schema).toContain("grant execute on function public.dedupe_pending_stubs() to service_role");
+    expect(schema).not.toMatch(/grant execute on function public\.dedupe_pending_stubs\(\) to authenticated/);
+  });
 });
 
 describe("db/schema.sql — _concept_key parity with lib/supabaseAdmin.js conceptKey", () => {
