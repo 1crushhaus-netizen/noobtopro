@@ -271,3 +271,13 @@ body {
 .np-admin-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .np-admin-empty { color: var(--muted); padding: 18px 16px; margin-bottom: 10px; }
 .np-ghost.np-admin-danger { color: var(--chem); }
+
+/* ---- concept hub (browse) ---- */
+.np-hub-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; justify-content: space-between; }
+.np-hub-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.np-hub-filters .np-chip { cursor: pointer; background: transparent; }
+.np-hub-filters .np-chip.active { background: rgba(255,255,255,.05); }
+.np-hub-search { flex: 1; min-width: 200px; max-width: 340px; padding: 9px 12px; border-radius: 10px; }
+.np-hub-topic { margin: 4px 0 14px; }
+.np-hub-topiclabel { font-family: var(--mono); font-size: 11px; letter-spacing: .5px; text-transform: uppercase; color: var(--muted); margin: 10px 0 7px; }
+.np-concepttag.np-hub-unapproved { border-style: dashed; color: var(--muted); font-style: italic; }

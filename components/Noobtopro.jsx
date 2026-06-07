@@ -105,6 +105,10 @@ function fileToBase64(file) {
 
 const now = () => new Date().toISOString();
 
+// NEXT_PUBLIC_* is inlined at build time. When "true", the Learn tab becomes the
+// browsable Concept Hub (full catalog); otherwise it stays the weak-concept picker.
+const HUB_ENABLED = process.env.NEXT_PUBLIC_ENABLE_CONCEPT_HUB === "true";
+
 // Object URLs created for image previews must be revoked or they leak memory
 // for the life of the page. Safe to call with a missing/blob-less image.
 function revokePreview(img) {
@@ -987,6 +991,10 @@ export default function Noobtopro() {
           />
         ) : view === "learn" && scores ? (
           <LearnTab
+            hubEnabled={HUB_ENABLED}
+            user={user}
+            isAdmin={isAdmin}
+            adminApi={adminApi}
             scores={scores}
             active={learnConcept}
             content={learnContent}

@@ -89,7 +89,7 @@ Score bands (global scale): **0–20** Absolute beginner · **20–40** Foundati
 - ✅ **Shared caches active** (`SUPABASE_SERVICE_ROLE_KEY` set): the concept-guide cache (each guide generated once, with a bundled "try this" question) and the baseline-diagnostic pool — both reused across users to cut Groq spend. Grading runs on the cheaper `openai/gpt-oss-120b` (`GROQ_GRADE_MODEL`).
 
 **In progress:**
-- 🛠️ **Concept Hub** — the universal, categorized, auto-growing concept directory (see "Where to start"). **Backend shipped** (taxonomy + public read-only catalog + grader auto-grow + **curation-only** promotion; live DB migrated; **no ERROR-level advisors** — remaining notices are the intended `diagnostic_pool` RLS lock and one unindexed-FK (both INFO), plus the leaked-password WARN tracked in §17). A **curated seed of 10 public guides is already live**; the browse UI + moderation (report/hide/regenerate) flow are next, behind `NEXT_PUBLIC_ENABLE_CONCEPT_HUB`.
+- 🛠️ **Concept Hub** — the universal, categorized, auto-growing concept directory (see "Where to start"). **Backend shipped** (taxonomy + public read-only catalog + grader auto-grow + **curation-only** promotion). **Admin curation is live** (PR #30: approve→public / hide / delete + abuse warnings). The **browse UI + user report button are built** (behind `NEXT_PUBLIC_ENABLE_CONCEPT_HUB`): the Learn tab becomes the searchable curated catalog; unapproved guides are admin-only (marked `*`). Remaining v1.1: open the hub to undiagnosed guests, `pg_trgm` fuzzy search, `tags[]`, canonical-merge de-dup (see §17).
 
 **Built but not yet activated (config only):**
 - ⏳ **GitHub / Discord sign-in** — code is env-toggleable and ready; needs the OAuth apps + Supabase provider config + `NEXT_PUBLIC_ENABLE_*` flags (see `AUTH_PROVIDERS.md`).
@@ -121,17 +121,16 @@ Other commands: `npm test` (run tests once), `npm run test:watch`, `npm run buil
 
 ---
 
-## Where to start (next task: Concept Hub browse UI)
+## Where to start (next task: Concept Hub v1.1)
 
-> **PR #29 (Concept Hub backend + audit hardening) is MERGED.** It was gated by a full pre-merge audit (an 81-agent sweep, then a second 8-lens audit with adversarial per-finding verification against the live DB) — **0 P0 / 0 P1 / no merge-blockers** — whose P2/P3 findings were fixed before merge (see [§17](#17-roadmap--known-limitations) → "Audit-fix round").
+> **Shipped:** PR #29 (Concept Hub backend + audit hardening) and PR #30 (Admin dashboard — approve→public / hide / delete + abuse warnings) are **MERGED**. The **Concept Hub browse UI + user report button** are built on `feat/concept-hub-browse-ui` (behind `NEXT_PUBLIC_ENABLE_CONCEPT_HUB`): the Learn tab becomes the searchable curated catalog (subject → topic → concept → Socratic guide), with a **Report** button for signed-in users (writes to `concept_reports`, which the admin dashboard triages — `lib/catalog.js` does the reads/report; the guide opens via the cached `/api/learn`). Unapproved guides are shown **only to admins**, marked `*` — preserving curation-only (the public catalog never exposes uncurated content).
 >
-> **Now in flight: the Admin dashboard** (branch `feat/admin-dashboard`) — an admin-only tab to **approve** auto-grown guides into the public hub and triage **abuse warnings** (prompt-injection / rate-limit) + user reports, gated by a server-verified deny-by-default `ADMIN_EMAILS` allowlist (§7, §10). After it merges, set `ADMIN_EMAILS` in Vercel + redeploy to reveal the tab.
->
-> **Then: the Concept Hub browse UI below.** (The user-facing **report button** ships with it, writing to the `concept_reports` table the admin dashboard already reads.)
+> To go live: set `NEXT_PUBLIC_ENABLE_CONCEPT_HUB=true` in Vercel + redeploy.
 
-### Next task — Concept Hub v1: browse UI + moderation
-- The browse **UI** (`LearnTab` rebuild + a new `lib/catalog.js`, behind `NEXT_PUBLIC_ENABLE_CONCEPT_HUB`, decoupled from `scores`) reads the public `concept_guides` / `concept_topics` directly via PostgREST — no Groq, no RPC. The **curated seed is already live** (10 public guides); what remains is the UI plus the **moderation flow** (report / hide / regenerate) for curation.
-- **v1.1 / roadmap ([§17](#17-roadmap--known-limitations)):** `pg_trgm` fuzzy search, `tags[]` facet, canonical-merge de-dup, durable per-account rate limiter, server-authoritative scoring, nonce-based strict CSP, per-item IRT/Elo, GitHub/Discord sign-in.
+### Next task — Concept Hub v1.1
+- **Open the hub to undiagnosed guests.** v1 gates the Learn tab on having taken the diagnostic (so the practice flow always has a subject score); the hub *content* is already decoupled from your weak concepts. Opening it to pure guests needs the practice flow made null-safe on a missing subject score + a landing-nav entry point.
+- **`pg_trgm`** fuzzy/typo-tolerant search (v1 uses plain `ILIKE`); a curated **`tags[]`** facet; a **canonical-merge** de-dup tool; a batched `times_opened` popularity counter.
+- **Roadmap ([§17](#17-roadmap--known-limitations)):** durable per-account rate limiter, server-authoritative scoring, nonce-based strict CSP, per-item IRT/Elo, GitHub/Discord sign-in.
 
 ### How the pre-merge audit was run (reference for the next gate)
 Be ruthlessly objective; treat README/code claims of "intended / safe / service-role only / verified / fixed" as **not evidence** and confirm each against the actual source **and the live DB**. Fan out independent finder agents by area/lens, then **adversarially verify every candidate finding** and reproduce it on paper (LLM reviewers — including your own sub-agents — hallucinate; an unverified claim is worse than none). Run the Supabase **advisors** (`get_advisors`, security + performance) and inspect live **RLS / policies / grants / function ACLs** as ground truth. **Note:** Greptile's trial review limit is exhausted, so it no longer auto-reviews PRs ([§15](#15-how-we-work-the-dev-loop)) — a manual/self review is now the only gate. Classify findings **P0–P3** and deliver a written report + an explicit merge-blocker list. For DB fixes, edit `db/schema.sql` **and** apply the migration to the live project, then re-check advisors.
@@ -192,8 +191,10 @@ lib/
   scoring.js           SUBJECTS/ORDER/bands + clampScore/band/blend/totalPoints/phdIndex
   rateLimit.js         In-memory per-IP fixed-window limiter (used by all 3 routes)
   store.js             Data layer: Supabase when signed in, localStorage for guests
+  catalog.js           Concept Hub browse: client-side reads of the public catalog + report write
+  conceptKey.js        Pure concept→cache-key normalizer (client-safe; SQL-parity with _concept_key)
   supabase.js          Browser Supabase client + auth helpers + PROVIDERS
-  supabaseAdmin.js     Server-only service-role client (concept cache) + conceptKey()
+  supabaseAdmin.js     Server-only service-role client (concept cache); re-exports conceptKey
   taxonomy.js          Concept-hub Subject→Topic taxonomy (36 slugs; mirrors concept_topics)
   contentSafety.js     isConceptSafe() gate for public concept-hub entries
   requestGuard.js      Same-origin (Sec-Fetch) + JSON content-type gate for the API routes
@@ -243,6 +244,7 @@ NEXT_PUBLIC_* values are **inlined into the client bundle at build time** (a cha
 | `SUPABASE_SERVICE_ROLE_KEY` | **Yes** (mark Sensitive) | no | Enables **both** shared read-through caches — the concept-guide cache (`/api/learn`) **and** the diagnostic pool (`/api/generate`). Server-only secret (Supabase → Settings → API → `service_role`). Unset = neither cache active (both features still work, regenerating each time). |
 | `NEXT_PUBLIC_ENABLE_GITHUB` | no (public) | no | `"true"` shows the GitHub sign-in button. Set **only after** configuring GitHub in Supabase, else it errors on click. |
 | `NEXT_PUBLIC_ENABLE_DISCORD` | no (public) | no | Same, for Discord. |
+| `NEXT_PUBLIC_ENABLE_CONCEPT_HUB` | no (public) | no | `"true"` makes the Learn tab the browsable **Concept Hub** (curated catalog + search + report) instead of the weak-concept picker. Inlined at build → **redeploy** after changing. |
 | `ADMIN_EMAILS` | **Yes** (mark Sensitive) | no | Comma-separated email allowlist for the **admin dashboard**, matched case-insensitively to the caller's verified Supabase JWT email. Server-only; **deny-by-default** (unset/empty = no admins). Needs `SUPABASE_SERVICE_ROLE_KEY` + the `NEXT_PUBLIC_SUPABASE_*` values. Redeploy after setting. |
 | `ADMIN_USER_IDS` | **Yes** (mark Sensitive) | no | Optional fallback allowlist of Supabase auth user UUIDs (comma-separated). Use instead of / alongside `ADMIN_EMAILS`. |
 
@@ -361,7 +363,7 @@ Components: **SignIn** (provider buttons), **ProfileTab** (identity + stats + co
 
 ## 13. Testing
 
-**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **271 tests across 24 files**, all passing.
+**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **298 tests across 26 files**, all passing.
 
 | File | Covers |
 |---|---|
@@ -387,7 +389,9 @@ Components: **SignIn** (provider buttons), **ProfileTab** (identity + stats + co
 | `test/error.test.jsx` | error-boundary logs the caught error + `reset()` on "Try again" |
 | `test/signin.test.jsx` | provider buttons, OAuth-only (no password field), enabled-provider, **env-flag (`NEXT_PUBLIC_ENABLE_*`) gating** |
 | `test/profile.test.jsx` | identity, empty state, stats, confirm-guarded reset |
-| `test/learn.test.jsx` | empty state, concept select, loading/error **live regions**, guidance render, **try-this question: practice-reuse / regenerate / fallback** |
+| `test/learn.test.jsx` | empty state, concept select, loading/error **live regions**, guidance render, **try-this question: practice-reuse / regenerate / fallback** (flag-off weak-concept picker) |
+| `test/learn-hub.test.jsx` | Concept Hub mode (flag on): topic-grouped catalog render, concept→`onSelect`, weak-concept shortcuts, **admin-only `*` overlay for unapproved**, report flow, debounced search |
+| `test/catalog.test.js` | `lib/catalog`: `loadTopics`/`browsePublicConcepts` (subject filter, **ILIKE wildcard escaping**, errors), `reportConcept` (guest rejected, **key normalization**, subject validation, reason cap) |
 
 **Mocking patterns:** Groq calls are mocked by stubbing global `fetch`; Supabase is mocked via `vi.mock("@/lib/...")` with `vi.hoisted`; components use `@testing-library/react`. No network or real keys are needed.
 
