@@ -52,6 +52,36 @@ alter table public.attempts add column if not exists rationale text;
 create index if not exists attempts_user_created_idx
   on public.attempts (user_id, created_at, id);
 
+-- attempt_reviews (PR 6): per-practice-attempt review detail (the question, the
+-- learner's answer, the rubric, and the post-grade feedback incl. the worked solution),
+-- 1:1 with a practice attempt. A SIBLING table so the hot `attempts` chart query stays
+-- lean and this heavy payload is fetched LAZILY only when the learner opens a review.
+-- RLS SELECT-own (the learner reads their OWN reviews directly via PostgREST); all
+-- WRITES go through save_progress_for (service-role) — direct client DML is revoked.
+create table if not exists public.attempt_reviews (
+  attempt_id bigint primary key references public.attempts(id) on delete cascade,
+  user_id uuid not null references auth.users on delete cascade,
+  subject text,
+  question text,
+  answer text,
+  target_concept text,
+  difficulty text,
+  reasoning_score int,
+  delta int,
+  rubric jsonb,
+  feedback jsonb,            -- { strengths[], improvements[], workedSolution, correctnessNote, socraticHint, microLesson }
+  created_at timestamptz not null default now()
+);
+alter table public.attempt_reviews enable row level security;
+drop policy if exists "read own attempt reviews" on public.attempt_reviews;
+create policy "read own attempt reviews"
+  on public.attempt_reviews for select
+  to authenticated
+  using ((select auth.uid()) = user_id);
+revoke insert, update, delete, truncate on public.attempt_reviews from anon, authenticated;
+create index if not exists attempt_reviews_user_created_idx
+  on public.attempt_reviews (user_id, created_at desc);
+
 -- ---- row-level security ----------------------------------------------------
 -- SERVER-AUTHORITATIVE SCORING: clients may READ their own rows (for hydrate) but
 -- may NOT write scores/attempts directly. Removing the write policy closes the
@@ -208,12 +238,19 @@ grant execute on function public.delete_user_data() to authenticated;
 -- stay service-role only — a grant to anon/authenticated would let a caller write to
 -- ANY user_id. (The old client-callable save_progress(jsonb,jsonb) is dropped below.)
 drop function if exists public.save_progress(jsonb, jsonb);
-create or replace function public.save_progress_for(p_user uuid, p_scores jsonb, p_attempt jsonb)
+-- p_review (PR 6, optional) carries the answer-review detail for a graded PRACTICE
+-- attempt; when present it is written to attempt_reviews IN THE SAME TRANSACTION as the
+-- attempt (the diagnostic path omits it, so p_review defaults null). The old 3-arg
+-- signature is dropped so a 3-arg call resolves unambiguously to this defaulted 4-arg.
+drop function if exists public.save_progress_for(uuid, jsonb, jsonb);
+create or replace function public.save_progress_for(p_user uuid, p_scores jsonb, p_attempt jsonb, p_review jsonb default null)
 returns void
 language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  v_attempt_id bigint;
 begin
   if p_user is null then
     raise exception 'user required';
@@ -273,13 +310,33 @@ begin
             case when pg_input_is_valid(p_attempt->>'total_after', 'numeric') then greatest(-2147483648, least(2147483647, round((p_attempt->>'total_after')::numeric)))::int end,
             case when pg_input_is_valid(p_attempt->>'phd_after', 'numeric') then greatest(-2147483648, least(2147483647, round((p_attempt->>'phd_after')::numeric)))::int end,
             least(coalesce(case when pg_input_is_valid(p_attempt->>'created_at', 'timestamptz') then (p_attempt->>'created_at')::timestamptz end, now()), now()),
-            left(p_attempt->>'rationale', 500));
+            left(p_attempt->>'rationale', 500))
+    returning id into v_attempt_id;
+
+    -- Answer-review detail (PR 6) for a graded practice attempt — same transaction.
+    -- Text fields length-capped; rubric/feedback stored only if JSON objects.
+    if v_attempt_id is not null and p_review is not null and jsonb_typeof(p_review) = 'object' then
+      insert into public.attempt_reviews (attempt_id, user_id, subject, question, answer, target_concept, difficulty, reasoning_score, delta, rubric, feedback, created_at)
+      values (
+        v_attempt_id, p_user,
+        p_attempt->>'subject',
+        left(p_review->>'question', 4000),
+        left(p_review->>'answer', 12000),
+        left(p_review->>'target_concept', 200),
+        case when p_review->>'difficulty' in ('beginner','foundational','intermediate','advanced','phd') then p_review->>'difficulty' else null end,
+        case when pg_input_is_valid(p_attempt->>'reasoning_score', 'numeric') then greatest(-2147483648, least(2147483647, round((p_attempt->>'reasoning_score')::numeric)))::int end,
+        case when pg_input_is_valid(p_attempt->>'delta', 'numeric') then greatest(-2147483648, least(2147483647, round((p_attempt->>'delta')::numeric)))::int end,
+        case when jsonb_typeof(p_review->'rubric') = 'object' then p_review->'rubric' else null end,
+        case when jsonb_typeof(p_review->'feedback') = 'object' then p_review->'feedback' else null end,
+        now()
+      );
+    end if;
   end if;
 end;
 $$;
 
-revoke all on function public.save_progress_for(uuid, jsonb, jsonb) from public, anon, authenticated;
-grant execute on function public.save_progress_for(uuid, jsonb, jsonb) to service_role;
+revoke all on function public.save_progress_for(uuid, jsonb, jsonb, jsonb) from public, anon, authenticated;
+grant execute on function public.save_progress_for(uuid, jsonb, jsonb, jsonb) to service_role;
 
 -- ---- concept hub: taxonomy reference + guide catalog ------------------------
 -- The Learn tab is a UNIVERSAL, browsable concept hub. concept_guides is the

@@ -114,17 +114,31 @@ describe("db/schema.sql — server-authoritative scoring (the trust boundary)", 
     expect(body).toContain("security definer");
     expect(body).toContain("p_user"); // user_id = p_user (the JWT-verified uid), not a client value
     expect(body).toContain("rubric"); // persists the per-subject rubric profile
-    // Grant hygiene (after the body): revoked from every client role, granted ONLY to
-    // service_role — a grant to authenticated would let a caller write ANY user_id.
+    // PR 6: now a 4-arg signature (p_review default null). The old 3-arg is dropped so a
+    // 3-arg call resolves unambiguously to this defaulted version. Grant hygiene: revoked
+    // from every client role, granted ONLY to service_role.
+    expect(schema).toContain("drop function if exists public.save_progress_for(uuid, jsonb, jsonb)");
     expect(schema).toContain(
-      "revoke all on function public.save_progress_for(uuid, jsonb, jsonb) from public, anon, authenticated"
+      "revoke all on function public.save_progress_for(uuid, jsonb, jsonb, jsonb) from public, anon, authenticated"
     );
     expect(schema).toContain(
-      "grant execute on function public.save_progress_for(uuid, jsonb, jsonb) to service_role"
+      "grant execute on function public.save_progress_for(uuid, jsonb, jsonb, jsonb) to service_role"
     );
     expect(schema).not.toMatch(
-      /grant execute on function public\.save_progress_for\(uuid, jsonb, jsonb\) to authenticated/
+      /grant execute on function public\.save_progress_for\(uuid, jsonb, jsonb, jsonb\) to authenticated/
     );
+  });
+
+  it("attempt_reviews (PR 6) is RLS SELECT-own with writes revoked (only save_progress_for writes it)", () => {
+    expect(schema).toMatch(/create table if not exists public\.attempt_reviews/);
+    expect(schema).toMatch(/alter table public\.attempt_reviews enable row level security/);
+    // Read policy is SELECT, scoped to the owner via auth.uid().
+    expect(schema).toMatch(/create policy "read own attempt reviews"\s+on public\.attempt_reviews for select/);
+    expect(schema).toContain("(select auth.uid()) = user_id");
+    // No client write path (all writes go through the service-role save_progress_for).
+    expect(schema).toMatch(/revoke insert, update, delete, truncate on public\.attempt_reviews from anon, authenticated/);
+    // save_progress_for writes the review row in the SAME transaction as the attempt.
+    expect(fnBody("save_progress_for")).toContain("attempt_reviews");
   });
 
   it("migrate_guest_data & delete_user_data are SECURITY DEFINER, self-scoped to auth.uid()", () => {

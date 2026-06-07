@@ -6,7 +6,7 @@ import { checkRateLimit, clientKey } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
-import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts } from "@/lib/gradeInput";
+import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, normalizeFeedbackList, capSolution } from "@/lib/gradeInput";
 
 export const dynamic = "force-dynamic";
 
@@ -152,6 +152,9 @@ export async function POST(req) {
       return NextResponse.json({
         reasoningScore: dock.reasoningScore,
         rubric: dock.rubric,
+        strengths: dock.strengths, // []
+        improvements: dock.improvements, // "attempt it first" nudge
+        workedSolution: "", // never revealed for a non-attempt
         correctnessNote: dock.correctnessNote,
         socraticHint: dock.socraticHint,
         microLesson: dock.microLesson,
@@ -172,10 +175,12 @@ export async function POST(req) {
         `Learner's reasoning:\n"""${work}"""`,
       image: img.image,
       grade: true, // route to the cheaper grading model
+      maxTokens: 2000, // room for strengths + improvements + the worked solution
     });
-    // Normalize every score the UI renders so malformed model output can't show NaN or
+    // Normalize every field the UI renders so malformed model output can't show NaN or
     // out-of-range values. reasoningScore is reconciled against the rubric; rubric -> 0–4
-    // bars; newScoreSuggestion -> the client's local Elo update (null = no change).
+    // bars; newScoreSuggestion -> the client's local Elo update (null = no change). The
+    // worked solution is revealed post-grade (this path is a genuine attempt, not docked).
     const rubric = normalizeRubric(data?.rubric);
     const weakConcepts = normalizeWeakConcepts(data?.weakConcepts);
     registerWeakConcepts(subject, weakConcepts); // auto-grow the hub (non-blocking)
@@ -184,6 +189,9 @@ export async function POST(req) {
       reasoningScore: reconcileReasoningScore(data?.reasoningScore, rubric),
       newScoreSuggestion: clampScore(data?.newScoreSuggestion),
       rubric,
+      strengths: normalizeFeedbackList(data?.strengths),
+      improvements: normalizeFeedbackList(data?.improvements),
+      workedSolution: capSolution(data?.workedSolution),
       weakConcepts,
     });
   } catch (e) {

@@ -48,7 +48,7 @@ import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireUser } from "@/lib/adminAuth";
 import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
-import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts } from "@/lib/gradeInput";
+import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, normalizeFeedbackList, capSolution } from "@/lib/gradeInput";
 
 export const dynamic = "force-dynamic";
 
@@ -282,12 +282,22 @@ async function handlePractice(req, body) {
             `Learner's current level: ${prevScore}/100\n\n` +
             `Learner's reasoning:\n"""${work}"""`,
           image: img.image,
+          maxTokens: 2000, // room for strengths + improvements + the worked solution
         });
 
     const attemptRubric = normalizeRubric(data?.rubric);
     // 3) Reconcile the headline score with its rubric (consistency / anti-gaming).
     const reasoningScore = reconcileReasoningScore(data?.reasoningScore, attemptRubric);
     const weakConcepts = normalizeWeakConcepts(data?.weakConcepts);
+    // Post-grade feedback: what was good, how to reach 100, and — only on a SUBSTANTIVE
+    // (non-docked) attempt — the full worked solution. A dock returns workedSolution=""
+    // so a non-attempt ("idk"/blank) can never extract the answer.
+    const strengths = normalizeFeedbackList(data?.strengths);
+    const improvements = normalizeFeedbackList(data?.improvements);
+    const workedSolution = dock ? "" : capSolution(data?.workedSolution);
+    const correctnessNote = typeof data?.correctnessNote === "string" ? data.correctnessNote : "";
+    const socraticHint = typeof data?.socraticHint === "string" ? data.socraticHint : "";
+    const microLesson = typeof data?.microLesson === "string" ? data.microLesson : "";
 
     // 4) Item-as-opponent Elo update (NON-ADDITIVE): outcome = reasoningScore/100 drives
     //    the rating against the item's calibrated difficulty; the item difficulty
@@ -335,6 +345,16 @@ async function handlePractice(req, body) {
         created_at: t,
         rationale,
       },
+      // Answer-review detail (persisted atomically with the attempt) so the learner can
+      // review this answer later. `answer` is the learner's own reasoning (`work`).
+      p_review: {
+        question: safeQuestion,
+        answer: work,
+        target_concept: safeConcept,
+        difficulty: safeDifficulty,
+        rubric: attemptRubric,
+        feedback: { strengths, improvements, workedSolution, correctnessNote, socraticHint, microLesson },
+      },
     });
     if (saveErr) throw saveErr;
 
@@ -346,9 +366,12 @@ async function handlePractice(req, body) {
     return NextResponse.json({
       reasoningScore,
       rubric: attemptRubric, // per-attempt 0–4 bars for the feedback panel
-      correctnessNote: typeof data?.correctnessNote === "string" ? data.correctnessNote : "",
-      socraticHint: typeof data?.socraticHint === "string" ? data.socraticHint : "",
-      microLesson: typeof data?.microLesson === "string" ? data.microLesson : "",
+      strengths, // what the answer did well
+      improvements, // specific, actionable steps to reach 100
+      workedSolution, // full solution, revealed post-grade (empty on a dock)
+      correctnessNote,
+      socraticHint,
+      microLesson,
       weakConcepts,
       newScore,
       delta,
