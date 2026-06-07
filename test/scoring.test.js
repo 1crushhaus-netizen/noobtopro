@@ -415,30 +415,30 @@ describe("diagnosticSubjectScore", () => {
   });
 
   it("a single submitted tier cannot inflate the baseline (anti-gaming: missing tier = 0 credit)", () => {
-    // The exploit fix: divisor floored at the FULL tier weight (30+70=100), so a lone
-    // aced easy answer is 30·100/100 = 30 (NOT 30·100/30 = 100), and a lone aced hard is
-    // 70·100/100 = 70 — a client can't reach PhD rank by omitting the hard tier.
-    expect(diagnosticSubjectScore([{ difficulty: "foundational", reasoningScore: 100 }])).toBe(30);
-    expect(diagnosticSubjectScore([{ difficulty: "advanced", reasoningScore: 100 }])).toBe(70);
+    // The exploit fix: divisor floored at the FULL tier weight (beginner 10 + intermediate
+    // 50 + advanced 70 = 130), so a lone aced BEGINNER answer is 10·100/130 = 8 (NOT 100),
+    // and a lone aced HARD answer is 70·100/130 = 54 — omitting tiers can't reach the top.
+    expect(diagnosticSubjectScore([{ difficulty: "beginner", reasoningScore: 100 }])).toBe(8);
+    expect(diagnosticSubjectScore([{ difficulty: "advanced", reasoningScore: 100 }])).toBe(54);
   });
 
   it("unknown/missing difficulty falls back to the intermediate anchor (50) as its weight", () => {
-    // Single unknown-difficulty item: numerator weight 50, divisor floored to FULL=100 ->
-    // 5000/100 = 50 (the 50 confirms the intermediate fallback: 70 -> 70, 30 -> 30).
+    // Single unknown-difficulty item: numerator weight 50, divisor floored to FULL=130 ->
+    // 5000/130 = 38 (the 50 weight confirms the intermediate fallback: 70 -> higher, 30 -> lower).
     expect(
       diagnosticSubjectScore([{ difficulty: "wat", reasoningScore: 100 }])
-    ).toBe(50);
-    // Pair "wat" (weight 50) acing + a foundational (30) zero: numerator 50*100 = 5000,
-    // divisor = max(50+30, 100) = 100 -> 50.
+    ).toBe(38);
+    // Pair "wat" (weight 50) acing + a beginner (10) zero: numerator 50*100 = 5000,
+    // divisor = max(50+10, 130) = 130 -> 38.
     expect(
       diagnosticSubjectScore([
         { difficulty: "wat", reasoningScore: 100 },
-        { difficulty: "foundational", reasoningScore: 0 },
+        { difficulty: "beginner", reasoningScore: 0 },
       ])
-    ).toBe(50);
+    ).toBe(38);
     // A missing difficulty key behaves the same as an unknown string (weight 50):
-    // 50*80 = 4000, divisor max(50,100)=100 -> 40.
-    expect(diagnosticSubjectScore([{ reasoningScore: 80 }])).toBe(40);
+    // 50*80 = 4000, divisor max(50,130)=130 -> 31.
+    expect(diagnosticSubjectScore([{ reasoningScore: 80 }])).toBe(31);
   });
 
   it("empty array and non-array (null/undefined) -> 0", () => {
@@ -469,15 +469,16 @@ describe("diagnosticSubjectScore", () => {
 });
 
 describe("DIAGNOSTIC_DIFFICULTIES / DIFFICULTY_LABELS", () => {
-  it("DIAGNOSTIC_DIFFICULTIES is the easy->hard band order (2 tiers, 6-question diagnostic)", () => {
+  it("DIAGNOSTIC_DIFFICULTIES is the easy->hard band order (3 tiers, 9-question diagnostic)", () => {
     expect(DIAGNOSTIC_DIFFICULTIES).toEqual([
-      "foundational",
+      "beginner",
+      "intermediate",
       "advanced",
     ]);
   });
 
   it("DIFFICULTY_LABELS maps each band to its friendly UI label", () => {
-    expect(DIFFICULTY_LABELS.foundational).toBe("Easy");
+    expect(DIFFICULTY_LABELS.beginner).toBe("Beginner");
     expect(DIFFICULTY_LABELS.intermediate).toBe("Intermediate");
     expect(DIFFICULTY_LABELS.advanced).toBe("Hard");
   });

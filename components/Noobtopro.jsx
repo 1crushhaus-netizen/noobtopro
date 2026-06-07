@@ -165,9 +165,24 @@ function Ring({ value, color, size = 96, stroke = 9, label }) {
   );
 }
 
-function AnswerComposer({ value, onText, img, onAttach, onRemoveImg, onSubmit, submitLabel, loading, placeholder }) {
+const SKIP_LOCK_SECONDS = 10;
+function AnswerComposer({ value, onText, img, onAttach, onRemoveImg, onSubmit, onSkip, submitLabel, loading, placeholder, lockKey }) {
   const fileRef = useRef(null);
   const canSubmit = (value && value.trim().length > 0) || img;
+  // The "I don't know" skip is TIME-LOCKED for SKIP_LOCK_SECONDS after each new question,
+  // so a learner can't reflexively skip without giving it a moment's thought. The countdown
+  // resets when lockKey (the question identity) changes.
+  const [skipIn, setSkipIn] = useState(onSkip ? SKIP_LOCK_SECONDS : 0);
+  useEffect(() => {
+    if (!onSkip) return undefined;
+    setSkipIn(SKIP_LOCK_SECONDS);
+    const id = setInterval(() => setSkipIn((n) => {
+      if (n <= 1) { clearInterval(id); return 0; }
+      return n - 1;
+    }), 1000);
+    return () => clearInterval(id);
+  }, [lockKey, onSkip]);
+  const skipLocked = skipIn > 0;
   return (
     <div className="np-card" style={{ padding: 0, overflow: "hidden" }}>
       <textarea
@@ -185,7 +200,7 @@ function AnswerComposer({ value, onText, img, onAttach, onRemoveImg, onSubmit, s
           <button className="np-iconbtn" onClick={onRemoveImg} aria-label="remove image"><Icon name="x" size={15} /></button>
         </div>
       )}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", borderTop: "1px solid var(--line)", background: "rgba(255,255,255,.015)" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "10px 12px", borderTop: "1px solid var(--line)", background: "rgba(255,255,255,.015)", flexWrap: "wrap" }}>
         <button className="np-ghost" onClick={() => fileRef.current && fileRef.current.click()}><Icon name="clip" size={15} /> Attach your work</button>
         <input
           ref={fileRef}
@@ -198,9 +213,23 @@ function AnswerComposer({ value, onText, img, onAttach, onRemoveImg, onSubmit, s
             e.target.value = "";
           }}
         />
-        <button className="np-btn np-primary" disabled={!canSubmit || loading} onClick={onSubmit}>
-          {loading ? "Working…" : submitLabel} {!loading && <Icon name="arrow" size={16} />}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {onSkip && (
+            <button
+              type="button"
+              className="np-ghost np-skip"
+              disabled={skipLocked || loading}
+              onClick={onSkip}
+              aria-label={skipLocked ? `I don't know — available in ${skipIn} seconds` : "I don't know — skip this question"}
+              title={skipLocked ? "Take a moment to think it through first" : "Skip — I don't know this one"}
+            >
+              {skipLocked ? `I don't know (${skipIn}s)` : "I don't know"}
+            </button>
+          )}
+          <button className="np-btn np-primary" disabled={!canSubmit || loading} onClick={onSubmit}>
+            {loading ? "Working…" : submitLabel} {!loading && <Icon name="arrow" size={16} />}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -597,7 +626,20 @@ export default function Noobtopro() {
     else submitDiagnostic();
   }
 
-  async function submitDiagnostic() {
+  // "I don't know" on the diagnostic: record the current question as a SKIP (empty answer,
+  // image discarded) and advance — the empty answer is docked server-side with NO Groq
+  // grade. Pass the freshly-cleared map straight to submitDiagnostic on the last question
+  // so it doesn't read the pre-clear state (setState is async).
+  function skipDiagnostic() {
+    if (curAns.img) revokePreview(curAns.img);
+    const cleared = { ...answers, [curKey]: { text: "", img: null } };
+    setAnswers(cleared);
+    if (qi < questions.length - 1) setQi(qi + 1);
+    else submitDiagnostic(cleared);
+  }
+
+  async function submitDiagnostic(answersArg) {
+    const ans = answersArg || answers;
     const myRun = ++diagRun.current;
     setError("");
     setStage("scoring");
@@ -607,7 +649,7 @@ export default function Noobtopro() {
       // concurrency + retry-once-on-429 + allSettled), replacing the old 9-parallel-
       // call burst where a single 429 sank the whole diagnostic.
       const payload = questions.map((q) => {
-        const a = answers[qid(q)] || { text: "", img: null };
+        const a = ans[qid(q)] || { text: "", img: null };
         return {
           subject: q.subject,
           question: q.question,
@@ -818,7 +860,7 @@ export default function Noobtopro() {
     });
   }
 
-  async function submitPractice() {
+  async function submitPractice(skip = false) {
     // Capture the practice run token: sign-out / Restart / "Reset my progress" /
     // starting another practice all bump practiceRun. If any happens while this grade
     // is in flight, bail BEFORE persisting — otherwise saveProgress re-resolves the
@@ -829,6 +871,11 @@ export default function Noobtopro() {
     setError("");
     setBusy(true);
     try {
+      // "I don't know" skip: submit an EMPTY answer (no reasoning, no image) so the server
+      // docks it with NO Groq grade — saving tokens and letting the learner move on rather
+      // than being forced to type a throwaway answer.
+      const reasoning = skip ? "" : pText;
+      const imagePayload = skip || !pImg ? undefined : { mime: pImg.mime, data: pImg.data };
       // Default for a subject not yet in scores (e.g. practicing an un-baselined
       // subject after a partial diagnostic) — guards the guest blend path below.
       const prev = scores?.[pSubject] || { score: 0, weakConcepts: [], comment: "", rubric: null };
@@ -843,8 +890,8 @@ export default function Noobtopro() {
           targetConcept: pQuestion.targetConcept,
           difficulty: pQuestion.difficulty,
           topicSlug: pQuestion.topicSlug, // taxonomy slug → the difficulty-bucket key (normalized server-side)
-          reasoning: pText,
-          image: pImg ? { mime: pImg.mime, data: pImg.data } : undefined,
+          reasoning,
+          image: imagePayload,
         });
         if (myRun !== practiceRun.current) return; // abandoned mid-grade
         // Defensive: a malformed response must not put an undefined subjectScore into
@@ -865,9 +912,9 @@ export default function Noobtopro() {
           question: pQuestion.question,
           targetConcept: pQuestion.targetConcept,
           score: prev.score,
-          reasoning: pText,
+          reasoning,
           difficulty: pQuestion.difficulty,
-          image: pImg ? { mime: pImg.mime, data: pImg.data } : undefined,
+          image: imagePayload,
         });
         if (myRun !== practiceRun.current) return; // abandoned mid-grade — don't persist a stale write
         const reasoningScore = r.reasoningScore ?? 0;
@@ -912,7 +959,7 @@ export default function Noobtopro() {
           // (signed-in users get it persisted server-side in attempt_reviews).
           review: {
             question: pQuestion.question,
-            answer: pText,
+            answer: reasoning,
             targetConcept: pQuestion.targetConcept,
             difficulty: pQuestion.difficulty,
             rubric: r.rubric,
@@ -1139,7 +1186,7 @@ export default function Noobtopro() {
                 </p>
                 <div className="np-steps">
                   {[
-                    ["01", "Prove it", "Six open problems — an easy and a hard one in each of math, physics, and chemistry. Solve them and explain every step."],
+                    ["01", "Prove it", "Nine open problems — beginner, intermediate, and hard in each of math, physics, and chemistry. Explain every step, or tap “I don’t know” to skip."],
                     ["02", "Get ranked", "Your reasoning is graded on a 5-part rubric and mapped to a 0–100 rank per subject."],
                     ["03", "Climb", "Pick a subject. Get calibrated problems. Sound reasoning moves your score — even when the answer's wrong."],
                   ].map(([n, t, d]) => (
@@ -1207,6 +1254,8 @@ export default function Noobtopro() {
                   onAttach={attachCur}
                   onRemoveImg={removeCurImg}
                   onSubmit={nextDiagnostic}
+                  onSkip={skipDiagnostic}
+                  lockKey={curKey}
                   submitLabel={qi < questions.length - 1 ? "Next question" : "Get ranked"}
                   loading={false}
                 />
@@ -1309,7 +1358,9 @@ export default function Noobtopro() {
                           img={pImg}
                           onAttach={attachP}
                           onRemoveImg={() => { revokePreview(pImg); setPImg(null); }}
-                          onSubmit={submitPractice}
+                          onSubmit={() => submitPractice(false)}
+                          onSkip={() => submitPractice(true)}
+                          lockKey={pQuestion.question}
                           submitLabel="Submit reasoning"
                           loading={busy}
                         />
