@@ -4,6 +4,7 @@ import { ORDER, clampScore } from "@/lib/scoring";
 import { rateLimit, clientKey } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,7 @@ export async function POST(req) {
 
   const rl = rateLimit(clientKey(req));
   if (!rl.ok) {
+    reportRateLimit({ req, route: "/api/generate" });
     return NextResponse.json(
       { error: "Too many requests. Please slow down and try again shortly." },
       { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
@@ -118,6 +120,8 @@ export async function POST(req) {
       .filter((c) => typeof c === "string")
       .slice(0, 10)
       .map((c) => c.slice(0, 200));
+    // Flag (don't block) obvious prompt-injection in the client-supplied concepts.
+    reportInjection({ req, route: "/api/generate", subject, text: concepts.join(" ") });
 
     const data = await groqJSON({
       system: PRACTICE_GEN_SYS,

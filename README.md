@@ -93,6 +93,7 @@ Score bands (global scale): **0–20** Absolute beginner · **20–40** Foundati
 
 **Built but not yet activated (config only):**
 - ⏳ **GitHub / Discord sign-in** — code is env-toggleable and ready; needs the OAuth apps + Supabase provider config + `NEXT_PUBLIC_ENABLE_*` flags (see `AUTH_PROVIDERS.md`).
+- ⏳ **Admin dashboard** — an in-app, admin-only tab to **approve** auto-grown guides into the public hub and triage **abuse warnings** (prompt-injection attempts, rate-limit spikes) + user reports. Gated by a server-verified, **deny-by-default** `ADMIN_EMAILS` allowlist (see §7); set it in Vercel + redeploy to reveal the tab. All `/api/admin/*` routes verify the caller's Supabase JWT and re-check on every action.
 
 **Env vars currently set in Vercel (project-level):** `GROQ_API_KEY` (Sensitive), `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (Sensitive). **Not set:** `NEXT_PUBLIC_ENABLE_GITHUB`, `NEXT_PUBLIC_ENABLE_DISCORD`.
 
@@ -122,7 +123,11 @@ Other commands: `npm test` (run tests once), `npm run test:watch`, `npm run buil
 
 ## Where to start (next task: Concept Hub browse UI)
 
-> **PR #29 (`feat/concept-hub-v1`) has been audited, hardened, and is awaiting merge.** A full pre-merge audit ran on this branch (an 81-agent sweep, then a second 8-lens audit with adversarial per-finding verification against the live DB). **Verdict: 0 P0 / 0 P1 / no merge-blockers** — the curation-only model, RLS isolation, DEFINER-RPC lockdown, and the "no XSS / no secret leak / no SQLi" claims all hold against the real source and the live project. The P2/P3 findings were fixed in an **audit-fix round on this branch** (see [§17](#17-roadmap--known-limitations) → "Audit-fix round": true `_concept_key`↔`conceptKey` parity, int4 clamps, `weak_concepts` cap, sign-out in-memory clear, practice image-preview revoke, guest-blob validation, `isConceptSafe` hardening, a pending-stub cap, plus new tests pinning the curation-only invariant + key parity + request-guard coverage; DB migrations applied to the live project, advisors re-checked clean). **Once the owner merges PR #29, the next task is the Concept Hub browse UI below.**
+> **PR #29 (Concept Hub backend + audit hardening) is MERGED.** It was gated by a full pre-merge audit (an 81-agent sweep, then a second 8-lens audit with adversarial per-finding verification against the live DB) — **0 P0 / 0 P1 / no merge-blockers** — whose P2/P3 findings were fixed before merge (see [§17](#17-roadmap--known-limitations) → "Audit-fix round").
+>
+> **Now in flight: the Admin dashboard** (branch `feat/admin-dashboard`) — an admin-only tab to **approve** auto-grown guides into the public hub and triage **abuse warnings** (prompt-injection / rate-limit) + user reports, gated by a server-verified deny-by-default `ADMIN_EMAILS` allowlist (§7, §10). After it merges, set `ADMIN_EMAILS` in Vercel + redeploy to reveal the tab.
+>
+> **Then: the Concept Hub browse UI below.** (The user-facing **report button** ships with it, writing to the `concept_reports` table the admin dashboard already reads.)
 
 ### Next task — Concept Hub v1: browse UI + moderation
 - The browse **UI** (`LearnTab` rebuild + a new `lib/catalog.js`, behind `NEXT_PUBLIC_ENABLE_CONCEPT_HUB`, decoupled from `scores`) reads the public `concept_guides` / `concept_topics` directly via PostgREST — no Groq, no RPC. The **curated seed is already live** (10 public guides); what remains is the UI plus the **moderation flow** (report / hide / regenerate) for curation.
@@ -172,11 +177,15 @@ app/
     generate/route.js  POST: diagnostic (3 Qs) or practice (1 Q) question generation
     grade/route.js     POST: grade reasoning (diagnostic or practice); image-aware
     learn/route.js     POST: Socratic concept guide; read-through shared cache
+    admin/me/route.js     POST: is the caller an admin? (UI hint; re-verified per action)
+    admin/data/route.js   POST: admin snapshot — approval queue + security events + reports
+    admin/action/route.js POST: admin actions — approve/hide/delete a guide; resolve events/reports
 components/
   Noobtopro.jsx        THE app — one big client component; stage×view state machine
   SignIn.jsx           OAuth sign-in menu (provider buttons; no email/password)
   ProfileTab.jsx       Identity card + stats + "Reset my progress"
   LearnTab.jsx         Weak-concept picker + Socratic guide renderer
+  AdminDashboard.jsx   Admin-only tab: concept approval queue + abuse warnings + reports
   ProgressDashboard.jsx  Charts (total over time, per-attempt deltas, by-subject)
 lib/
   groq.js              Server-only Groq client + ALL system prompts (*_SYS)
@@ -188,6 +197,8 @@ lib/
   taxonomy.js          Concept-hub Subject→Topic taxonomy (36 slugs; mirrors concept_topics)
   contentSafety.js     isConceptSafe() gate for public concept-hub entries
   requestGuard.js      Same-origin (Sec-Fetch) + JSON content-type gate for the API routes
+  adminAuth.js         Server-only: verify Supabase JWT + deny-by-default admin allowlist
+  abuseDetection.js    Server-only: prompt-injection heuristic + security_events logging
 db/
   schema.sql           CANONICAL database DDL (tables, RLS, all RPCs) — run this to provision
 test/                  Vitest suite (see §13)
@@ -232,6 +243,8 @@ NEXT_PUBLIC_* values are **inlined into the client bundle at build time** (a cha
 | `SUPABASE_SERVICE_ROLE_KEY` | **Yes** (mark Sensitive) | no | Enables **both** shared read-through caches — the concept-guide cache (`/api/learn`) **and** the diagnostic pool (`/api/generate`). Server-only secret (Supabase → Settings → API → `service_role`). Unset = neither cache active (both features still work, regenerating each time). |
 | `NEXT_PUBLIC_ENABLE_GITHUB` | no (public) | no | `"true"` shows the GitHub sign-in button. Set **only after** configuring GitHub in Supabase, else it errors on click. |
 | `NEXT_PUBLIC_ENABLE_DISCORD` | no (public) | no | Same, for Discord. |
+| `ADMIN_EMAILS` | **Yes** (mark Sensitive) | no | Comma-separated email allowlist for the **admin dashboard**, matched case-insensitively to the caller's verified Supabase JWT email. Server-only; **deny-by-default** (unset/empty = no admins). Needs `SUPABASE_SERVICE_ROLE_KEY` + the `NEXT_PUBLIC_SUPABASE_*` values. Redeploy after setting. |
+| `ADMIN_USER_IDS` | **Yes** (mark Sensitive) | no | Optional fallback allowlist of Supabase auth user UUIDs (comma-separated). Use instead of / alongside `ADMIN_EMAILS`. |
 
 ---
 
@@ -246,6 +259,8 @@ To stand up the database from scratch (or reproduce it), **run `db/schema.sql` i
 - **`concept_topics`** *(taxonomy reference)* — `(subject, slug, label, sort)`, PK `(subject, slug)`. The curated 36-topic Subject→Topic tree (mirrors `lib/taxonomy.js`). **Public-readable** (`for select using (true)`) so the hub renders labels/ordering; writes service-role only.
 - **`concept_guides`** *(the concept-hub catalog)* — `(subject, concept_key, concept, topic→concept_topics, content jsonb null, status 'ready'|'pending', visibility 'public'|'hidden', source 'grader'|'curated'|'user', level_band, times_opened, created_at, updated_at)`, PK `(subject, concept_key)`. **Publicly readable but read-only** — the policy `for select to anon, authenticated using (visibility='public' and status='ready')` exposes only vetted guides; **all writes stay service-role only**. `content` is `null` for a `pending` stub. **CURATION-ONLY public model (security):** auto-grown guides (`source` grader/user) are **always stored `visibility='hidden'`** — cached + servable to a direct opener, but **never publicly browsable**. Only `source='curated'` rows (the seed / explicit approval) are public, so attacker-influenced concept labels/content can never be broadcast to all users. ⚠️ This is a public object — **never add a PII/per-user column here.**
 - **`diagnostic_pool`** *(internal cache)* — `(id bigint identity, content jsonb, created_at)`. A handful of full 3-subject baseline diagnostics, reused across users (standardized, like the guides). Same **RLS-on / NO-policies** service-role lock. `/api/generate` serves a random one with no Groq call once it reaches `DIAG_POOL_TARGET` (12); below that it self-fills via the **`try_add_diagnostic(p_content, p_target)`** RPC — an advisory-locked, count-gated insert (`service_role`-only) so concurrent cold-start fills can't overshoot the target.
+- **`security_events`** *(admin / abuse monitoring)* — server-logged warnings (prompt-injection attempts, rate-limit spikes, user reports) shown in the admin dashboard. **RLS on, NO policy** (service-role only — same lock as `diagnostic_pool`); never written by the browser.
+- **`concept_reports`** *(admin / abuse monitoring)* — a signed-in user's report about a public guide. RLS has an **insert-own** policy (`to authenticated with check (auth.uid() = reporter_id)`); reads are admin-only (service-role; no select policy). The user-facing report button ships with the browse UI.
 
 `scores`/`attempts` have RLS: `for all to authenticated using ((select auth.uid()) = user_id) with check (...)` — each user only ever sees/writes their own rows.
 
@@ -299,6 +314,14 @@ All three routes are `POST`, `dynamic = "force-dynamic"`, **same-origin-gated** 
 - **Read-through shared cache:** normalizes the concept to a key (`conceptKey`); on a hit returns the stored guide (`cached:true`) **without calling Groq**; on a miss generates via Groq, normalizes, and — **only if `isConceptSafe(concept)`** — writes via **`promote_or_insert_guide`** (`cached:false`), which always stores the guide **`hidden`** (curation-only; never auto-public) and never overwrites a `ready` guide. An **unsafe** concept is still generated and returned to the opener but is **never persisted** (so it can't be served to anyone else). The LLM also classifies the concept into a curated **`topic`** slug (validated against `lib/taxonomy.js`; unknown → `general_<subject>`). Cache only active when `SUPABASE_SERVICE_ROLE_KEY` is set — **the platform's biggest token saver: each safe guide is generated once and reused, forever.**
 - **Response:** `{ subject, concept, topic, overview, keyIdeas[], socraticQuestions[], pitfalls[], tryThis, tryThisQuestion, cached }`. `tryThisQuestion` is a practice-ready `{ question, targetConcept, difficulty }` (or `null`) — a concrete "try this" problem **cached with the guide**, so the Learn tab can start a practice attempt from it with **no `/api/generate` call**.
 
+### Admin API (`/api/admin/*`) — the only authenticated routes
+Unlike the three public routes above, these require an **admin**. The browser attaches its Supabase session token (`Authorization: Bearer <jwt>`); `lib/adminAuth.js#requireAdmin` **verifies the JWT server-side** (`supabase.auth.getUser(token)`) and checks the verified user against a **deny-by-default** allowlist (`ADMIN_EMAILS` / `ADMIN_USER_IDS`). Re-verified on **every** call — the client is never trusted. Same same-origin + JSON guard + rate limiting. Privileged writes use the service-role client (`lib/supabaseAdmin.js`).
+- **`POST /api/admin/me`** → `{ isAdmin, email }`. A UI hint only (reveals the Admin tab); always `200`.
+- **`POST /api/admin/data`** → `{ counts, pendingGuides[], events[], reports[] }` — the curation queue (guides not yet `public`+`ready`, with a content preview), open `security_events`, open `concept_reports`. `401`/`403` if not an admin.
+- **`POST /api/admin/action`** → `{ target, action, ... }`: `guide` **approve** (the only sanctioned path to publish: `visibility=public, status=ready, source=curated`, and only for a `ready` guide — a `content`-less stub yields `409`) / **hide** / **delete**; `event`/`report` → **reviewed**/**dismissed**. Subject allow-listed via `ORDER.includes`.
+
+**Abuse monitoring (on the public routes):** `lib/abuseDetection.js#reportInjection` runs a high-precision prompt-injection heuristic over the user-supplied text in `/api/generate`, `/api/grade`, `/api/learn` and, when flagged, logs a throttled `security_events` row **after the response** (`after()`, non-blocking — it flags for admin review, never blocks the learner). A `429` logs a throttled `rate_limit` event. Logging is a no-op without the service-role key.
+
 ### The Groq client (`lib/groq.js`)
 - Models: **generation + Learn** use `llama-3.3-70b-versatile` (`GROQ_MODEL`); **grading** uses the cheaper `openai/gpt-oss-120b` (`GROQ_GRADE_MODEL`, via `groqJSON({grade:true})`, with `reasoning_effort` pinned low); **vision** (photo grading) uses `meta-llama/llama-4-scout-17b-16e-instruct` regardless. Every call logs `[groq] <model> in=… out=…` token usage to the server log for cost monitoring. All overridable via env.
 - All system prompts live here: `DIAG_GEN_SYS`, `DIAG_GRADE_SYS`, `PRACTICE_GEN_SYS`, `PRACTICE_GRADE_SYS`, `LEARN_SYS`. Every grading/teaching prompt forbids revealing answers.
@@ -338,7 +361,7 @@ Components: **SignIn** (provider buttons), **ProfileTab** (identity + stats + co
 
 ## 13. Testing
 
-**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **201 tests across 20 files**, all passing.
+**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **271 tests across 24 files**, all passing.
 
 | File | Covers |
 |---|---|
@@ -352,6 +375,10 @@ Components: **SignIn** (provider buttons), **ProfileTab** (identity + stats + co
 | `test/contentSafety.test.js` | `isConceptSafe` accepts STEM labels (incl. accented/Greek); rejects links/emails/markup/blocklist/over-long/symbol-dominated **+ expanded TLDs + zero-width-split evasion** |
 | `test/conceptKey.test.js` | `conceptKey` JS↔SQL parity golden vectors: control/zero-width/BOM strip, surrounding-quote strip, **code-point-safe 200-char truncation** (surrogate-safe) |
 | `test/schema-invariants.test.js` | static guard on `db/schema.sql`: **curation-only invariant** (`promote_or_insert_guide` always `hidden`, never `public`; grader stubs `pending`; read policy = `public`+`ready`) + **`_concept_key` control/zero-width/BOM strip + `left(…,200)`** parity markers |
+| `test/adminAuth.test.js` | `requireAdmin`/`isAdminUser`: **deny-by-default** (empty allowlist matches no one), no-token → 401, invalid token → 401, non-admin → 403, admin-by-email (case/space-tolerant) and admin-by-id → ok, missing-email rejected |
+| `test/abuseDetection.test.js` | `scanForInjection` flags injection markers (override/system-prompt/role/jailbreak/medium) + passes normal STEM; `logSecurityEvent` field caps + **per-(kind:ip) throttle** + no-key no-op; `reportInjection` flag-and-log |
+| `test/api-admin.test.js` | `/api/admin/{me,data,action}`: auth gating (401/403), request-guard 403/415, guide **approve→public / hide / delete** (+ prototype-key subject rejection, 409 on stub approve), event/report reviewed-or-dismissed |
+| `test/admin-dashboard.test.jsx` | AdminDashboard renders the 3 sections, **Approve disabled for a pending stub**, action buttons hit `/api/admin/action` + refetch, empty states, error/retry |
 | `test/store.test.js` | migration clamping + **single-flight dedup + >5000-attempt cap**, delete RPC, signed-in load/save paths + **user_id scoping** + data-wipe guard, **atomic `saveProgress`** incl. **guest quota-failure surfacing**, **guest-blob sanitization on read + weak_concepts ≤64 cap** (mocked Supabase) |
 | `test/noobtopro.test.jsx` | the state machine: **diagnostic image-preview revoke on completion** + **`submitPractice` run-token guard** (stale grade after Restart doesn't persist or repopulate) |
 | `test/noobtopro-reset.test.jsx` | the **"Restart" logo**: a signed-in user keeps persisted progress (re-hydrates, never blanks) while a guest's local session clears to the intro; **sign-out synchronously clears in-memory scores** (shared-device safety) |
@@ -435,7 +462,7 @@ History of what's shipped is in `git log` (PRs #2–#29): flatten-for-Vercel, au
   - **Disable the Supabase email/password provider** (the app is OAuth-only) to clear the leaked-password advisor and close an unused signup surface; if kept, enable HIBP leaked-password protection.
   - **Quarantine/report flow** for a poisoned *hidden* guide served on direct open (shared-cache trade-off) — future, alongside the curation UI.
   - **Shared-device guest migration:** a guest's `localStorage` progress auto-migrates into the **first different account** that signs in on the same browser — but only into an *empty* account (the scores-exists guard blocks any populated account; no PII; RLS intact, write is correctly scoped to that account). Bounded and by-design for the guest→account flow; a future "merge your guest progress?" consent prompt (instead of silent auto-migrate) would close it.
-- **Server-side auth enforcement** on the API routes (today they're same-origin-gated + rate-limited + RLS-scoped, but not per-user authenticated).
+- **Server-side auth enforcement** on the *public* API routes (`/api/generate|grade|learn` are same-origin-gated + rate-limited + RLS-scoped, but not per-user authenticated). The **`/api/admin/*` routes ARE per-user authenticated** — the app's first privileged surface: they verify the caller's Supabase JWT server-side (`lib/adminAuth.js`) against a deny-by-default `ADMIN_EMAILS`/`ADMIN_USER_IDS` allowlist, re-checked on every call, never trusting the client; the admin **approve** action is the only sanctioned path that publishes a guide (human-in-the-loop curation — no *automated* path makes content public). Prompt-injection/abuse signals are logged (non-blocking, field-capped) to `security_events` for review; the per-IP log throttle is best-effort and shares the in-memory rate limiter's IP-spoofable residual (a durable store is the same pre-monetization TODO). A focused adversarial security review of this surface found **no P0/P1/P2** (verified against the live DB: JWT-only identity, deny-by-default allowlist, RLS default-deny on both new tables, publish guardrails, no XSS, intact client/server boundary). Given it can publish content, re-review it at each change.
 - **Atomicity:** the score + attempt write is now one transaction via the `save_progress` RPC (resolving identity once, server-side) — fixed. Remaining: diagnostic grading is all-or-nothing (one failed grade discards the others) — known/low-severity.
 - **Nonce-based strict CSP** — a baseline CSP now ships (§14); the next step is a middleware-generated nonce so `script-src`/`style-src` can drop `'unsafe-inline'`.
 - **ESLint / CI lint enforcement** — not configured yet; the deprecated, unconfigured `next lint` script was removed (it only dropped into an interactive setup wizard). Wire up flat-config ESLint + `eslint-config-next` and run it in CI before any Next 16 upgrade.

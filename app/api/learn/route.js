@@ -6,6 +6,7 @@ import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
 import { getSupabaseAdmin, conceptKey } from "@/lib/supabaseAdmin";
 import { normalizeTopic, topicSlugsFor } from "@/lib/taxonomy";
 import { isConceptSafe } from "@/lib/contentSafety";
+import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
 
 export const dynamic = "force-dynamic";
 
@@ -66,6 +67,7 @@ export async function POST(req) {
   // call). Apply a tighter per-IP budget than the default.
   const rl = rateLimit(clientKey(req), { max: 15 });
   if (!rl.ok) {
+    reportRateLimit({ req, route: "/api/learn" });
     return NextResponse.json(
       { error: "Too many requests. Please slow down and try again shortly." },
       { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
@@ -88,6 +90,8 @@ export async function POST(req) {
   }
   const safeConcept = cap(concept.trim(), 200);
   const key = conceptKey(safeConcept);
+  // Flag (don't block) obvious prompt-injection in the user-supplied concept.
+  reportInjection({ req, route: "/api/learn", subject, concept: safeConcept, text: safeConcept });
   const sb = getSupabaseAdmin(); // null when SUPABASE_SERVICE_ROLE_KEY isn't set
 
   // 1) Shared cache hit → return the standardized guide without calling Groq.
