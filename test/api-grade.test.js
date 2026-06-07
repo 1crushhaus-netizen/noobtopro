@@ -114,6 +114,33 @@ describe("POST /api/grade — deterministic pre-grade dock (no LLM call)", () =>
     expect(j.reasoningScore).toBeLessThanOrEqual(25); // pulled toward the rubric-implied 0
     expect(j.reasoningScore).toBeLessThan(88);
   });
+
+  it("returns strengths/improvements + the worked solution on a substantive practice attempt (PR 6)", async () => {
+    mockGroqReturning({
+      reasoningScore: 70, rubric: RUBRIC_50,
+      strengths: ["set up the equation correctly"], improvements: ["show the intermediate sum", 42, "  "],
+      workedSolution: "Step 1: ... Step 2: ... Final answer: 7.",
+      correctnessNote: "n", socraticHint: "h", microLesson: "m", weakConcepts: [], newScoreSuggestion: 70,
+    });
+    const res = await POST(req({ kind: "practice", subject: "math", question: "Q", targetConcept: "addition", score: 50, reasoning: REASONING }));
+    expect(res.status).toBe(200);
+    const j = await res.json();
+    expect(j.strengths).toEqual(["set up the equation correctly"]);
+    expect(j.improvements).toEqual(["show the intermediate sum"]); // non-strings/blanks filtered
+    expect(j.workedSolution).toMatch(/Final answer/);
+  });
+
+  it("a docked practice answer gets NO worked solution (can't extract the answer with 'idk')", async () => {
+    const failFetch = vi.fn(() => { throw new Error("no Groq on a docked answer"); });
+    vi.stubGlobal("fetch", failFetch);
+    const res = await POST(req({ kind: "practice", subject: "math", question: "Q", targetConcept: "x", reasoning: "idk" }));
+    expect(res.status).toBe(200);
+    const j = await res.json();
+    expect(j.docked).toBe(true);
+    expect(j.workedSolution).toBe("");
+    expect(j.improvements.length).toBeGreaterThan(0); // still gets the "attempt it first" nudge
+    expect(failFetch).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/grade — input validation (no network)", () => {

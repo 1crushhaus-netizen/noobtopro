@@ -16,7 +16,7 @@ import {
   defaultDifficultyForBand,
   explainRankMove,
 } from "@/lib/scoring";
-import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData } from "@/lib/store";
+import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData, loadReviews } from "@/lib/store";
 import { getSupabase, isSupabaseConfigured, signInWithProvider, signOutUser, PROVIDERS } from "@/lib/supabase";
 import ProgressDashboard from "@/components/ProgressDashboard";
 import SignIn from "@/components/SignIn";
@@ -897,6 +897,23 @@ export default function Noobtopro() {
           totalAfter: totalPoints(updatedScores),
           phdAfter: phdIndex(updatedScores),
           rationale,
+          // Embed the answer-review detail so guests can review past answers too
+          // (signed-in users get it persisted server-side in attempt_reviews).
+          review: {
+            question: pQuestion.question,
+            answer: pText,
+            targetConcept: pQuestion.targetConcept,
+            difficulty: pQuestion.difficulty,
+            rubric: r.rubric,
+            feedback: {
+              strengths: r.strengths || [],
+              improvements: r.improvements || [],
+              workedSolution: r.docked ? "" : r.workedSolution || "",
+              correctnessNote: r.correctnessNote || "",
+              socraticHint: r.socraticHint || "",
+              microLesson: r.microLesson || "",
+            },
+          },
         });
         if (myRun !== practiceRun.current) return; // abandoned during the save round-trip
         if (st && st.history) setHistory(st.history); // null = couldn't refresh; keep current
@@ -1092,6 +1109,7 @@ export default function Noobtopro() {
             history={history}
             onPractice={(s) => { setView("practice"); startPractice(s); }}
             onLearn={openLearn}
+            loadReviews={loadReviews}
           />
         ) : (
           <>
@@ -1310,6 +1328,40 @@ export default function Noobtopro() {
                             </span>
                             <span>{feedback.rationale}</span>
                           </div>
+                        )}
+
+                        {/* What you did well → how to reach 100 — the actionable feedback. */}
+                        {(((feedback.strengths || []).length > 0) || ((feedback.improvements || []).length > 0)) && (
+                          <div className="np-card">
+                            {(feedback.strengths || []).length > 0 && (
+                              <>
+                                <div className="np-cardicon" style={{ color: "var(--phys)" }}><Icon name="spark" size={16} /> What you did well</div>
+                                <ul className="np-learnlist" aria-label="What you did well" style={{ marginBottom: (feedback.improvements || []).length ? 14 : 0 }}>
+                                  {feedback.strengths.map((s, i) => <li key={i} style={{ "--dot": "var(--phys)" }}>{s}</li>)}
+                                </ul>
+                              </>
+                            )}
+                            {(feedback.improvements || []).length > 0 && (
+                              <>
+                                <div className="np-cardicon" style={{ color: "var(--math)" }}><Icon name="arrow" size={16} /> To reach 100</div>
+                                <ul className="np-learnlist" aria-label="How to reach the maximum score">
+                                  {feedback.improvements.map((s, i) => <li key={i} style={{ "--dot": "var(--math)" }}>{s}</li>)}
+                                </ul>
+                              </>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Worked solution — revealed only AFTER grading a substantive attempt
+                            (a docked non-answer returns ""). Collapsed by default so it doesn't
+                            spoil a retry at a glance. */}
+                        {feedback.workedSolution && (
+                          <details className="np-card np-lesson">
+                            <summary className="np-cardicon" style={{ color: SUBJECTS[pSubject].color, cursor: "pointer" }}>
+                              <Icon name="bulb" size={16} /> Worked solution (reveal the full answer)
+                            </summary>
+                            <div className="np-lessontext" style={{ whiteSpace: "pre-wrap", marginTop: 10 }}>{feedback.workedSolution}</div>
+                          </details>
                         )}
 
                         {feedback.correctnessNote && <div className="np-note">{feedback.correctnessNote}</div>}

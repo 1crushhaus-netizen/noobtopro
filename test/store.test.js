@@ -21,12 +21,16 @@ vi.mock("@/lib/supabase", () => ({
     // call's args are captured so tests can assert the RLS-scoping filter
     // (.eq("user_id", uid)) and the stable ordering, not just the returned data.
     from: (table) => {
-      const sel = table === "scores" ? mocks.db.scoresSelect : mocks.db.attemptsSelect;
+      const sel =
+        table === "scores" ? mocks.db.scoresSelect
+        : table === "attempt_reviews" ? mocks.db.reviewsSelect
+        : mocks.db.attemptsSelect;
       const c = (mocks.calls[table] ||= { eq: [], order: [], upsert: [] });
       const chain = {
         select: (...a) => { c.select = a; return chain; },
         eq: (...a) => { c.eq.push(a); return chain; },
         order: (...a) => { c.order.push(a); return chain; },
+        limit: (...a) => { c.limit = a; return chain; },
         then: (resolve, reject) => Promise.resolve(sel ?? { data: [], error: null }).then(resolve, reject),
         upsert: async (...a) => { c.upsert.push(a); return mocks.db.scoresUpsert ?? { error: null }; },
       };
@@ -35,7 +39,7 @@ vi.mock("@/lib/supabase", () => ({
   }),
 }));
 
-import { migrateGuestToAccount, deleteAllUserData, loadState, saveProgress } from "@/lib/store";
+import { migrateGuestToAccount, deleteAllUserData, loadState, saveProgress, loadReviews } from "@/lib/store";
 
 const KEY = "noobtopro:v1";
 const signedIn = { data: { session: { user: { id: "u1" } } } };
@@ -334,5 +338,48 @@ describe("saveProgress (atomic score + attempt write)", () => {
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+describe("loadReviews (answer review)", () => {
+  it("signed-in: reads the user's own attempt_reviews (RLS-scoped) newest-first", async () => {
+    mocks.session = signedIn;
+    mocks.db.reviewsSelect = {
+      data: [
+        { subject: "math", created_at: "t2", question: "Q2", answer: "A2", target_concept: "addition", difficulty: "foundational", reasoning_score: 70, delta: 5, rubric: { conceptual_understanding: 3 }, feedback: { strengths: ["good"], improvements: ["more"], workedSolution: "S2" } },
+      ],
+      error: null,
+    };
+    const res = await loadReviews();
+    expect(res.reviews).toHaveLength(1);
+    expect(res.reviews[0]).toMatchObject({ subject: "math", question: "Q2", answer: "A2", targetConcept: "addition", reasoningScore: 70 });
+    expect(res.reviews[0].feedback.workedSolution).toBe("S2");
+    // RLS-scoping filter applied.
+    expect(mocks.calls.attempt_reviews.eq).toContainEqual(["user_id", "u1"]);
+  });
+
+  it("signed-in: surfaces a DB error instead of an empty list", async () => {
+    mocks.session = signedIn;
+    mocks.db.reviewsSelect = { data: null, error: { message: "boom" } };
+    const res = await loadReviews();
+    expect(res.error).toBeTruthy();
+  });
+
+  it("guest: returns the review detail embedded in local history (newest-first)", async () => {
+    mocks.session = guest;
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        scores: { math: { score: 50, weakConcepts: [] } },
+        history: [
+          { type: "attempt", t: "t1", subject: "math", reasoningScore: 40, delta: 2, review: { question: "Q1", answer: "A1", targetConcept: "addition", difficulty: "foundational", rubric: {}, feedback: { workedSolution: "S1" } } },
+          { type: "attempt", t: "t0", subject: "math", reasoningScore: 30 }, // no review → excluded
+        ],
+      })
+    );
+    const res = await loadReviews();
+    expect(res.reviews).toHaveLength(1);
+    expect(res.reviews[0]).toMatchObject({ question: "Q1", answer: "A1", subject: "math", reasoningScore: 40 });
+    expect(res.reviews[0].feedback.workedSolution).toBe("S1");
   });
 });

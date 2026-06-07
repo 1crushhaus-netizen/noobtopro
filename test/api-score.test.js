@@ -274,6 +274,34 @@ describe("POST /api/score practice — server-authoritative Elo score", () => {
     expect(j.rationale).toMatch(/docked/i);
     // A dock carries no difficulty signal, so the bucket is NOT calibrated from it.
     expect(calls.rpc.find((c) => c.fn === "bump_item_difficulty")).toBeFalsy();
+    // A docked non-answer NEVER reveals the worked solution.
+    expect(j.workedSolution).toBe("");
+  });
+
+  it("persists the answer-review (p_review) and reveals the worked solution on a substantive attempt (PR 6)", async () => {
+    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
+    const { sb, calls } = fakeAdmin({ scoresRows: [{ subject: "math", score: 40 }] });
+    storage.getAdmin.mockReturnValue(sb);
+    mockGroq({
+      ...PRACTICE_GRADE,
+      strengths: ["named the right principle"], improvements: ["show the intermediate step"],
+      workedSolution: "Step 1 … Final answer: 7.",
+    });
+    const res = await POST(req(
+      { kind: "practice", subject: "math", question: "Q-pencils", targetConcept: "addition", difficulty: "foundational", reasoning: REASONING },
+      { authHeader: true }
+    ));
+    expect(res.status).toBe(200);
+    const j = await res.json();
+    expect(j.strengths).toEqual(["named the right principle"]);
+    expect(j.improvements).toEqual(["show the intermediate step"]);
+    expect(j.workedSolution).toMatch(/Final answer/); // revealed post-grade (substantive attempt)
+    // The review detail is persisted atomically with the attempt (p_review on save_progress_for).
+    const save = calls.rpc.find((c) => c.fn === "save_progress_for");
+    expect(save.args.p_review).toBeTruthy();
+    expect(save.args.p_review.question).toBe("Q-pencils");
+    expect(save.args.p_review.answer).toBe(REASONING); // the learner's own reasoning
+    expect(save.args.p_review.feedback.workedSolution).toMatch(/Final answer/);
   });
 
   it("RECONCILES a score that contradicts its rubric (all-zero rubric can't ship an 85)", async () => {

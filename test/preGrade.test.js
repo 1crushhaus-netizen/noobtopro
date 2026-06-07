@@ -72,6 +72,14 @@ describe("preGradeDock — deterministic docking gate", () => {
     expect(typeof v.comment).toBe("string");
   });
 
+  it("a dock gives constructive feedback but NEVER a worked solution (can't extract the answer with 'idk')", () => {
+    const v = preGradeDock("idk");
+    expect(v.strengths).toEqual([]);
+    expect(Array.isArray(v.improvements)).toBe(true);
+    expect(v.improvements.length).toBeGreaterThan(0);
+    expect(v.workedSolution).toBe(""); // the solution is withheld for a non-attempt
+  });
+
   it("is deterministic (same input → same verdict)", () => {
     expect(preGradeDock("idk")).toEqual(preGradeDock("idk"));
     expect(preGradeDock("a real attempt with reasoning, 2x+1")).toBeNull();
