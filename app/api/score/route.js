@@ -53,7 +53,7 @@ import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, no
 export const dynamic = "force-dynamic";
 
 const GRADE_CONCURRENCY = 3; // simultaneous Groq grade calls per diagnostic
-const MAX_DIAGNOSTIC_ANSWERS = ORDER.length * DIAGNOSTIC_DIFFICULTIES.length; // 9
+const MAX_DIAGNOSTIC_ANSWERS = ORDER.length * DIAGNOSTIC_DIFFICULTIES.length; // 6 (3 subjects × 2 tiers)
 const RETRY_DELAY_MS = 700;
 
 const nowIso = () => new Date().toISOString();
@@ -269,7 +269,10 @@ async function handlePractice(req, body) {
 
     // 2) DETERMINISTIC pre-grade dock (no LLM call) on the ORIGINAL answer: empty /
     //    "idk" / off-topic / gibberish → forced low outcome + all-zero rubric. Else grade.
-    const dock = preGradeDock(reasoning);
+    //    Skip the dock when a photo is attached — preGradeDock only inspects TEXT, so an
+    //    image-only answer (worked notes in the photo, empty text box) is a substantive
+    //    submission that must reach the vision grader, not be docked to a non-attempt.
+    const dock = img.image ? null : preGradeDock(reasoning);
     const data = dock
       ? dock
       : await gradeOne({
@@ -457,8 +460,9 @@ async function handleDiagnostic(req, body) {
           : "(no written reasoning provided)",
       // Deterministic dock on the RAW answer (before the placeholder substitution
       // above), so a blank / "idk" / off-topic diagnostic answer is graded low with no
-      // LLM call, just like practice.
-      dock: preGradeDock(a.reasoning),
+      // LLM call, just like practice. Skip the dock when a photo is attached — an
+      // image-only answer must reach the vision grader (preGradeDock only sees text).
+      dock: img.image ? null : preGradeDock(a.reasoning),
       image: img.image,
     });
   }
@@ -473,7 +477,12 @@ async function handleDiagnostic(req, body) {
   const imgCount = items.filter((i) => i.image).length;
   if (imgCount) {
     let imgRl;
-    for (let i = 0; i < imgCount; i++) imgRl = await checkRateLimit(`${clientKey(req)}:img`, { max: 10 });
+    // Charge one :img token per image-bearing answer, but stop as soon as the budget is
+    // exceeded — no point spending further durable-RPC round-trips once we'll reject.
+    for (let i = 0; i < imgCount; i++) {
+      imgRl = await checkRateLimit(`${clientKey(req)}:img`, { max: 10 });
+      if (!imgRl.ok) break;
+    }
     if (!imgRl.ok) {
       reportRateLimit({ req, route: "/api/score" });
       return NextResponse.json(

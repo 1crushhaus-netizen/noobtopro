@@ -111,8 +111,8 @@ function fileToBase64(file) {
 
 const now = () => new Date().toISOString();
 
-// Stable per-question key for the 3-tier diagnostic (each subject has an
-// easy/hard question), so the answers map can hold all 6 answers.
+// Stable per-question key for the 2-tier diagnostic (each subject has an
+// easy + a hard question), so the answers map can hold all 6 answers.
 const qid = (q) => (q ? `${q.subject}:${q.difficulty}` : "");
 
 // NEXT_PUBLIC_* is inlined at build time. When "true", the Learn tab becomes the
@@ -481,6 +481,27 @@ export default function Noobtopro() {
       setHistory([]);
       setStage("intro");
     }
+  }
+
+  // Sign out. Clear the sensitive in-memory view SYNCHRONOUSLY before the async
+  // signOutUser() network round-trip, so on a shared device the prior user's scores,
+  // email, leaderboard position, and Learn data can't linger on screen during that
+  // round-trip — or forever if signOut() hangs/fails offline. The onAuthStateChange
+  // SIGNED_OUT handler then runs the full reset (previews, guest blob, re-hydrate).
+  function handleSignOut() {
+    setUser(null); // hide identity-bearing surfaces (Profile/Admin/email) immediately
+    setIsAdmin(false);
+    setScores(null);
+    setHistory([]);
+    setScoreDelta(null);
+    setFeedback(null);
+    setLearnConcept(null);
+    setLearnContent(null);
+    setLearnQuestion(null);
+    setLearnError("");
+    setView("practice");
+    setStage("intro");
+    signOutUser();
   }
 
   // Profile → "Reset my progress": permanently delete the signed-in user's data.
@@ -1005,7 +1026,7 @@ export default function Noobtopro() {
         <span className="np-tag">prove what you know</span>
         <div className="np-signin">
           {user ? (
-            <button className="np-signinbtn" onClick={() => signOutUser()} title={user.email || ""}>
+            <button className="np-signinbtn" onClick={handleSignOut} title={user.email || ""}>
               <Icon name="google" size={16} /> Sign out
             </button>
           ) : (
@@ -1081,7 +1102,7 @@ export default function Noobtopro() {
             loadLeaderboard={() => authApi("/api/leaderboard", {})}
             onStartDiagnostic={() => { setView("practice"); beginDiagnostic(); }}
             onPractice={(s) => { setView("practice"); startPractice(s); }}
-            onSignOut={() => signOutUser()}
+            onSignOut={handleSignOut}
             onReset={resetProgress}
             onViewProgress={() => setView("progress")}
           />
@@ -1125,7 +1146,7 @@ export default function Noobtopro() {
                 </p>
                 <div className="np-steps">
                   {[
-                    ["01", "Prove it", "Three open problems — one each in math, physics, chemistry. Solve them and explain every step."],
+                    ["01", "Prove it", "Six open problems — an easy and a hard one in each of math, physics, and chemistry. Solve them and explain every step."],
                     ["02", "Get ranked", "Your reasoning is graded on a 5-part rubric and mapped to a 0–100 rank per subject."],
                     ["03", "Climb", "Pick a subject. Get calibrated problems. Sound reasoning moves your score — even when the answer's wrong."],
                   ].map(([n, t, d]) => (

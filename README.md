@@ -10,7 +10,7 @@
 > 3. **Follow the dev loop in §15** (branch → PR → CI "Test and build" → address Greptile → merge → verify) for every change.
 > 4. **Keep this README up to date.** When you change architecture, env vars, the data model, status, or conventions, update the relevant section in the same PR. A stale hand-off doc is worse than none — the next session relies on it being accurate.
 >
-> New here? Jump to [**Where to start (next task: full independent fleet audit)**](#where-to-start-next-task-full-independent-fleet-audit).
+> New here? Jump to [**Where to start (fleet audit complete)**](#where-to-start-fleet-audit-complete).
 
 **Prove what you know. Climb from noob to pro.**
 
@@ -18,7 +18,7 @@
 
 ## Table of contents
 
-- ⭐ [**Where to start (next task: full independent fleet audit)**](#where-to-start-next-task-full-independent-fleet-audit)
+- ⭐ [**Where to start (fleet audit complete)**](#where-to-start-fleet-audit-complete)
 1. [What it is & why](#1-what-it-is--why)
 2. [Current status & live links](#2-current-status--live-links)
 3. [Quickstart](#3-quickstart)
@@ -128,14 +128,20 @@ Other commands: `npm test` (run tests once), `npm run test:watch`, `npm run buil
 
 ---
 
-## Where to start (next task: full independent fleet audit)
+## Where to start (fleet audit complete)
 
-> **Shipped & live on `main` (all merged):** flatten-for-Vercel + audit hardening (PR #2–#29) · Concept Hub backend/admin/browse (#29–#31) · "Prove it" diagnostic (#32) · server-authoritative scoring + reasoning radar (#34/#35) · fleet-audit fixes (#36) · diagnostic → 6 questions (#37) · durable per-account rate limiter (#38) · **Elo ranking + explainable anti-gaming grading + anonymous leaderboard (PR 3, #40)** · **Concept Hub public seed + canonical de-dup (PR 4, #44)** · **Learn-tab proof/derivation guides + stale-guide auto-heal (PR 5, #45)** · **detailed "how to reach 100" feedback + post-grade worked solution + answer review (PR 6, #43)** · **Concept Hub UI fixes (#46)**.
+> **Shipped & live on `main` (all merged):** flatten-for-Vercel + audit hardening (PR #2–#29) · Concept Hub backend/admin/browse (#29–#31) · "Prove it" diagnostic (#32) · server-authoritative scoring + reasoning radar (#34/#35) · fleet-audit fixes (#36) · diagnostic → 6 questions (#37) · durable per-account rate limiter (#38) · **Elo ranking + explainable anti-gaming grading + anonymous leaderboard (PR 3, #40)** · **Concept Hub public seed + canonical de-dup (PR 4, #44)** · **Learn-tab proof/derivation guides + stale-guide auto-heal (PR 5, #45)** · **detailed "how to reach 100" feedback + post-grade worked solution + answer review (PR 6, #43)** · **Concept Hub UI fixes (#46)** · **independent fleet-audit fix round (this PR — see below)**.
 >
-> **Live DB migrations `0001a`–`0007` are ALL applied** to the Supabase project (`vwvhgnlgubctrgksyohr`), so the live DB == `db/schema.sql`. Advisor baseline is the documented/accepted set (§17). **438 tests across 32 files + `npm run build` are green.** The Concept Hub has **9 curated, proof-bearing guides** seeded live (run `node scripts/seed-concept-hub.mjs` with the Groq + service-role keys to fill all 36 topics).
+> **Live DB migrations `0001a`–`0008` are ALL applied** to the Supabase project (`vwvhgnlgubctrgksyohr`), so the live DB == `db/schema.sql`. Advisor baseline is the documented/accepted set (§17). **442 tests across 32 files + `npm run build` are green.** The Concept Hub has **9 curated, proof-bearing guides** seeded live (run `node scripts/seed-concept-hub.mjs` with the Groq + service-role keys to fill all 36 topics).
 
-### 🔎 THE NEXT TASK — a comprehensive, independent, fleet audit of the ENTIRE codebase
-The owner wants a **full, adversarial, independent audit** — spend **as many agents and as many tokens as you can** to be exhaustive. Find **everything**: security vulnerabilities, network/API vulnerabilities, UI bugs, and correctness/non-severe bugs, at **every** severity. This is a *find-and-report* task first; **do not change code until the report is delivered and the owner picks what to fix.**
+### ✅ THE INDEPENDENT FLEET AUDIT — done; fix round in this PR
+A full, adversarial, independent audit of the entire codebase was run (105-agent Workflow fleet: finder lenses → per-finding adversarial verify → completeness critic → second round, **plus** an orchestrator re-read of the whole trust boundary/DB/routes and re-verification of every high-severity finding against real `file:line` + the live DB). **Result: 0 P0, and the confirmed P1/P2/P3 findings are fixed in this PR** (migration `0008`):
+- **P1** — image-only practice/diagnostic answers were docked to 3 without grading the photo (`preGradeDock` only sees text); the dock is now skipped when an image is attached, in `/api/score` (both paths) and `/api/grade`.
+- **P2** — diagnostic single-tier inflation (a missing tier now counts as 0, not 100 — `diagnosticSubjectScore`); leaderboard `overall` now means over all 3 subjects (matches `phdIndex`); guest answer-reviews now survive first sign-in (`migrate_guest_data` carries them into `attempt_reviews`); the seed script now keeps the `whyItWorks` proof; the historical migrations got `save_progress_for` drop-guards; `concept_reports.concept_key` got a 200-char cap.
+- **P3** — admin-email match now requires a confirmed email; sign-out clears sensitive state synchronously; preGrade no longer docks numeric answers; a11y focus ring + contrast; `register_concepts` stubs stored `hidden`; CSP/`X-Powered-By`; numerous stale-doc/comment corrections (incl. this README).
+- **Re-judged accepted residuals (still valid):** the §17 list holds; the diagnostic partial-failure re-weight is now conservative (a failed tier scores 0 rather than inflating). **Deferred by design:** the leaderboard tie/percentile convention + k-anonymity floor (tied to the owner's anonymous-tiers / future percentile-recut), and the preGrade one-word-term dock (structurally indistinguishable from an off-topic one-word answer).
+
+**To re-run the audit (kept for reference):** spend **as many agents and as many tokens as you can** to be exhaustive — find **everything** (security, network/API, UI, correctness) at **every** severity. *Find-and-report first; don't change code until the owner picks fixes.*
 
 **Posture — be ruthlessly independent.** Treat **every** claim in this README and in code comments ("safe / verified / fixed / accepted / intended / 0 findings") as **UNVERIFIED until you confirm it yourself** against the actual source **and the live database**. Prior reviews were run by the same agent lineage that wrote the code — assume they missed things. **Sub-agents hallucinate**, so **every finding must be verified against the real file:line (and, for DB claims, the live project) before it goes in the report.** Default a candidate finding to *refuted* unless the source unambiguously confirms it.
 
@@ -180,7 +186,7 @@ Browser (components/)                    Next.js server (app/api/)            Gr
 
 - **Client → `/api/*`** for anything that needs the Groq key (question generation, grading, concept guides).
 - **Client → Supabase** (via `lib/store.js`) for reads/writes of the signed-in user's own `scores`/`attempts` (RLS-protected). Guests use `localStorage`.
-- **Server → Supabase (service role)** only inside `/api/learn`, to read/write the shared `concept_guides` cache (an internal table no end-user can touch).
+- **Server → Supabase (service role)** inside `/api/learn` (the shared `concept_guides` cache) and `/api/generate` (the shared `diagnostic_pool`), plus the score/leaderboard/admin write paths — all internal objects no end-user can touch.
 
 ---
 
@@ -195,7 +201,7 @@ app/
   error.jsx            App Router error boundary (no white-screen on crashes)
   globals.css          All styles + design tokens (the .np-* system)
   api/
-    generate/route.js  POST: diagnostic (9 Qs) or practice (1 Q) question generation
+    generate/route.js  POST: diagnostic (6 Qs) or practice (1 Q) question generation
     grade/route.js     POST: grade reasoning (guest practice + low-level); image-aware
     score/route.js     POST: SERVER-AUTHORITATIVE scoring (signed-in) — dock+grade+reconcile+Elo+persist; diagnostic batch
     leaderboard/route.js POST: anonymous rank-tier distribution (JWT-verified → service-role leaderboard_tiers)
@@ -215,7 +221,7 @@ lib/
   gradeInput.js        Shared input validators (capText/normalizeImage/difficulty/weakConcepts) for /api/grade + /api/score
   preGrade.js          Deterministic pre-grade DOCKING gate (empty/idk/off-topic/gibberish → forced low, no LLM)
   scoring.js           SUBJECTS/ORDER/bands + clampScore/band + Elo engine (eloUpdate/rankFor/reconcile/explainRankMove) + rubric helpers (radar)
-  rateLimit.js         In-memory per-IP fixed-window limiter (used by all 3 routes)
+  rateLimit.js         Durable Postgres rate limiter (per-account/per-IP; rate_limit_hit RPC) + in-memory fallback
   store.js             Data layer: Supabase when signed in, localStorage for guests
   catalog.js           Concept Hub browse: client-side reads of the public catalog + report write
   conceptKey.js        Pure concept→cache-key normalizer (client-safe; SQL-parity with _concept_key)
@@ -228,7 +234,7 @@ lib/
   abuseDetection.js    Server-only: prompt-injection heuristic + security_events logging
 db/
   schema.sql           CANONICAL database DDL (tables, RLS, all RPCs) — run this to provision
-  migrations/          Numbered delta migrations vs a live DB (0001a … 0007); all applied to the live project
+  migrations/          Numbered delta migrations vs a live DB (0001a … 0008); all applied to the live project
 scripts/
   seed-concept-hub.mjs Concept Hub PUBLIC SEED (PR 4): batch-generate + publish a curated guide per of the 36 topics (run once, with keys)
 test/                  Vitest suite (see §13)
@@ -307,7 +313,7 @@ To stand up the database from scratch (or reproduce it), **run `db/schema.sql` i
 - **`register_concepts(p_subject, p_concepts jsonb)`** *(concept hub)* — auto-grow: registers the grader's (server-normalized) weak concepts as **`pending` stubs** (hidden until generated). `SECURITY DEFINER`, `service_role`-only; `on conflict do nothing` so it never disturbs an existing row; a **best-effort global cap (50k pending stubs)** bounds catalog growth. Called non-blocking (`after()`) from `/api/grade`.
 - **`promote_or_insert_guide(p_subject, p_concept, p_content, p_topic, p_level, p_safe)`** *(concept hub)* — on a `/api/learn` generation: **promotes** a `pending` grader stub to `ready`, else inserts a fresh user-originated guide. **Either way the guide is stored `visibility='hidden'`** (curation-only): cached + servable to a direct opener but **never publicly browsable**. `p_safe` is retained for backward-compat but **no longer grants public visibility** (only a `source='curated'` seed is public). **Never overwrites an existing `ready` guide** (first-writer-wins). `SECURITY DEFINER`, `service_role`-only.
 - **`seed_curated_guide(p_subject, p_topic, p_concept, p_content, p_level)`** *(concept hub — PR 4)* — the sanctioned **BATCH public-publish path** (alongside the admin "approve" action): upserts a `source='curated', visibility='public', status='ready'` guide. **Idempotent + re-runnable** (re-running refreshes content); on conflict it also promotes any prior hidden row for the key to the curated public catalog. `SECURITY DEFINER`, **`service_role`-only** — a signed-in user can never self-publish, so the curation-only model holds (no automated/client path makes content public). Called by `scripts/seed-concept-hub.mjs` for each `SEED_CONCEPTS` entry.
-- **`dedupe_pending_stubs()`** *(concept hub — PR 4)* — conservative housekeeping: deletes content-less grader **`pending` stubs** already subsumed by a `ready` guide in the same `(subject, topic)` (the stub's key is a substring of the ready guide's key). Touches **no** `ready`/`public`/`curated` row; a concept re-stubs if a later grade re-registers it. `SECURITY DEFINER`, `service_role`-only. (Fuzzy semantic merge of distinct-keyed near-duplicates is the v1.1 `pg_trgm` follow-on.)
+- **`dedupe_pending_stubs()`** *(concept hub — PR 4)* — conservative housekeeping: deletes content-less grader **`pending` stubs** already subsumed by a `ready` guide in the same `(subject, topic)` (the stub's key appears as a whole **word** in the ready guide's key — a word-boundary match, not a raw substring, so e.g. "sin" is not pruned by "cosine"). Touches **no** `ready`/`public`/`curated` row; a concept re-stubs if a later grade re-registers it. `SECURITY DEFINER`, `service_role`-only. (Fuzzy semantic merge of distinct-keyed near-duplicates is the v1.1 `pg_trgm` follow-on.)
 - **`_concept_key(text)`** *(concept hub)* — SQL re-implementation of `conceptKey()` with **byte-for-byte parity**: both strip control/zero-width/BOM chars (the set where JS `\s`/`trim()` and Postgres `\s` disagree) and truncate to 200 by **code point** (`left()` ↔ `Array.from().slice()`). Pinned by `test/conceptKey.test.js` golden vectors + a live-DB equality check, so grader-registered keys always match generated ones.
 - *(The hub's **reads** are browser-direct against the publicly-readable `concept_guides`/`concept_topics` via PostgREST — no RPC, no Groq.)*
 
@@ -357,7 +363,7 @@ All three routes are `POST`, `dynamic = "force-dynamic"`, **same-origin-gated** 
 ### `POST /api/score` — server-authoritative scoring (the trust boundary)
 The write path for **signed-in** users. Same same-origin + JSON guard + per-IP rate limiting as the public routes. The browser attaches its Supabase session token (`Authorization: Bearer <jwt>`); `lib/adminAuth.js#requireUser` verifies it server-side (`supabase.auth.getUser(token)`). Persistence is via the `service_role`-only `save_progress_for` RPC bound to the **verified `auth.uid()`** — the client supplies reasoning, never a score.
 - **`{ kind: "practice", subject, question, targetConcept, difficulty, topicSlug, reasoning, [image] }`** — **auth REQUIRED** (`401` without a valid token; `503` if the service-role key is unset). Reads the user's **stored** subject rating, **prior attempt count** (sets the Elo K), and the **calibrated item difficulty** for the `(subject, topicSlug, band)` bucket — all server-side; the client supplies none of the values the new rating is computed from. Applies the **pre-grade dock**, **reconciles** the grader score against its rubric, then computes the new rating via the **item-as-opponent Elo** (`eloUpdate`, §11 — *non-additive*: a poor answer on an at-level item **loses** rating). Persists score + attempt + rubric atomically (with a one-line **`rationale`** — "why your rank moved" — and the **answer-review detail** via `save_progress_for`'s `p_review`) and calibrates the item-difficulty bucket (`bump_item_difficulty`, non-blocking). Returns `{ reasoningScore, rubric, strengths[], improvements[], workedSolution, correctnessNote, socraticHint, microLesson, weakConcepts, newScore, delta, rationale, docked, subjectScore, attempt }` (PR 6). `strengths`/`improvements` are the post-grade "what you did well / to reach 100" feedback; **`workedSolution` is the full solution, revealed only on a SUBSTANTIVE attempt** (empty on a dock — so "idk" can't extract the answer). A client-supplied `score`/`newScore` is **ignored**.
-- **`{ kind: "diagnostic", answers: [{subject, question, difficulty, reasoning, [image]}] (≤9) }`** — **auth OPTIONAL** (an invalid token is still rejected; it is not silently downgraded to guest). Grades the answers **server-side with bounded concurrency (3) + retry-once-on-429 + `allSettled`** (the fix for the old 9-call burst), dedupes by `subject:difficulty`, aggregates each subject's difficulty-weighted baseline (`diagnosticSubjectScore` + `diagnosticSubjectRubric`). A **verified** user → persists the baseline + returns `{ scores, persisted:true, attempt }`; a **guest** → `{ scores, persisted:false, attempt:null }` for the client to store in `localStorage`. If every grade fails → retryable `503` (no all-zero baseline persisted). A stricter per-IP `:diag` budget (4/min) + the `:img` budget guard the Groq fan-out.
+- **`{ kind: "diagnostic", answers: [{subject, question, difficulty, reasoning, [image]}] (≤6) }`** — **auth OPTIONAL** (an invalid token is still rejected; it is not silently downgraded to guest). Grades the answers **server-side with bounded concurrency (3) + retry-once-on-429 + `allSettled`** (the fix for the old 9-call burst), dedupes by `subject:difficulty`, aggregates each subject's difficulty-weighted baseline (`diagnosticSubjectScore` + `diagnosticSubjectRubric`). A **verified** user → persists the baseline + returns `{ scores, persisted:true, attempt }`; a **guest** → `{ scores, persisted:false, attempt:null }` for the client to store in `localStorage`. If every grade fails → retryable `503` (no all-zero baseline persisted). A stricter per-IP `:diag` budget (4/min) + the `:img` budget guard the Groq fan-out.
 
 ### `POST /api/leaderboard` — anonymous rank tiers
 The Profile leaderboard. **Auth REQUIRED** (it's a signed-in surface; same same-origin + JSON guard + rate limiting). Verifies the caller's JWT (`requireUser`), then calls the **`service_role`-only** `leaderboard_tiers(p_uid)` RPC with the **verified uid** and returns `{ tiers }`. `tiers` is **anonymous by construction** — per subject + `overall`, the count of ranked learners in each of the 5 rank bands (`counts[5]`, `total`) plus the **caller's own** `{ band, score, above }` (how many rank strictly above them, for a "top X%" readout). **No display names, no email, no per-attempt rows, no other user's identity in any form** (the owner-chosen privacy model). Because the RPC is service-role-only it adds **no** `authenticated_security_definer` advisor and a client can't call the cross-user aggregate directly. The per-band counts are exactly what a later **percentile-recut** tiering would consume (architected for it; §17). `503` if the service-role key is unset.
@@ -417,7 +423,7 @@ Components: **SignIn** (provider buttons), **ProfileTab** (identity + stats + co
 
 ## 13. Testing
 
-**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **438 tests across 32 files**, all passing.
+**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **442 tests across 32 files**, all passing.
 
 | File | Covers |
 |---|---|
@@ -529,7 +535,7 @@ History of what's shipped is in `git log`: flatten-for-Vercel, audit hardening (
 - **Accepted residual risks (documented, by decision):**
   - **Same-subject practice is a read-modify-write** (`/api/score` reads prev → blends → writes); two concurrent same-user grades on one subject could lose an update. Single-user, low-stakes, guarded by the one-question-at-a-time UI + run-token; revisit if scores gate paid features. (Commented at the read in `handlePractice`.)
   - **Re-taking the diagnostic re-baselines** (overwrites accumulated scores via upsert) — the same destructive semantics as before; guarded by the UI. A "merge vs replace" prompt is the future fix.
-  - **Diagnostic partial-failure re-weights** a subject from its surviving graded answers (a transient miss on the hard tier slightly inflates that subject) — preferred over discarding a subject; retry-once covers most. All-fail → retryable 503 (no all-zero baseline).
+  - **Diagnostic partial-failure is now CONSERVATIVE (audit-fix round):** `diagnosticSubjectScore` divides by the FULL expected tier weight, so a subject whose hard tier fails grading (or is omitted) scores that tier as **0** rather than inflating to the easy-only value — closing the "submit only the easy tier → PhD rank" gaming vector. Retry-once still covers most transient misses; all-fail → retryable 503 (no all-zero baseline).
   - **SECURITY DEFINER owner not pinned** via `ALTER FUNCTION ... OWNER TO` — relies on the migration being run as the table-owning role (same assumption as the existing concept-hub DEFINER RPCs); the revoked write grants make this robust regardless.
   - **(PR 3, P3 — accepted) Unindexed `attempts` count in `/api/score` practice.** The new attempt-count read filters `(user_id, subject, type='attempt')` but the index is `(user_id, created_at, id)`, so it scans only the caller's small partition and filters `subject`/`type` in memory. Per-user attempt counts are tiny and the per-account `:practice` cap (45/min) bounds frequency, so the cost is negligible; revisit with a `(user_id, subject) where type='attempt'` partial index if attempt volumes grow. (Surfaced by the PR 3 review's cost lens; refuted as a merge-blocker.)
   - **(PR 3) One new INFO advisor — `rls_enabled_no_policy` on `item_difficulty`** — the same accepted "RLS-on, no policy = service-role only" pattern as `diagnostic_pool`/`rate_limits`/`security_events`. The table holds NO per-user data and writes are revoked from `anon`/`authenticated`; reads are RLS-denied (no policy). Intentional/accepted; no new WARN/ERROR.

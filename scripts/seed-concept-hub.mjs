@@ -21,6 +21,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { groqJSON, LEARN_SYS } from "../lib/groq.js";
+import { conceptKey } from "../lib/conceptKey.js";
 
 // One canonical core concept per taxonomy topic (mirrors lib/taxonomy.js SEED_CONCEPTS).
 const SEED = {
@@ -96,6 +97,11 @@ function normalizeGuide(subject, concept, data) {
     concept,
     topic: str(data && data.topic),
     overview: str(data && data.overview),
+    // The proof / derivation / mechanism (PR 5). MUST be carried or every seeded curated
+    // guide ships without the "Why it works" section the LearnTab renders — and curated
+    // rows never auto-heal (refresh_guide skips source='curated'), so the gap is permanent
+    // until the next seed run. Mirrors /api/learn's normalizeGuide.
+    whyItWorks: str(data && data.whyItWorks),
     keyIdeas: arr(data && data.keyIdeas),
     socraticQuestions: arr(data && data.socraticQuestions),
     pitfalls: arr(data && data.pitfalls),
@@ -121,13 +127,14 @@ async function main() {
       .eq("status", "ready");
     for (const r of data || []) existing.add(`${r.subject}:${r.concept_key}`);
   }
-  const normKey = (s) => s.toLowerCase().trim().replace(/\s+/g, " ").slice(0, 200);
-
   let seeded = 0, skipped = 0, failed = 0;
   for (const subject of SUBJECTS) {
     const allowed = SEED[subject].map(([slug]) => slug).join(", ");
     for (const [slug, concept] of SEED[subject]) {
-      if (!force && existing.has(`${subject}:${normKey(concept)}`)) {
+      // Use the CANONICAL conceptKey() (same normalizer the DB's _concept_key /
+      // seed_curated_guide write) for the skip-check — a local re-implementation would
+      // diverge on quotes / control chars / unicode and break idempotency.
+      if (!force && existing.has(`${subject}:${conceptKey(concept)}`)) {
         skipped++;
         console.log(`· skip   ${subject}/${slug} — "${concept}" (already public)`);
         continue;

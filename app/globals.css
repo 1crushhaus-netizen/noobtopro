@@ -91,7 +91,11 @@ body {
 .np-question { font-family: var(--display); font-size: 21px; line-height: 1.4; font-weight: 500; margin-bottom: 16px; }
 
 .np-input { width: 100%; background: transparent; border: none; outline: none; resize: vertical; color: var(--text); font-family: var(--ui); font-size: 16px; line-height: 1.6; padding: 18px 18px 8px; min-height: 120px; }
-.np-input::placeholder { color: #5a6472; }
+/* Visible keyboard-focus indicator on the answer/report textareas (the most-used
+   control). Without this, .np-input's outline:none leaves keyboard users no focus cue
+   (WCAG 2.4.7). outline-offset keeps the ring inside the wrapping .np-card. */
+.np-input:focus-visible { outline: 2px solid var(--math); outline-offset: -2px; border-radius: 4px; }
+.np-input::placeholder { color: var(--muted); }
 
 .np-hint { font-size: 13px; color: var(--muted); margin: 12px 2px 0; }
 .np-hint em { color: var(--text); font-style: italic; }
@@ -127,7 +131,7 @@ body {
 .np-error { background: rgba(255, 126, 116, .12); border: 1px solid rgba(255, 126, 116, .4); color: #ffd9d5; }
 .np-banner { background: rgba(91, 214, 196, .1); border: 1px solid rgba(91, 214, 196, .35); color: #cdeee8; }
 
-.np-foot { max-width: 900px; margin: 40px auto 0; font-size: 12px; color: #5a6472; font-family: var(--mono); text-align: center; }
+.np-foot { max-width: 900px; margin: 40px auto 0; font-size: 12px; color: var(--muted); font-family: var(--mono); text-align: center; }
 
 /* ---- progress dashboard ---- */
 .np-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 18px; }

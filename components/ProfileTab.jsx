@@ -172,7 +172,7 @@ export default function ProfileTab({
         <div className="np-card" style={{ textAlign: "center", padding: "36px 24px" }}>
           <h2 className="np-h2">Not ranked yet</h2>
           <p className="np-lede" style={{ margin: "0 auto 20px" }}>
-            Prove what you know across three problems to get your starting scores in math, physics, and chemistry.
+            Prove what you know across six problems (an easy and a hard one per subject) to get your starting scores in math, physics, and chemistry.
           </p>
           <button className="np-btn np-primary np-big" onClick={onStartDiagnostic}>Prove it</button>
         </div>

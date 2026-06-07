@@ -18,6 +18,8 @@
 begin;
 
 -- 1) Per-user advisory lock in the server-authoritative save RPC.
+-- Delta migration — apply once, in order. Drop any prior overload first (see 0001a/0007).
+drop function if exists public.save_progress_for(uuid, jsonb, jsonb);
 create or replace function public.save_progress_for(p_user uuid, p_scores jsonb, p_attempt jsonb)
 returns void
 language plpgsql

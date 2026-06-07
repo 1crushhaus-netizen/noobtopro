@@ -136,6 +136,10 @@ set search_path = public
 as $$
 declare
   uid uuid := auth.uid();
+  v_a jsonb;
+  v_type text;
+  v_subject text;
+  v_attempt_id bigint;
 begin
   if uid is null then
     raise exception 'not authenticated';
@@ -170,23 +174,53 @@ begin
   where s->>'subject' in ('math', 'physics', 'chemistry')
   on conflict (user_id, subject) do nothing;
 
-  -- Guarded casts (pg_input_is_valid, PG16+): a single malformed numeric/timestamp
-  -- in the guest blob must not abort the whole migration — coerce it to NULL/now()
-  -- instead of raising. The type is allow-listed so a client-supplied value can't
-  -- land an out-of-domain string in attempts.type (which now has a CHECK).
-  insert into public.attempts (user_id, type, subject, reasoning_score, delta, new_score, total_after, phd_after, created_at)
-  select uid,
-         coalesce(a->>'type', 'attempt'),
-         a->>'subject',
-         case when pg_input_is_valid(a->>'reasoning_score', 'numeric') then greatest(-2147483648, least(2147483647, round((a->>'reasoning_score')::numeric)))::int end,
-         case when pg_input_is_valid(a->>'delta', 'numeric') then greatest(-2147483648, least(2147483647, round((a->>'delta')::numeric)))::int end,
-         case when pg_input_is_valid(a->>'new_score', 'numeric') then greatest(-2147483648, least(2147483647, round((a->>'new_score')::numeric)))::int end,
-         case when pg_input_is_valid(a->>'total_after', 'numeric') then greatest(-2147483648, least(2147483647, round((a->>'total_after')::numeric)))::int end,
-         case when pg_input_is_valid(a->>'phd_after', 'numeric') then greatest(-2147483648, least(2147483647, round((a->>'phd_after')::numeric)))::int end,
-         least(coalesce(case when pg_input_is_valid(a->>'created_at', 'timestamptz') then (a->>'created_at')::timestamptz end, now()), now())
-  from jsonb_array_elements(coalesce(p_attempts, '[]'::jsonb)) as a
-  where (a->>'subject' is null or a->>'subject' in ('math', 'physics', 'chemistry'))
-    and coalesce(a->>'type', 'attempt') in ('baseline', 'attempt');
+  -- Attempts: insert PER ROW (not one bulk insert) so each guest practice attempt's
+  -- embedded review detail can be linked to its freshly-inserted attempt id and written
+  -- into attempt_reviews — otherwise the guest "Review your answers" history is lost on
+  -- first sign-in. Guarded casts (pg_input_is_valid, PG16+): a malformed numeric/timestamp
+  -- in the guest blob coerces to NULL/now() instead of aborting; type/subject are
+  -- allow-listed (rows that don't qualify are skipped, matching the old WHERE).
+  for v_a in select value from jsonb_array_elements(coalesce(p_attempts, '[]'::jsonb)) loop
+    if jsonb_typeof(v_a) <> 'object' then continue; end if;
+    v_type := coalesce(v_a->>'type', 'attempt');
+    if v_type not in ('baseline', 'attempt') then continue; end if;
+    v_subject := v_a->>'subject';
+    if v_subject is not null and v_subject not in ('math', 'physics', 'chemistry') then continue; end if;
+
+    insert into public.attempts (user_id, type, subject, reasoning_score, delta, new_score, total_after, phd_after, created_at)
+    values (
+      uid, v_type, v_subject,
+      case when pg_input_is_valid(v_a->>'reasoning_score', 'numeric') then greatest(-2147483648, least(2147483647, round((v_a->>'reasoning_score')::numeric)))::int end,
+      case when pg_input_is_valid(v_a->>'delta', 'numeric') then greatest(-2147483648, least(2147483647, round((v_a->>'delta')::numeric)))::int end,
+      case when pg_input_is_valid(v_a->>'new_score', 'numeric') then greatest(-2147483648, least(2147483647, round((v_a->>'new_score')::numeric)))::int end,
+      case when pg_input_is_valid(v_a->>'total_after', 'numeric') then greatest(-2147483648, least(2147483647, round((v_a->>'total_after')::numeric)))::int end,
+      case when pg_input_is_valid(v_a->>'phd_after', 'numeric') then greatest(-2147483648, least(2147483647, round((v_a->>'phd_after')::numeric)))::int end,
+      -- created_at clamped to (now() - 5y, now()] so a hand-edited blob can't back- or
+      -- forward-date an attempt (the upper bound was already enforced; add the floor).
+      greatest(now() - interval '5 years',
+               least(coalesce(case when pg_input_is_valid(v_a->>'created_at', 'timestamptz') then (v_a->>'created_at')::timestamptz end, now()), now()))
+    )
+    returning id into v_attempt_id;
+
+    -- Guest review detail (camelCase keys, embedded by the client) -> attempt_reviews,
+    -- keyed to the new attempt id. Only practice attempts carry one. Text length-capped;
+    -- rubric/feedback stored only if JSON objects; difficulty allow-listed.
+    if jsonb_typeof(v_a->'review') = 'object' then
+      insert into public.attempt_reviews (attempt_id, user_id, subject, question, answer, target_concept, difficulty, reasoning_score, delta, rubric, feedback, created_at)
+      values (
+        v_attempt_id, uid, v_subject,
+        left(v_a->'review'->>'question', 4000),
+        left(v_a->'review'->>'answer', 12000),
+        left(v_a->'review'->>'targetConcept', 200),
+        case when v_a->'review'->>'difficulty' in ('beginner','foundational','intermediate','advanced','phd') then v_a->'review'->>'difficulty' else null end,
+        case when pg_input_is_valid(v_a->>'reasoning_score', 'numeric') then greatest(-2147483648, least(2147483647, round((v_a->>'reasoning_score')::numeric)))::int end,
+        case when pg_input_is_valid(v_a->>'delta', 'numeric') then greatest(-2147483648, least(2147483647, round((v_a->>'delta')::numeric)))::int end,
+        case when jsonb_typeof(v_a->'review'->'rubric') = 'object' then v_a->'review'->'rubric' else null end,
+        case when jsonb_typeof(v_a->'review'->'feedback') = 'object' then v_a->'review'->'feedback' else null end,
+        now()
+      );
+    end if;
+  end loop;
 
   return true;
 end;
@@ -466,8 +500,11 @@ begin
   -- can't grow concept_guides without bound (no TTL/cleanup yet); curated/ready rows
   -- are unaffected. A small overshoot under concurrency is fine for this P3 guard.
   if (select count(*) from public.concept_guides where status = 'pending') >= 50000 then return; end if;
+  -- Stubs are visibility='hidden' (curation-only invariant: auto-grown rows are never
+  -- public). status='pending' alone already excludes them from the read policy; storing
+  -- 'hidden' too keeps them excluded even if that policy ever drops the status check.
   insert into public.concept_guides (subject, concept_key, concept, topic, status, content, visibility, source)
-  select p_subject, _concept_key(val), left(val, 200), 'general_' || p_subject, 'pending', null, 'public', 'grader'
+  select p_subject, _concept_key(val), left(val, 200), 'general_' || p_subject, 'pending', null, 'hidden', 'grader'
   from jsonb_array_elements_text(coalesce(p_concepts, '[]'::jsonb)) as val
   where coalesce(btrim(val), '') <> '' and _concept_key(val) <> ''
   on conflict (subject, concept_key) do nothing;
@@ -666,7 +703,9 @@ create table if not exists public.concept_reports (
   id bigint generated always as identity primary key,
   created_at timestamptz not null default now(),
   subject text not null check (subject in ('math','physics','chemistry')),
-  concept_key text not null,
+  -- Length-capped: the one column an authenticated user writes directly (RLS insert),
+  -- so bound it like every other text field to stop junk-row bloat of the admin queue.
+  concept_key text not null check (char_length(concept_key) <= 200),
   reporter_id uuid not null references auth.users on delete cascade,
   reason text check (reason is null or char_length(reason) <= 1000),
   status text not null default 'open' check (status in ('open','reviewed','dismissed'))
@@ -834,7 +873,10 @@ as $$
   with base as (
     select subject::text as track, user_id, score from public.scores
     union all
-    select 'overall'::text as track, user_id, round(avg(score))::int as score
+    -- 'overall' = mean over ALL THREE subjects (sum/3), matching lib/scoring.js phdIndex:
+    -- a missing subject counts as 0 rather than being dropped, so a 1–2-subject user can't
+    -- out-rank a 3-subject user (and can't game it by only scoring their best subject).
+    select 'overall'::text as track, user_id, round(sum(score) / 3.0)::int as score
       from public.scores group by user_id
   ),
   banded as (
