@@ -10,7 +10,7 @@
 > 3. **Follow the dev loop in §15** (branch → PR → CI "Test and build" → address Greptile → merge → verify) for every change.
 > 4. **Keep this README up to date.** When you change architecture, env vars, the data model, status, or conventions, update the relevant section in the same PR. A stale hand-off doc is worse than none — the next session relies on it being accurate.
 >
-> New here? Jump to [**Where to start (next task: Concept Hub browse UI)**](#where-to-start-next-task-concept-hub-browse-ui).
+> New here? Jump to [**Where to start (next task: server-side grading and spider chart)**](#where-to-start-next-task-server-side-grading-and-spider-chart).
 
 **Prove what you know. Climb from noob to pro.**
 
@@ -18,7 +18,7 @@
 
 ## Table of contents
 
-- ⭐ [**Where to start (next task: Concept Hub browse UI)**](#where-to-start-next-task-concept-hub-browse-ui)
+- ⭐ [**Where to start (next task: server-side grading and spider chart)**](#where-to-start-next-task-server-side-grading-and-spider-chart)
 1. [What it is & why](#1-what-it-is--why)
 2. [Current status & live links](#2-current-status--live-links)
 3. [Quickstart](#3-quickstart)
@@ -79,7 +79,7 @@ Score bands (global scale): **0–20** Absolute beginner · **20–40** Foundati
 | **Supabase OAuth callback** | `https://vwvhgnlgubctrgksyohr.supabase.co/auth/v1/callback` (stable; set once per provider) |
 
 **What works today:**
-- ✅ Diagnostic → per-subject scoring → calibrated practice loop (Groq-backed).
+- ✅ **3-tier diagnostic** (easy/intermediate/hard per subject, difficulty-weighted baseline) → per-subject scoring → calibrated practice loop (Groq-backed). *(Scoring is still client-computed — making it server-authoritative is the next task; see "Where to start".)*
 - ✅ Photo-of-work grading (vision model, graceful text fallback).
 - ✅ **Google sign-in** (configured + working), durable per-user storage with RLS.
 - ✅ **Guest mode** (no login): full flow stored in `localStorage`. On first sign-in, guest progress **migrates** into the account.
@@ -121,19 +121,36 @@ Other commands: `npm test` (run tests once), `npm run test:watch`, `npm run buil
 
 ---
 
-## Where to start (next task: Concept Hub v1.1)
+## Where to start (next task: server-side grading and spider chart)
 
-> **Shipped:** PR #29 (Concept Hub backend + audit hardening) and PR #30 (Admin dashboard — approve→public / hide / delete + abuse warnings) are **MERGED**. The **Concept Hub browse UI + user report button** are built on `feat/concept-hub-browse-ui` (behind `NEXT_PUBLIC_ENABLE_CONCEPT_HUB`): the Learn tab becomes the searchable curated catalog (subject → topic → concept → Socratic guide), with a **Report** button for signed-in users (writes to `concept_reports`, which the admin dashboard triages — `lib/catalog.js` does the reads/report; the guide opens via the cached `/api/learn`). Unapproved guides are shown **only to admins**, marked `*` — preserving curation-only (the public catalog never exposes uncurated content).
->
-> To go live: set `NEXT_PUBLIC_ENABLE_CONCEPT_HUB=true` in Vercel + redeploy.
+> **Shipped & live (all merged):** the **Concept Hub** — backend (PR #29) + admin dashboard / curation + abuse monitoring (PR #30) + browse UI & report button (PR #31, behind `NEXT_PUBLIC_ENABLE_CONCEPT_HUB`, which is ON) — and the **3-tier "Prove it" diagnostic** (PR #32: each subject asks easy/intermediate/hard, 9 questions, difficulty-weighted per-subject baseline; the live `diagnostic_pool` serves 9-question sets). Each round was gated by an adversarial pre-merge review (see the dev-loop note at the end).
 
-### Next task — Concept Hub v1.1
-- **Open the hub to undiagnosed guests.** v1 gates the Learn tab on having taken the diagnostic (so the practice flow always has a subject score); the hub *content* is already decoupled from your weak concepts. Opening it to pure guests needs the practice flow made null-safe on a missing subject score + a landing-nav entry point.
-- **`pg_trgm`** fuzzy/typo-tolerant search (v1 uses plain `ILIKE`); a curated **`tags[]`** facet; a **canonical-merge** de-dup tool; a batched `times_opened` popularity counter.
-- **Roadmap ([§17](#17-roadmap--known-limitations)):** durable per-account rate limiter, server-authoritative scoring, nonce-based strict CSP, per-item IRT/Elo, GitHub/Discord sign-in.
+### The task — a trustworthy, server-side grading system + a reasoning "spider chart"
+Three pillars (the design decisions below are **already made** — build to them; don't re-litigate):
 
-### How the pre-merge audit was run (reference for the next gate)
-Be ruthlessly objective; treat README/code claims of "intended / safe / service-role only / verified / fixed" as **not evidence** and confirm each against the actual source **and the live DB**. Fan out independent finder agents by area/lens, then **adversarially verify every candidate finding** and reproduce it on paper (LLM reviewers — including your own sub-agents — hallucinate; an unverified claim is worse than none). Run the Supabase **advisors** (`get_advisors`, security + performance) and inspect live **RLS / policies / grants / function ACLs** as ground truth. **Note:** Greptile's trial review limit is exhausted, so it no longer auto-reviews PRs ([§15](#15-how-we-work-the-dev-loop)) — a manual/self review is now the only gate. Classify findings **P0–P3** and deliver a written report + an explicit merge-blocker list. For DB fixes, edit `db/schema.sql` **and** apply the migration to the live project, then re-check advisors.
+**1. Make scoring server-AUTHORITATIVE (signed-in users).** The grader already runs server-side (Groq via `/api/grade`), but the **score is computed on the client** today — `blend()` for practice, `diagnosticSubjectScore()` for the diagnostic — and the client then sends that number to the `save_progress` RPC. So a signed-in user can self-assert any score (the accepted residual in [§17](#17-roadmap--known-limitations)). Close it: for a signed-in user the **server** must compute the new score and persist it, so the client can't supply an arbitrary value.
+- Add an **authenticated** scoring path: verify the caller's Supabase JWT server-side — **reuse `lib/adminAuth.js#requireAdmin`'s `getUser(token)` pattern** (the admin routes are the precedent for per-user auth) — compute the score on the server (the math in `lib/scoring.js` is pure/shared, so a route can call `blend`/`diagnosticSubjectScore` directly), and write it for the verified `auth.uid()` (service-role client, or a `SECURITY DEFINER` RPC). Simplest shape: one authenticated route that **grades and returns+persists the trusted score in one trip** (fold grade + score + save together, rather than the current grade→client-blend→save_progress dance).
+- **Guests stay local** (localStorage, client-computed) — no account to protect; the trust gap only matters for signed-in/leaderboard/paid contexts. Keep the guest path working unchanged.
+- This is the prerequisite for any leaderboard / score-gated / paid feature and clears the §17 "scores client-computed / not trustworthy" residual.
+
+**2. Per-subject reasoning rubric (powers both the explanations and the chart).** The 5-dimension rubric — **Conceptual grasp · Logical structure · Strategy · Execution · Communication** (0–4 each) — exists only for *practice* attempts today (`PRACTICE_GRADE_SYS` in `lib/groq.js`); the *diagnostic* grader returns only a subject score + weak concepts. Give every **subject** a rubric profile:
+- Have the diagnostic grader emit the 5-dim rubric per question (add it to `DIAG_GRADE_SYS`) and aggregate the 3 tiers into a per-subject rubric (difficulty-weighted, mirroring `diagnosticSubjectScore`).
+- **Persist** the per-subject rubric so it can be charted (decide: a `rubric jsonb` column on `scores`, or aggregate from `attempts`) → edit `db/schema.sql` **and** apply the migration to the live project, then re-check advisors.
+- "**Explain what to work on**": turn the lowest rubric dimensions + the weak concepts into concrete, actionable guidance, wired into the existing **Learn tab** (`openLearn`) / concept guides (e.g. "your *Logical structure* is the gap — here's the idea + a problem to try"). Also worth tightening grading **consistency** — the LLM can return a `reasoningScore` that contradicts its own rubric (e.g. 5/100 with all-zero bars); §17 notes anchored exemplars / multi-sample averaging as the fix.
+
+**3. The spider / radar chart.** Axes = the **5 rubric dimensions**; **one polygon per subject** (Mathematics / Physics / Chemistry, using the existing `--math`/`--phys`/`--chem` colors) so the learner compares their reasoning profile across subjects (matches the attached concept image). **Hand-roll it in inline SVG** — no new dependency — to match the existing dependency-free charts in `components/ProgressDashboard.jsx` (give it `role="img"` + an `aria-label`, like `LineChart`/`BarChart`/`Ring`). It lives in the **Progress tab** (`ProgressDashboard`); its data is the per-subject rubric from pillar 2.
+
+### Fix this too (closely related)
+The 3-tier diagnostic fires **9 parallel `/api/grade` calls** on submit (`submitDiagnostic`, `Promise.all` = all-or-nothing). On Groq's free tier (~30 req/min + per-minute token caps, §16) that bursts into **429s** and a single rate-limited call sinks the whole diagnostic ("Grading is temporarily unavailable" — observed in prod). The server-side grading rework should **bound grading concurrency + retry a 429 once**, and/or use `Promise.allSettled` so one bad question doesn't fail the set.
+
+### Key files
+`lib/scoring.js` (pure score math — keep here, call from the server) · `lib/groq.js` (`DIAG_GRADE_SYS` ← add rubric; `PRACTICE_GRADE_SYS` already has it) · `app/api/grade/route.js` (add auth + server-side score+persist; `lib/adminAuth.js` = the JWT pattern) · `lib/store.js` + `save_progress` (`db/schema.sql`) (client-driven persist → server-driven for signed-in) · `components/Noobtopro.jsx` (`submitPractice`/`submitDiagnostic` consume the server score instead of computing it) · `components/ProgressDashboard.jsx` (the radar).
+
+### How to work (dev loop §15) — treat this as a security-sensitive surface
+It adds a per-user **auth** path and moves the **trust boundary**, so review it like the admin dashboard. Be ruthlessly objective; treat README/code claims of "intended / safe / verified / fixed" as **not evidence** and confirm each against the actual source **and the live DB**. Run a focused adversarial **security review** before merge (forged/missing token, non-admin/non-owner write, can the client still self-assert a score, cross-user write, secret leakage), fanning out finder agents and **verifying every finding** on paper (sub-agents hallucinate). Run the Supabase **advisors** and inspect live **RLS / policies / grants / function ACLs**. **Note:** Greptile's trial review limit is exhausted, so it no longer auto-reviews PRs — a manual/self review is the only gate. Classify findings **P0–P3**, list explicit merge-blockers; for DB changes edit `db/schema.sql` **and** apply the migration to the live project, then re-check advisors.
+
+### Also queued (lower priority — see [§17](#17-roadmap--known-limitations))
+Concept Hub v1.1 (open the hub to undiagnosed guests; `pg_trgm` fuzzy search; `tags[]`; canonical-merge de-dup); durable per-account rate limiter; nonce-based strict CSP; per-item IRT/Elo; GitHub/Discord sign-in.
 
 ---
 
@@ -461,7 +478,8 @@ History of what's shipped is in `git log` (PRs #2–#29): flatten-for-Vercel, au
 - **Audit-fix round (a second full pre-merge audit of PR #29 — 8 finder lenses + adversarial verification — fixes applied to this branch):** `_concept_key`↔`conceptKey` made **true byte-for-byte parity** (control/zero-width/BOM strip + code-point truncation; live-verified) so the read-through cache can't miss on exotic input and the README parity claim is now accurate; **int4-range clamp** on every attempt field in `save_progress`/`migrate_guest_data` (a corrupt guest blob can no longer abort the whole migration); **`weak_concepts` capped at 64** (server RPCs + client); **best-effort 50k cap** on pending grader stubs; **sign-out synchronously clears in-memory scores/history** (shared-device peek); **practice image preview revoked on completion** (matching the diagnostic fix); **guest `localStorage` validated/clamped on read**; `totalPoints`/`phdIndex` coerce non-integer scores; `isConceptSafe` hardened (expanded TLDs, zero-width-split evasion, Unicode-letter count). New tests pin the **curation-only invariant** and **key parity** (`test/schema-invariants.test.js`, `test/conceptKey.test.js`) and add **request-guard 403/415** coverage on all three routes. The audit confirmed **0 P0/0 P1 / no merge-blockers**; everything fixed here was P2/P3.
 - **Verified clean (not just claimed):** no cross-user data read/write (RLS bound to `auth.uid()`), no SQLi, no XSS sinks (all LLM/user content is React-escaped; no `dangerouslySetInnerHTML`), no secret leakage, SECURITY DEFINER RPCs are `service_role`-only, and **no RPC path yields a `public`+`ready` guide** (curation-only holds) — all checked against the live DB.
 - **Accepted residual risks (documented, by decision):**
-  - **Scores are client-computed and NOT yet trustworthy** — a user can self-assert their own score (self-only; RLS blocks touching others). Fine while scores are demonstrative; **must move scoring server-authoritative before any score-gated / paid / leaderboard / cross-user feature.**
+  - **Scores are client-computed and NOT yet trustworthy** — a user can self-assert their own score (self-only; RLS blocks touching others). Fine while scores are demonstrative; **must move scoring server-authoritative before any score-gated / paid / leaderboard / cross-user feature.** → **This is now the active next task — see "Where to start".**
+  - **The 3-tier diagnostic fires 9 parallel `/api/grade` calls** (`submitDiagnostic`, `Promise.all`), so on Groq's free-tier limits a single 429 sinks the whole diagnostic ("Grading is temporarily unavailable"). Bound grading concurrency + retry-once on 429 (and/or `Promise.allSettled`) — folded into the grading-system task above.
   - **Durable rate limiter** (e.g. `@upstash/ratelimit`) + per-account limits to replace the in-memory one — do before monetizing / heavy public traffic.
   - **`delete_user_data`** clears the user's scores/attempts but does **not** delete the `auth.users` account (needs an admin-API flow).
   - **Disable the Supabase email/password provider** (the app is OAuth-only) to clear the leaked-password advisor and close an unused signup surface; if kept, enable HIBP leaked-password protection.
