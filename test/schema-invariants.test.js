@@ -135,4 +135,15 @@ describe("db/schema.sql — audit-hardening invariants", () => {
     expect(schema).toMatch(/create unique index if not exists concept_reports_one_open_per_user/);
     expect(schema).toMatch(/where status = 'open'/);
   });
+
+  it("durable rate limiter: rate_limit_hit is SECURITY DEFINER + service-role only; rate_limits is write-locked", () => {
+    const body = fnBody("rate_limit_hit");
+    expect(body).toContain("security definer");
+    expect(body).toContain("on conflict (bucket) do update"); // atomic increment
+    expect(schema).toContain("revoke all on function public.rate_limit_hit(text, int, int) from public, anon, authenticated");
+    expect(schema).toContain("grant execute on function public.rate_limit_hit(text, int, int) to service_role");
+    expect(schema).not.toMatch(/grant execute on function public\.rate_limit_hit\(text, int, int\) to authenticated/);
+    expect(schema).toMatch(/alter table public\.rate_limits enable row level security/);
+    expect(schema).toMatch(/revoke insert, update, delete, truncate on public\.rate_limits from anon, authenticated/);
+  });
 });
