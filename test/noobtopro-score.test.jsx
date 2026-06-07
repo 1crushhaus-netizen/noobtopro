@@ -95,7 +95,8 @@ describe("Noobtopro — signed-in practice is server-authoritative", () => {
     // The feedback panel renders the SERVER's reasoning score (88) — proof the client
     // rendered the trusted server result, not a client-computed one.
     await screen.findByText(/reasoning quality this attempt/i);
-    expect(screen.getByText("88")).toBeTruthy();
+    // 88 renders in the headline AND as the breakdown total — both are the server's score.
+    expect(screen.getAllByText("88").length).toBeGreaterThan(0);
 
     // It went to /api/score WITH the Bearer token...
     const scoreCall = fetchMock.mock.calls.find(([p]) => p === "/api/score");

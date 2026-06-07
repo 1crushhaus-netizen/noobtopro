@@ -1,12 +1,12 @@
 import { NextResponse, after } from "next/server";
 import { groqJSON, DIAG_GRADE_SYS, PRACTICE_GRADE_SYS } from "@/lib/groq";
-import { clampScore, ORDER, normalizeRubric, reconcileReasoningScore } from "@/lib/scoring";
+import { clampScore, ORDER, normalizeRubric, scoreFromRubric } from "@/lib/scoring";
 import { preGradeDock } from "@/lib/preGrade";
 import { checkRateLimit, clientKey } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
-import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, normalizeFeedbackList, capSolution } from "@/lib/gradeInput";
+import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, normalizeFeedbackList, capSolution, normalizeErrors, normalizeSolve } from "@/lib/gradeInput";
 
 export const dynamic = "force-dynamic";
 
@@ -142,9 +142,13 @@ export async function POST(req) {
       registerWeakConcepts(subject, weakConcepts); // auto-grow the hub (non-blocking)
       return NextResponse.json({
         ...data,
-        // Reconcile the score against the rubric so it can't contradict the bars.
-        score: reconcileReasoningScore(data?.score, rubric),
+        // The headline is the TRANSPARENT weighted mean of the rubric axes — the grader no
+        // longer emits a score, so there's nothing to reconcile (path-independent).
+        score: scoreFromRubric(rubric),
         rubric,
+        solve: normalizeSolve(data?.solve),
+        errors: normalizeErrors(data?.errors),
+        finalAnswerMatches: data?.finalAnswerMatches === true,
         weakConcepts,
       });
     }
@@ -162,6 +166,9 @@ export async function POST(req) {
         microLesson: dock.microLesson,
         weakConcepts: dock.weakConcepts,
         newScoreSuggestion: dock.reasoningScore,
+        solve: null,
+        errors: [],
+        finalAnswerMatches: false,
         docked: true,
       });
     }
@@ -177,7 +184,7 @@ export async function POST(req) {
         `Learner's reasoning:\n"""${work}"""`,
       image: img.image,
       grade: true, // route to the cheaper grading model
-      maxTokens: 2000, // room for strengths + improvements + the worked solution
+      maxTokens: 3000, // room for the grader's solve block + strengths/improvements + typed errors + worked solution
     });
     // Normalize every field the UI renders so malformed model output can't show NaN or
     // out-of-range values. reasoningScore is reconciled against the rubric; rubric -> 0–4
@@ -186,11 +193,15 @@ export async function POST(req) {
     const rubric = normalizeRubric(data?.rubric);
     const weakConcepts = normalizeWeakConcepts(data?.weakConcepts);
     registerWeakConcepts(subject, weakConcepts); // auto-grow the hub (non-blocking)
+    const reasoningScore = scoreFromRubric(rubric); // transparent weighted mean of the axes
     return NextResponse.json({
       ...data,
-      reasoningScore: reconcileReasoningScore(data?.reasoningScore, rubric),
-      newScoreSuggestion: clampScore(data?.newScoreSuggestion),
+      reasoningScore,
+      newScoreSuggestion: reasoningScore, // the guest's local Elo target = the same axis-derived score
       rubric,
+      solve: normalizeSolve(data?.solve),
+      errors: normalizeErrors(data?.errors),
+      finalAnswerMatches: data?.finalAnswerMatches === true,
       strengths: normalizeFeedbackList(data?.strengths),
       improvements: normalizeFeedbackList(data?.improvements),
       workedSolution: capSolution(data?.workedSolution),
