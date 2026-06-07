@@ -236,7 +236,6 @@ describe("POST /api/score practice — server-authoritative score", () => {
 describe("POST /api/score diagnostic", () => {
   const answers = [
     { subject: "math", question: "Qm-easy", difficulty: "foundational", reasoning: "a" },
-    { subject: "math", question: "Qm-mid", difficulty: "intermediate", reasoning: "b" },
     { subject: "math", question: "Qm-hard", difficulty: "advanced", reasoning: "c" },
   ];
 
@@ -250,7 +249,7 @@ describe("POST /api/score diagnostic", () => {
     expect(j.attempt).toBe(null);
     expect(j.scores.math.score).toBeGreaterThan(0);
     expect(Object.keys(j.scores.math.rubric)).toHaveLength(5); // per-subject rubric profile
-    expect(fetchMock).toHaveBeenCalledTimes(3); // one grade per answer
+    expect(fetchMock).toHaveBeenCalledTimes(2); // one grade per answer (2 tiers)
   });
 
   it("SIGNED-IN: persists the baseline for the verified uid and returns the baseline attempt", async () => {
@@ -286,7 +285,7 @@ describe("POST /api/score diagnostic", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2); // 2 distinct slots, not 4
   });
 
-  it("rejects more answers than the diagnostic size (>9) with 400", async () => {
+  it("rejects more answers than the diagnostic size (>6) with 400", async () => {
     const many = Array.from({ length: 10 }, (_, i) => ({ subject: "math", question: `Q${i}`, difficulty: "foundational", reasoning: "x" }));
     expect((await POST(req({ kind: "diagnostic", answers: many }))).status).toBe(400);
   });
@@ -297,13 +296,13 @@ describe("POST /api/score diagnostic", () => {
   });
 
   it("is resilient (allSettled): one failed grade doesn't sink the set", async () => {
-    // First grade hard-fails (500, not retryable); the other two succeed → still 200.
+    // First grade hard-fails (500, not retryable); the other succeeds → still 200.
     const fetchMock = mockGroq(DIAG_GRADE, { failFirstN: 1, failStatus: 500 });
     const res = await POST(req({ kind: "diagnostic", answers }));
     expect(res.status).toBe(200);
     const j = await res.json();
     expect(j.scores.math.score).toBeGreaterThan(0);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("returns a retryable 503 when EVERY grade fails (no all-zero baseline persisted)", async () => {
@@ -319,17 +318,17 @@ describe("POST /api/score diagnostic", () => {
   it("CHARGES the :img budget for diagnostic vision grades — they can't bypass the image cap", async () => {
     // base64 of the PNG magic signature (89 50 4E 47 ...), a valid image to normalizeImage.
     const PNG = { mime: "image/png", data: "iVBORw0KGgo=" };
-    const nineImages = [];
+    const sixImages = [];
     for (const s of ["math", "physics", "chemistry"]) {
-      for (const d of ["foundational", "intermediate", "advanced"]) {
-        nineImages.push({ subject: s, question: `Q-${s}-${d}`, difficulty: d, reasoning: "x", image: PNG });
+      for (const d of ["foundational", "advanced"]) {
+        sixImages.push({ subject: s, question: `Q-${s}-${d}`, difficulty: d, reasoning: "x", image: PNG });
       }
     }
     mockGroq(DIAG_GRADE);
-    // First diagnostic: 9 image grades consume 9 of the 10-token :img budget → ok.
-    expect((await POST(req({ kind: "diagnostic", answers: nineImages }))).status).toBe(200);
-    // Second diagnostic: only 1 :img token remains, so the 9-image fan-out is rejected
-    // (before this fix the diagnostic never touched :img and this returned 200).
-    expect((await POST(req({ kind: "diagnostic", answers: nineImages }))).status).toBe(429);
+    // First diagnostic: 6 image grades consume 6 of the 10-token :img budget → ok.
+    expect((await POST(req({ kind: "diagnostic", answers: sixImages }))).status).toBe(200);
+    // Second diagnostic: only 4 :img tokens remain but it needs 6, so the fan-out is
+    // rejected (before this fix the diagnostic never touched :img and this returned 200).
+    expect((await POST(req({ kind: "diagnostic", answers: sixImages }))).status).toBe(429);
   });
 });

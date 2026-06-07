@@ -14,9 +14,9 @@
 //
 // kind:"practice"   → REQUIRES a verified user (it persists). Grades one question,
 //                     returns the coaching feedback + the trusted new score.
-// kind:"diagnostic" → auth-OPTIONAL. Grades the (≤9) answers server-side with
+// kind:"diagnostic" → auth-OPTIONAL. Grades the (≤6) answers server-side with
 //                     bounded concurrency + retry-once-on-429 + allSettled (so the
-//                     old 9-call client burst can't 429 the whole set). A verified
+//                     old per-question parallel client burst can't 429 the whole set). A verified
 //                     user gets the baseline persisted; a guest gets it back to
 //                     store in localStorage (no account to protect).
 //
@@ -287,7 +287,7 @@ async function handlePractice(req, body) {
 
 // --- diagnostic: auth-OPTIONAL batch baseline grading ---------------------------
 async function handleDiagnostic(req, body) {
-  // Stricter budget FIRST: one diagnostic request fans out to up to 9 Groq grades, so
+  // Stricter budget FIRST: one diagnostic request fans out to up to 6 Groq grades, so
   // reject an over-budget request before any auth round-trip or grading.
   const diagRl = rateLimit(`${clientKey(req)}:diag`, { max: 4 });
   if (!diagRl.ok) {
@@ -353,7 +353,7 @@ async function handleDiagnostic(req, body) {
 
   // Charge the per-IP IMAGE budget for the diagnostic's vision grades — one token per
   // image-bearing answer — so the costliest Groq path (multimodal, multi-MB) is bounded
-  // identically to the practice route. Without this, a diagnostic could drive up to 9
+  // identically to the practice route. Without this, a diagnostic could drive up to 6
   // vision calls/request entirely outside the :img cap.
   const imgCount = items.filter((i) => i.image).length;
   if (imgCount) {

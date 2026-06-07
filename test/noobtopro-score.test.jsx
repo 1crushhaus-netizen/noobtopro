@@ -113,19 +113,16 @@ describe("Noobtopro — signed-in diagnostic is server-persisted", () => {
   const DIAGNOSTIC = {
     questions: [
       { subject: "math", topic: "t", difficulty: "foundational", question: "MATH-FND" },
-      { subject: "math", topic: "t", difficulty: "intermediate", question: "MATH-INT" },
       { subject: "math", topic: "t", difficulty: "advanced", question: "MATH-ADV" },
       { subject: "physics", topic: "t", difficulty: "foundational", question: "PHYS-FND" },
-      { subject: "physics", topic: "t", difficulty: "intermediate", question: "PHYS-INT" },
       { subject: "physics", topic: "t", difficulty: "advanced", question: "PHYS-ADV" },
       { subject: "chemistry", topic: "t", difficulty: "foundational", question: "CHEM-FND" },
-      { subject: "chemistry", topic: "t", difficulty: "intermediate", question: "CHEM-INT" },
       { subject: "chemistry", topic: "t", difficulty: "advanced", question: "CHEM-ADV" },
     ],
   };
-  const ORDER = ["MATH-FND", "MATH-INT", "MATH-ADV", "PHYS-FND", "PHYS-INT", "PHYS-ADV", "CHEM-FND", "CHEM-INT", "CHEM-ADV"];
+  const ORDER = ["MATH-FND", "MATH-ADV", "PHYS-FND", "PHYS-ADV", "CHEM-FND", "CHEM-ADV"];
 
-  it("sends all 9 answers to /api/score (kind:diagnostic) with the Bearer token, then persists server-side (no saveProgress)", async () => {
+  it("sends all 6 answers to /api/score (kind:diagnostic) with the Bearer token, then persists server-side (no saveProgress)", async () => {
     // Signed-in but no scores yet → starts at the intro so we can run the diagnostic.
     store.loadState.mockResolvedValue({ scores: null, history: [] });
     const persisted = {
@@ -157,13 +154,13 @@ describe("Noobtopro — signed-in diagnostic is server-persisted", () => {
 
     await screen.findByText("Where you stand");
 
-    // ONE batched /api/score request, kind:diagnostic, with the Bearer token + 9 answers.
+    // ONE batched /api/score request, kind:diagnostic, with the Bearer token + 6 answers.
     const scoreCalls = fetchMock.mock.calls.filter(([p]) => p === "/api/score");
     expect(scoreCalls).toHaveLength(1);
     expect(scoreCalls[0][1].headers.Authorization).toBe("Bearer tok-123");
     const body = JSON.parse(scoreCalls[0][1].body);
     expect(body.kind).toBe("diagnostic");
-    expect(body.answers).toHaveLength(9);
+    expect(body.answers).toHaveLength(6);
     // Server persisted it — the client never writes locally.
     expect(store.saveProgress).not.toHaveBeenCalled();
   });

@@ -110,7 +110,7 @@ function fileToBase64(file) {
 const now = () => new Date().toISOString();
 
 // Stable per-question key for the 3-tier diagnostic (each subject has an
-// easy/intermediate/hard question), so the answers map can hold all 9 answers.
+// easy/hard question), so the answers map can hold all 6 answers.
 const qid = (q) => (q ? `${q.subject}:${q.difficulty}` : "");
 
 // NEXT_PUBLIC_* is inlined at build time. When "true", the Learn tab becomes the
@@ -508,9 +508,9 @@ export default function Noobtopro() {
     setBusy(true);
     try {
       const data = await api("/api/generate", { kind: "diagnostic" });
-      // Index by subject+difficulty, then require ALL 3 subjects × ALL 3 tiers
-      // (9 questions). Guards against duplicates / unknown subject or difficulty /
-      // a partial set. ORDER.includes is prototype-safe.
+      // Index by subject+difficulty, then require ALL 3 subjects × ALL tiers
+      // (6 questions: easy+hard per subject). Guards against duplicates / unknown
+      // subject or difficulty / a partial set. ORDER.includes is prototype-safe.
       const byKey = {};
       for (const q of data.questions || []) {
         if (
@@ -1124,8 +1124,9 @@ export default function Noobtopro() {
             {/* DIAGNOSTIC */}
             {stage === "diagnostic" && curQ && (
               <div className="fade-up" key={qi}>
-                {/* Progress: 3 subject groups × 3 difficulty pips (easy→hard),
-                    filled up to the current question. Relies on the subject-major,
+                {/* Progress: 3 subject groups × 2 difficulty pips (easy→hard),
+                    filled up to the current question. Data-driven off
+                    DIAGNOSTIC_DIFFICULTIES; relies on the subject-major,
                     easy→hard ordering set in beginDiagnostic. */}
                 <div className="np-diag-progress">
                   {ORDER.map((s, si) => (
