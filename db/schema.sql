@@ -4,7 +4,8 @@
 -- This is the full DDL applied to the Supabase project (via the connector /
 -- migrations). It is committed so the database is reproducible from version
 -- control. The app depends on exactly these tables AND on the RPCs below —
--- migrate_guest_data, delete_user_data, save_progress (called by lib/store.js)
+-- migrate_guest_data, delete_user_data (called by lib/store.js), save_progress_for
+-- (service-role only; called by /api/score for server-authoritative scoring)
 -- and try_add_diagnostic (called by the /api/generate server route) — so
 -- provisioning the tables alone is NOT enough; the functions must exist or sign-in
 -- migration, "Reset my progress", the practice/diagnostic write path, and the
@@ -20,9 +21,15 @@ create table if not exists public.scores (
   score int not null default 0,
   weak_concepts text[] not null default '{}',
   comment text,
+  -- Per-subject reasoning rubric ({conceptual_understanding, logical_structure,
+  -- strategy, execution_accuracy, communication} each 0–4) powering the radar chart.
+  -- Server-computed only (see save_progress_for); NULL until a first graded result.
+  rubric jsonb,
   updated_at timestamptz not null default now(),
   primary key (user_id, subject)
 );
+-- Add the rubric column to an already-provisioned scores table (idempotent).
+alter table public.scores add column if not exists rubric jsonb;
 
 create table if not exists public.attempts (
   id bigint generated always as identity primary key,
@@ -41,32 +48,55 @@ create index if not exists attempts_user_created_idx
   on public.attempts (user_id, created_at, id);
 
 -- ---- row-level security ----------------------------------------------------
+-- SERVER-AUTHORITATIVE SCORING: clients may READ their own rows (for hydrate) but
+-- may NOT write scores/attempts directly. Removing the write policy closes the
+-- self-assert gap — a signed-in user can no longer PATCH their own scores row to an
+-- arbitrary value via PostgREST. All writes go through SECURITY DEFINER functions:
+--   save_progress_for  (service-role only; called by /api/score after JWT verify)
+--   migrate_guest_data / delete_user_data (authenticated; self-scoped via auth.uid())
+-- Those functions are owned by a role that bypasses RLS, so a SELECT-only policy
+-- here does not block them.
 alter table public.scores   enable row level security;
 alter table public.attempts enable row level security;
 
+-- Drop the prior read+write policies (named "own ...") if present, then the
+-- read-only replacements. Idempotent: safe to re-run.
 drop policy if exists "own scores" on public.scores;
-create policy "own scores"
-  on public.scores for all
+drop policy if exists "read own scores" on public.scores;
+create policy "read own scores"
+  on public.scores for select
   to authenticated
-  using ((select auth.uid()) = user_id)        -- (select ...) => evaluated once/query
-  with check ((select auth.uid()) = user_id);
+  using ((select auth.uid()) = user_id);     -- (select ...) => evaluated once/query
 
 drop policy if exists "own attempts" on public.attempts;
-create policy "own attempts"
-  on public.attempts for all
+drop policy if exists "read own attempts" on public.attempts;
+create policy "read own attempts"
+  on public.attempts for select
   to authenticated
-  using ((select auth.uid()) = user_id)
-  with check ((select auth.uid()) = user_id);
+  using ((select auth.uid()) = user_id);
+
+-- Defense-in-depth: also revoke direct write privileges at the GRANT layer (Supabase
+-- grants anon/authenticated full table DML by default). With these revoked, the
+-- SELECT-only intent holds even if a permissive write policy is ever added by mistake
+-- or RLS is toggled. SELECT stays (RLS-gated by the read policies). The legitimate
+-- write path — save_progress_for / migrate_guest_data / delete_user_data — is
+-- SECURITY DEFINER (owner bypasses RLS and these grants), so it is unaffected.
+revoke insert, update, delete, truncate on public.scores   from anon, authenticated;
+revoke insert, update, delete, truncate on public.attempts from anon, authenticated;
 
 -- ---- RPC: atomic guest -> account migration (called on first sign-in) ------
--- SECURITY INVOKER so RLS still applies (a user can only write their own rows).
--- Advisory-locked per user + "scores already exist" guard = idempotent and
--- concurrency-safe; both inserts run in ONE transaction so history can't be
--- partially migrated or duplicated. Input sizes are bounded.
+-- SECURITY DEFINER: the scores/attempts tables are now SELECT-only under RLS
+-- (server-authoritative scoring), so this function must run with definer rights to
+-- write. It is SELF-SCOPED — it captures auth.uid() and only ever touches the
+-- caller's own rows (the JWT claim is read from the request regardless of definer),
+-- so authenticated callers can migrate ONLY their own guest data. Advisory-locked
+-- per user + "scores already exist" guard = idempotent and concurrency-safe; both
+-- inserts run in ONE transaction so history can't be partially migrated or
+-- duplicated. Input sizes are bounded. set search_path pins schema resolution.
 create or replace function public.migrate_guest_data(p_scores jsonb, p_attempts jsonb)
 returns boolean
 language plpgsql
-security invoker
+security definer
 set search_path = public
 as $$
 declare
@@ -87,7 +117,7 @@ begin
     return false;  -- account already has data; nothing to migrate
   end if;
 
-  insert into public.scores (user_id, subject, score, weak_concepts, comment, updated_at)
+  insert into public.scores (user_id, subject, score, weak_concepts, comment, rubric, updated_at)
   select uid,
          s->>'subject',
          greatest(0, least(100, coalesce(case when pg_input_is_valid(s->>'score', 'numeric') then round((s->>'score')::numeric) end, 0)))::int,
@@ -99,6 +129,7 @@ begin
            '{}'::text[]
          ),
          left(coalesce(s->>'comment', ''), 2000),
+         case when jsonb_typeof(s->'rubric') = 'object' then s->'rubric' else null end,
          now()
   from jsonb_array_elements(coalesce(p_scores, '[]'::jsonb)) as s
   where s->>'subject' in ('math', 'physics', 'chemistry')
@@ -134,10 +165,12 @@ revoke all on function public.migrate_guest_data(jsonb, jsonb) from public, anon
 grant execute on function public.migrate_guest_data(jsonb, jsonb) to authenticated;
 
 -- ---- RPC: atomic delete of the caller's data (Profile -> "Reset my progress")
+-- SECURITY DEFINER (scores/attempts are SELECT-only under RLS now), self-scoped to
+-- auth.uid() so a caller can delete ONLY their own rows.
 create or replace function public.delete_user_data()
 returns void
 language plpgsql
-security invoker
+security definer
 set search_path = public
 as $$
 declare
@@ -154,35 +187,39 @@ $$;
 revoke all on function public.delete_user_data() from public, anon;
 grant execute on function public.delete_user_data() to authenticated;
 
--- ---- RPC: atomic save of a score update + its matching attempt --------------
--- The practice/diagnostic flow persists a subject-score change AND appends an
--- attempt-history row. Done as two separate client writes, a partial failure can
--- persist the score but lose the attempt (and the client re-resolves identity
--- twice). This RPC does BOTH in one transaction, capturing auth.uid() once.
--- SECURITY INVOKER so RLS still applies. p_scores is the full scores map as a
--- jsonb array of {subject,score,weak_concepts,comment}; p_attempt is the single
--- attempt to append (snake_case, matching lib/store.js). Values are clamped /
--- allow-listed / guard-cast exactly like migrate_guest_data so malformed input
--- can't violate a CHECK or abort the write.
-create or replace function public.save_progress(p_scores jsonb, p_attempt jsonb)
+-- ---- RPC: server-authoritative save of a score update + its attempt ---------
+-- Server-authoritative scoring path. The score is COMPUTED ON THE SERVER (/api/score
+-- verifies the caller's JWT, grades via Groq, then blends from the user's STORED
+-- level) and persisted here for the verified user. SERVICE-ROLE ONLY: the server
+-- passes the JWT-verified uid as p_user; the scores/attempts tables are SELECT-only
+-- under RLS — so a signed-in user cannot self-assert a score by ANY path (no direct
+-- write, no client-callable save RPC). SECURITY DEFINER so the service-role caller's
+-- write passes the SELECT-only RLS. p_scores is a jsonb array of
+-- {subject,score,weak_concepts,comment,rubric}; p_attempt is the single attempt to
+-- append. Values are clamped / allow-listed / guard-cast like migrate_guest_data, and
+-- the score upsert + attempt insert run in ONE transaction (all-or-nothing).
+--
+-- WARNING: p_user is trusted to be a JWT-verified uid resolved server-side. This MUST
+-- stay service-role only — a grant to anon/authenticated would let a caller write to
+-- ANY user_id. (The old client-callable save_progress(jsonb,jsonb) is dropped below.)
+drop function if exists public.save_progress(jsonb, jsonb);
+create or replace function public.save_progress_for(p_user uuid, p_scores jsonb, p_attempt jsonb)
 returns void
 language plpgsql
-security invoker
+security definer
 set search_path = public
 as $$
-declare
-  uid uuid := auth.uid();
 begin
-  if uid is null then
-    raise exception 'not authenticated';
+  if p_user is null then
+    raise exception 'user required';
   end if;
 
   if coalesce(jsonb_array_length(coalesce(p_scores, '[]'::jsonb)), 0) > 3 then
     raise exception 'too many score rows';
   end if;
 
-  insert into public.scores (user_id, subject, score, weak_concepts, comment, updated_at)
-  select uid,
+  insert into public.scores (user_id, subject, score, weak_concepts, comment, rubric, updated_at)
+  select p_user,
          s->>'subject',
          greatest(0, least(100, coalesce(case when pg_input_is_valid(s->>'score', 'numeric') then round((s->>'score')::numeric) end, 0)))::int,
          coalesce(
@@ -193,6 +230,7 @@ begin
            '{}'::text[]
          ),
          left(coalesce(s->>'comment', ''), 2000),
+         case when jsonb_typeof(s->'rubric') = 'object' then s->'rubric' else null end,
          now()
   from jsonb_array_elements(coalesce(p_scores, '[]'::jsonb)) as s
   where s->>'subject' in ('math', 'physics', 'chemistry')
@@ -200,6 +238,7 @@ begin
     set score = excluded.score,
         weak_concepts = excluded.weak_concepts,
         comment = excluded.comment,
+        rubric = excluded.rubric,
         updated_at = excluded.updated_at;
 
   -- Append the attempt (skip if no usable attempt was supplied). Validate type +
@@ -215,7 +254,7 @@ begin
       raise exception 'invalid attempt subject: %', p_attempt->>'subject';
     end if;
     insert into public.attempts (user_id, type, subject, reasoning_score, delta, new_score, total_after, phd_after, created_at)
-    values (uid,
+    values (p_user,
             coalesce(p_attempt->>'type', 'attempt'),
             p_attempt->>'subject',
             case when pg_input_is_valid(p_attempt->>'reasoning_score', 'numeric') then greatest(-2147483648, least(2147483647, round((p_attempt->>'reasoning_score')::numeric)))::int end,
@@ -228,8 +267,8 @@ begin
 end;
 $$;
 
-revoke all on function public.save_progress(jsonb, jsonb) from public, anon;
-grant execute on function public.save_progress(jsonb, jsonb) to authenticated;
+revoke all on function public.save_progress_for(uuid, jsonb, jsonb) from public, anon, authenticated;
+grant execute on function public.save_progress_for(uuid, jsonb, jsonb) to service_role;
 
 -- ---- concept hub: taxonomy reference + guide catalog ------------------------
 -- The Learn tab is a UNIVERSAL, browsable concept hub. concept_guides is the

@@ -78,12 +78,19 @@ async function attachImageToCurrentComposer(container) {
 }
 
 describe("Noobtopro — diagnostic image previews are revoked on completion (leak fix)", () => {
-  it("revokes every answer's object URL once the diagnostic finishes and the dashboard shows", async () => {
-    vi.stubGlobal("fetch", vi.fn(async (path) => {
+  it("grades the 9 answers in ONE batched /api/score request and revokes every preview", async () => {
+    const scoresPayload = {
+      math: { score: 55, weakConcepts: [], comment: "", rubric: { conceptual_understanding: 3, logical_structure: 3, strategy: 3, execution_accuracy: 3, communication: 3 } },
+      physics: { score: 40, weakConcepts: [], comment: "", rubric: { conceptual_understanding: 2, logical_structure: 2, strategy: 2, execution_accuracy: 2, communication: 2 } },
+      chemistry: { score: 30, weakConcepts: [], comment: "", rubric: { conceptual_understanding: 2, logical_structure: 2, strategy: 2, execution_accuracy: 2, communication: 2 } },
+    };
+    const fetchMock = vi.fn(async (path) => {
       if (path === "/api/generate") return jsonRes(DIAGNOSTIC);
-      if (path === "/api/grade") return jsonRes({ score: 55, weakConcepts: [], comment: "" });
+      // Guest diagnostic: server grades + aggregates server-side, returns scores (no persist).
+      if (path === "/api/score") return jsonRes({ scores: scoresPayload, persisted: false, attempt: null });
       return jsonRes({});
-    }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
     const { container } = render(<Noobtopro />);
     fireEvent.click(await screen.findByRole("button", { name: /prove it/i }));
@@ -101,6 +108,14 @@ describe("Noobtopro — diagnostic image previews are revoked on completion (lea
 
     // Lands on the dashboard once grading completes.
     await screen.findByText("Where you stand");
+
+    // The fix: grading is ONE batched server request carrying all 9 answers, not the
+    // old 9-parallel-call burst that could 429 the whole diagnostic.
+    const scoreCalls = fetchMock.mock.calls.filter(([p]) => p === "/api/score");
+    expect(scoreCalls).toHaveLength(1);
+    const body = JSON.parse(scoreCalls[0][1].body);
+    expect(body.kind).toBe("diagnostic");
+    expect(body.answers).toHaveLength(9);
 
     // Each subject ring is self-describing for screen readers (subject in the label).
     expect(screen.getByRole("img", { name: /Mathematics: Score \d+ of 100/ })).toBeTruthy();

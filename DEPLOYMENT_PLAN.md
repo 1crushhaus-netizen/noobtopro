@@ -92,11 +92,12 @@ Goal: a working URL before any keys, to confirm the build + hosting are solid. T
 
 The full applied schema — **tables, RLS, and all RPCs** — lives in
 [`db/schema.sql`](./db/schema.sql), which is the source of truth for reproducing
-the database. It now defines **four RPCs** (`migrate_guest_data`,
-`delete_user_data`, `save_progress`, `try_add_diagnostic`) and **four tables**
-(`scores`, `attempts`, plus the service-role-only `concept_guides` and
-`diagnostic_pool` caches). `lib/store.js` depends on those functions, not just the
-tables. The two core tables (for quick reference — see `db/schema.sql` for the rest):
+the database. Core RPCs include `migrate_guest_data`, `delete_user_data` (called by
+`lib/store.js`), `save_progress_for` (**service-role only**, called by `/api/score`
+for server-authoritative scoring — the old client-callable `save_progress` is dropped),
+and `try_add_diagnostic`, plus the concept-hub functions. `scores`/`attempts` are
+**SELECT-only under RLS** (writes go through the SECURITY DEFINER functions). The two
+core tables (for quick reference — see `db/schema.sql` for the rest):
 
 ```sql
 create table scores (
@@ -105,6 +106,7 @@ create table scores (
   score int not null default 0,
   weak_concepts text[] default '{}',
   comment text,
+  rubric jsonb,                 -- per-subject reasoning radar profile (server-computed)
   updated_at timestamptz default now(),
   primary key (user_id, subject)
 );

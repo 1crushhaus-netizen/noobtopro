@@ -1,7 +1,17 @@
 "use client";
 
 import React from "react";
-import { SUBJECTS, ORDER, totalPoints, phdIndex, band } from "@/lib/scoring";
+import {
+  SUBJECTS,
+  ORDER,
+  totalPoints,
+  phdIndex,
+  band,
+  RUBRIC_KEYS,
+  RUBRIC_LABELS,
+  RUBRIC_MAX,
+  lowestRubricDimensions,
+} from "@/lib/scoring";
 
 /* ---- tiny SVG charting (no dependencies) ---- */
 
@@ -94,8 +104,76 @@ function MiniBar({ value, color }) {
   );
 }
 
+// Hand-rolled inline-SVG radar/spider chart (no dependency, matching the other
+// charts above). Axes = the 5 rubric dimensions (0–RUBRIC_MAX); ONE polygon per
+// subject so the learner compares their reasoning profile across subjects.
+function RadarChart({ subjects }) {
+  const W = 600, H = 360;
+  const cx = W / 2, cy = H / 2 + 4, R = 108;
+  const axes = RUBRIC_KEYS;
+  const N = axes.length;
+  const angleFor = (i) => -Math.PI / 2 + (i * 2 * Math.PI) / N; // first axis at the top
+  const coord = (i, frac) => {
+    const r = R * Math.max(0, Math.min(1, frac));
+    return [cx + r * Math.cos(angleFor(i)), cy + r * Math.sin(angleFor(i))];
+  };
+  const ringPolygon = (frac) => axes.map((_, i) => coord(i, frac).map((n) => n.toFixed(1)).join(",")).join(" ");
+  const dimVal = (rubric, k) => {
+    const v = Number(rubric ? rubric[k] : 0);
+    return Number.isFinite(v) ? Math.max(0, Math.min(RUBRIC_MAX, v)) : 0;
+  };
+  const round1 = (n) => Math.round(n * 10) / 10;
+
+  // Accessible summary: each subject's per-dimension values (the chart is decorative
+  // without this text equivalent).
+  const summary = subjects
+    .map((s) => `${s.label} — ${axes.map((k) => `${RUBRIC_LABELS[k]} ${round1(dimVal(s.rubric, k))}`).join(", ")}`)
+    .join("; ");
+
+  return (
+    <svg
+      className="np-chart"
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-label={`Reasoning profile across the five rubric dimensions, scored 0 to ${RUBRIC_MAX}, for ${subjects
+        .map((s) => s.label)
+        .join(", ")}. ${summary}.`}
+    >
+      {[1, 2, 3, 4].map((lvl) => (
+        <polygon key={lvl} points={ringPolygon(lvl / RUBRIC_MAX)} fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="1" />
+      ))}
+      {axes.map((k, i) => {
+        const [ex, ey] = coord(i, 1);
+        const [lx, ly] = coord(i, 1.2);
+        const anchor = Math.abs(lx - cx) < 6 ? "middle" : lx > cx ? "start" : "end";
+        return (
+          <g key={k}>
+            <line x1={cx} y1={cy} x2={ex} y2={ey} stroke="rgba(255,255,255,.10)" strokeWidth="1" />
+            <text x={lx} y={ly} textAnchor={anchor} dominantBaseline="central" fill="#7a8494" style={{ fontFamily: "var(--ui)", fontSize: 11 }}>
+              {RUBRIC_LABELS[k]}
+            </text>
+          </g>
+        );
+      })}
+      {subjects.map((s) => {
+        const pts = axes.map((k, i) => coord(i, dimVal(s.rubric, k) / RUBRIC_MAX).map((n) => n.toFixed(1)).join(",")).join(" ");
+        return (
+          <g key={s.key}>
+            <polygon points={pts} fill={s.color} fillOpacity="0.12" stroke={s.color} strokeWidth="2" strokeLinejoin="round" />
+            {axes.map((k, i) => {
+              const [px, py] = coord(i, dimVal(s.rubric, k) / RUBRIC_MAX);
+              return <circle key={k} cx={px} cy={py} r="2.5" fill={s.color} />;
+            })}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 /* ---- dashboard ---- */
-export default function ProgressDashboard({ scores, history = [], onPractice }) {
+export default function ProgressDashboard({ scores, history = [], onPractice, onLearn }) {
   const total = totalPoints(scores);
   const phd = phdIndex(scores);
   const attempts = history.filter((h) => h.type === "attempt");
@@ -105,6 +183,12 @@ export default function ProgressDashboard({ scores, history = [], onPractice }) 
     value: Math.round(a.delta || 0),
     glyph: SUBJECTS[a.subject]?.glyph || "·",
   }));
+
+  // Subjects that have a rubric profile (set once the diagnostic/first attempt is
+  // graded) — drives the radar chart and the "what to work on" guidance.
+  const rubricSubjects = ORDER
+    .filter((k) => scores && scores[k] && scores[k].rubric && typeof scores[k].rubric === "object")
+    .map((k) => ({ key: k, label: SUBJECTS[k].label, color: SUBJECTS[k].color, rubric: scores[k].rubric }));
 
   return (
     <div className="fade-up">
@@ -149,6 +233,54 @@ export default function ProgressDashboard({ scores, history = [], onPractice }) 
           <BarChart items={barItems} />
         ) : (
           <p className="np-statsub">No graded attempts yet.</p>
+        )}
+      </div>
+
+      <div className="np-card np-chartcard">
+        <div className="np-charttitle">Reasoning profile</div>
+        <div className="np-chartsub">
+          How your reasoning scores across the five dimensions we grade (0–{RUBRIC_MAX}), per subject. The shape shows where
+          you reason well — and where to focus next.
+        </div>
+        {rubricSubjects.length >= 1 ? (
+          <>
+            <RadarChart subjects={rubricSubjects} />
+            <div style={{ marginTop: 14 }}>
+              <div className="np-charttitle" style={{ fontSize: 14, marginBottom: 10 }}>What to work on</div>
+              {rubricSubjects.map((s) => {
+                const lowKeys = lowestRubricDimensions(s.rubric, 1);
+                const lowLabel = lowKeys.length ? RUBRIC_LABELS[lowKeys[0]] : null;
+                const concept = (scores[s.key]?.weakConcepts || []).find((c) => typeof c === "string" && c.trim()) || null;
+                return (
+                  <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+                    <span style={{ color: s.color, fontFamily: "var(--mono)", width: 18 }}>{SUBJECTS[s.key].glyph}</span>
+                    <span style={{ fontSize: 14, minWidth: 92 }}>{s.label}</span>
+                    <span className="np-statsub" style={{ flex: 1, minWidth: 170 }}>
+                      {lowLabel ? (
+                        <>
+                          Weakest dimension: <strong style={{ color: "var(--text)" }}>{lowLabel}</strong>
+                          {concept ? <> — work on <em>{concept}</em></> : null}
+                        </>
+                      ) : (
+                        "Keep practicing to refine your profile."
+                      )}
+                    </span>
+                    {concept ? (
+                      <button className="np-ghost" onClick={() => onLearn && onLearn(s.key, concept)} style={{ whiteSpace: "nowrap" }}>
+                        Learn this
+                      </button>
+                    ) : (
+                      <button className="np-ghost" onClick={() => onPractice && onPractice(s.key)} style={{ whiteSpace: "nowrap" }}>
+                        practice
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        ) : (
+          <p className="np-statsub">Finish the diagnostic to see your reasoning profile.</p>
         )}
       </div>
 

@@ -1,0 +1,473 @@
+// ---------------------------------------------------------------------------
+// /api/score — SERVER-AUTHORITATIVE scoring for signed-in users.
+//
+// The trust boundary the rest of the app leans on. For a SIGNED-IN user the score
+// is GRADED, COMPUTED, and PERSISTED entirely server-side:
+//   1. the caller's Supabase JWT is verified (requireUser → supabase.auth.getUser),
+//   2. the reasoning is graded by Groq,
+//   3. the new score is blended from the user's STORED level (read here, never
+//      client-supplied), and
+//   4. it is written for the verified auth.uid() via the service-role-only
+//      save_progress_for RPC.
+// Because scores/attempts are SELECT-only under RLS, the client can no longer
+// self-assert a score by any path.
+//
+// kind:"practice"   → REQUIRES a verified user (it persists). Grades one question,
+//                     returns the coaching feedback + the trusted new score.
+// kind:"diagnostic" → auth-OPTIONAL. Grades the (≤9) answers server-side with
+//                     bounded concurrency + retry-once-on-429 + allSettled (so the
+//                     old 9-call client burst can't 429 the whole set). A verified
+//                     user gets the baseline persisted; a guest gets it back to
+//                     store in localStorage (no account to protect).
+//
+// Same same-origin + JSON guard + per-IP rate limiting + abuse logging as the other
+// routes; diagnostic carries a stricter budget because one request fans out to many
+// Groq calls. Real errors are logged server-side; the client gets a generic message.
+// ---------------------------------------------------------------------------
+
+import { NextResponse, after } from "next/server";
+import { groqJSON, PRACTICE_GRADE_SYS, DIAG_GRADE_SYS } from "@/lib/groq";
+import {
+  clampScore,
+  ORDER,
+  blend,
+  blendRubric,
+  normalizeRubric,
+  diagnosticSubjectScore,
+  diagnosticSubjectRubric,
+  totalPoints,
+  phdIndex,
+  DIAGNOSTIC_DIFFICULTIES,
+} from "@/lib/scoring";
+import { rateLimit, clientKey } from "@/lib/rateLimit";
+import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import { requireUser } from "@/lib/adminAuth";
+import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
+import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts } from "@/lib/gradeInput";
+
+export const dynamic = "force-dynamic";
+
+const GRADE_CONCURRENCY = 3; // simultaneous Groq grade calls per diagnostic
+const MAX_DIAGNOSTIC_ANSWERS = ORDER.length * DIAGNOSTIC_DIFFICULTIES.length; // 9
+const RETRY_DELAY_MS = 700;
+
+const nowIso = () => new Date().toISOString();
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Auto-grow the concept hub: register the grader's (server-normalized) weak concepts
+// as PENDING catalog stubs, AFTER the response (no added grading latency). Mirrors
+// /api/grade so signed-in users feed the hub too. No-op without the service-role key.
+function registerWeakConcepts(subject, weakConcepts) {
+  if (!ORDER.includes(subject) || !Array.isArray(weakConcepts) || weakConcepts.length === 0) return;
+  const task = async () => {
+    try {
+      const sb = getSupabaseAdmin();
+      if (sb) await sb.rpc("register_concepts", { p_subject: subject, p_concepts: weakConcepts });
+    } catch (e) {
+      console.error("[/api/score] register_concepts", e); // best-effort; self-heals next grade
+    }
+  };
+  try {
+    after(task);
+  } catch {
+    void task();
+  }
+}
+
+// Grade one question's reasoning, retrying ONCE on a 429 after a short backoff. The
+// diagnostic fans out several grades; a transient per-minute 429 shouldn't sink an
+// answer. groqJSON re-throws hard upstream errors with .status set, so a 429 surfaces
+// here for the retry. We do NOT retry IMAGE grades: groqJSON already falls back to a
+// text-only call internally on a recoverable vision failure, so re-issuing the whole
+// call would fire a SECOND (expensive, multi-MB) vision request — a cost-amplifier.
+async function gradeOne(args) {
+  try {
+    return await groqJSON({ ...args, grade: true });
+  } catch (e) {
+    if (e && e.status === 429 && !args.image) {
+      await sleep(RETRY_DELAY_MS);
+      return await groqJSON({ ...args, grade: true });
+    }
+    throw e;
+  }
+}
+
+// Bounded-concurrency map that NEVER rejects: each item resolves to
+// { ok:true, value } or { ok:false, error } (Promise.allSettled semantics), so one
+// failed grade can't fail the whole diagnostic. At most `limit` run at once.
+async function settledPool(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      try {
+        out[i] = { ok: true, value: await fn(items[i], i) };
+      } catch (e) {
+        out[i] = { ok: false, error: e };
+      }
+    }
+  }
+  const workers = Math.max(1, Math.min(limit, items.length));
+  await Promise.all(Array.from({ length: workers }, worker));
+  return out;
+}
+
+export async function POST(req) {
+  if (isCrossSiteRequest(req)) {
+    return NextResponse.json({ error: "Cross-site requests are not allowed." }, { status: 403 });
+  }
+  if (isWrongContentType(req)) {
+    return NextResponse.json({ error: "Content-Type must be application/json." }, { status: 415 });
+  }
+
+  const rl = rateLimit(clientKey(req));
+  if (!rl.ok) {
+    reportRateLimit({ req, route: "/api/score" });
+    return NextResponse.json(
+      { error: "Too many requests. Please slow down and try again shortly." },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
+    );
+  }
+
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Request body must be valid JSON." }, { status: 400 });
+  }
+
+  const kind = body && body.kind;
+  if (kind === "practice") return handlePractice(req, body);
+  if (kind === "diagnostic") return handleDiagnostic(req, body);
+  return NextResponse.json({ error: 'kind must be "practice" or "diagnostic".' }, { status: 400 });
+}
+
+// --- practice: auth-REQUIRED, server-authoritative single-question scoring -------
+async function handlePractice(req, body) {
+  const auth = await requireUser(req);
+  if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  const uid = auth.user.id;
+
+  const sb = getSupabaseAdmin();
+  if (!sb) return NextResponse.json({ error: "Scoring is temporarily unavailable." }, { status: 503 });
+
+  const { subject, question, targetConcept, difficulty, reasoning, image } = body || {};
+  if (typeof subject !== "string" || typeof question !== "string") {
+    return NextResponse.json({ error: "subject and question are required." }, { status: 400 });
+  }
+  if (!ORDER.includes(subject)) {
+    return NextResponse.json({ error: `Unknown subject "${subject}".` }, { status: 400 });
+  }
+  const work =
+    typeof reasoning === "string" && reasoning.trim() ? capText(reasoning.trim()) : "(no written reasoning provided)";
+  const safeQuestion = capText(question);
+  const safeConcept = capText(targetConcept) || "(unspecified)";
+  const safeDifficulty = normalizeDifficulty(difficulty);
+
+  reportInjection({
+    req,
+    route: "/api/score",
+    subject,
+    concept: safeConcept !== "(unspecified)" ? safeConcept : null,
+    text: `${work}\n${safeConcept}`,
+  });
+
+  const img = normalizeImage(image);
+  if (!img.ok) return NextResponse.json({ error: img.error }, { status: 400 });
+  if (img.image) {
+    const imgRl = rateLimit(`${clientKey(req)}:img`, { max: 10 });
+    if (!imgRl.ok) {
+      reportRateLimit({ req, route: "/api/score" });
+      return NextResponse.json(
+        { error: "Too many image grades. Please slow down and try again shortly." },
+        { status: 429, headers: { "Retry-After": String(imgRl.retryAfter) } }
+      );
+    }
+  }
+
+  try {
+    // ACCEPTED RESIDUAL: this is a read-modify-write (read prev → blend → write). Two
+    // concurrent same-user, same-subject grades could lose one update. It's single-user
+    // and low-stakes (the practiceRun guard + one-question-at-a-time UI make it rare),
+    // so it's accepted rather than serialized; revisit if scores gate anything paid.
+    // 1) Server-authoritative PREV: read the user's current scores from the DB. The
+    //    client never supplies the level the new score is computed from.
+    const { data: rows, error: readErr } = await sb
+      .from("scores")
+      .select("subject, score, weak_concepts, comment, rubric")
+      .eq("user_id", uid);
+    if (readErr) throw readErr;
+    const current = {};
+    for (const r of rows || []) {
+      current[r.subject] = {
+        score: r.score,
+        weakConcepts: r.weak_concepts || [],
+        comment: r.comment || "",
+        rubric: r.rubric || null,
+      };
+    }
+    const prev = current[subject] || null;
+
+    // 2) Grade this attempt.
+    const data = await gradeOne({
+      system: PRACTICE_GRADE_SYS,
+      user:
+        `Subject: ${subject}\n` +
+        `Question: ${safeQuestion}\n` +
+        `Concept being probed: ${safeConcept}\n` +
+        `Question difficulty band: ${safeDifficulty}\n` +
+        `Learner's current level: ${prev ? prev.score : 0}/100\n\n` +
+        `Learner's reasoning:\n"""${work}"""`,
+      image: img.image,
+    });
+
+    const reasoningScore = clampScore(data?.reasoningScore) ?? 0;
+    const attemptRubric = normalizeRubric(data?.rubric);
+    const weakConcepts = normalizeWeakConcepts(data?.weakConcepts);
+    const suggestion = clampScore(data?.newScoreSuggestion);
+
+    // 3) Compute the trusted new score + rubric profile server-side.
+    const newScore = blend(prev ? prev.score : undefined, suggestion, {
+      difficulty: safeDifficulty,
+      reasoningScore,
+    });
+    const newRubric = blendRubric(prev ? prev.rubric : null, attemptRubric);
+    const newWeak = weakConcepts.length ? weakConcepts : prev ? prev.weakConcepts : [];
+    const comment = prev ? prev.comment : "";
+
+    // 4) Snapshot totals over the full (updated) map for the attempt-history row.
+    const updatedMap = { ...current, [subject]: { score: newScore } };
+    const totalAfter = totalPoints(updatedMap);
+    const phdAfter = phdIndex(updatedMap);
+    const delta = newScore - (prev ? prev.score : 0);
+    const t = nowIso();
+
+    // 5) Persist ONLY the changed subject (+ its attempt) atomically for the verified
+    //    uid. Sending one subject (not the full map) avoids clobbering a concurrent
+    //    same-user session's progress on the other two.
+    const { error: saveErr } = await sb.rpc("save_progress_for", {
+      p_user: uid,
+      p_scores: [
+        { subject, score: newScore, weak_concepts: (newWeak || []).slice(0, 64), comment, rubric: newRubric },
+      ],
+      p_attempt: {
+        type: "attempt",
+        subject,
+        reasoning_score: reasoningScore,
+        delta,
+        new_score: newScore,
+        total_after: totalAfter,
+        phd_after: phdAfter,
+        created_at: t,
+      },
+    });
+    if (saveErr) throw saveErr;
+
+    registerWeakConcepts(subject, weakConcepts); // auto-grow the hub (non-blocking)
+
+    return NextResponse.json({
+      reasoningScore,
+      rubric: attemptRubric, // per-attempt 0–4 bars for the feedback panel
+      correctnessNote: typeof data?.correctnessNote === "string" ? data.correctnessNote : "",
+      socraticHint: typeof data?.socraticHint === "string" ? data.socraticHint : "",
+      microLesson: typeof data?.microLesson === "string" ? data.microLesson : "",
+      weakConcepts,
+      newScore,
+      delta,
+      subjectScore: { score: newScore, weakConcepts: newWeak, comment, rubric: newRubric },
+      attempt: { type: "attempt", t, subject, reasoningScore, delta, newScore, totalAfter, phdAfter },
+    });
+  } catch (e) {
+    console.error("[/api/score practice]", e);
+    return NextResponse.json({ error: "Grading is temporarily unavailable. Please try again." }, { status: 500 });
+  }
+}
+
+// --- diagnostic: auth-OPTIONAL batch baseline grading ---------------------------
+async function handleDiagnostic(req, body) {
+  // Stricter budget FIRST: one diagnostic request fans out to up to 9 Groq grades, so
+  // reject an over-budget request before any auth round-trip or grading.
+  const diagRl = rateLimit(`${clientKey(req)}:diag`, { max: 4 });
+  if (!diagRl.ok) {
+    reportRateLimit({ req, route: "/api/score" });
+    return NextResponse.json(
+      { error: "Too many diagnostics. Please slow down and try again shortly." },
+      { status: 429, headers: { "Retry-After": String(diagRl.retryAfter) } }
+    );
+  }
+
+  // Auth is OPTIONAL: a valid token persists the baseline; a guest gets it back. An
+  // INVALID token is still rejected — don't silently downgrade a bad token to guest.
+  let uid = null;
+  let sb = null;
+  if (req.headers.get("authorization")) {
+    const auth = await requireUser(req);
+    if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+    uid = auth.user.id;
+    // Resolve the service-role client UP FRONT: if persistence is impossible, fail
+    // before spending Groq tokens on a baseline we couldn't save.
+    sb = getSupabaseAdmin();
+    if (!sb) return NextResponse.json({ error: "Scoring is temporarily unavailable." }, { status: 503 });
+  }
+
+  const rawAnswers = body && Array.isArray(body.answers) ? body.answers : null;
+  if (!rawAnswers || rawAnswers.length === 0) {
+    return NextResponse.json({ error: "answers must be a non-empty array." }, { status: 400 });
+  }
+  if (rawAnswers.length > MAX_DIAGNOSTIC_ANSWERS) {
+    return NextResponse.json({ error: "Too many answers." }, { status: 400 });
+  }
+
+  // Validate + DEDUPE by subject:difficulty so a client can't multiply the Groq
+  // fan-out by sending the same slot many times.
+  const seen = new Set();
+  const items = [];
+  for (const a of rawAnswers) {
+    if (!a || typeof a !== "object") continue;
+    const subject = a.subject;
+    if (!ORDER.includes(subject)) continue;
+    if (typeof a.question !== "string" || !a.question.trim()) continue;
+    const difficulty = DIAGNOSTIC_DIFFICULTIES.includes(a.difficulty) ? a.difficulty : null;
+    if (!difficulty) continue;
+    const key = `${subject}:${difficulty}`;
+    if (seen.has(key)) continue;
+    const img = normalizeImage(a.image);
+    if (!img.ok) return NextResponse.json({ error: img.error }, { status: 400 });
+    seen.add(key);
+    items.push({
+      subject,
+      difficulty,
+      question: capText(a.question),
+      reasoning:
+        typeof a.reasoning === "string" && a.reasoning.trim()
+          ? capText(a.reasoning.trim())
+          : "(no written reasoning provided)",
+      image: img.image,
+    });
+  }
+  if (items.length === 0) {
+    return NextResponse.json({ error: "No valid answers to grade." }, { status: 400 });
+  }
+
+  // Charge the per-IP IMAGE budget for the diagnostic's vision grades — one token per
+  // image-bearing answer — so the costliest Groq path (multimodal, multi-MB) is bounded
+  // identically to the practice route. Without this, a diagnostic could drive up to 9
+  // vision calls/request entirely outside the :img cap.
+  const imgCount = items.filter((i) => i.image).length;
+  if (imgCount) {
+    let imgRl;
+    for (let i = 0; i < imgCount; i++) imgRl = rateLimit(`${clientKey(req)}:img`, { max: 10 });
+    if (!imgRl.ok) {
+      reportRateLimit({ req, route: "/api/score" });
+      return NextResponse.json(
+        { error: "Too many image grades. Please slow down and try again shortly." },
+        { status: 429, headers: { "Retry-After": String(imgRl.retryAfter) } }
+      );
+    }
+  }
+
+  reportInjection({ req, route: "/api/score", text: items.map((i) => i.reasoning).join("\n") });
+
+  try {
+    const graded = await settledPool(items, GRADE_CONCURRENCY, async (it) => {
+      const data = await gradeOne({
+        system: DIAG_GRADE_SYS,
+        user:
+          `Subject: ${it.subject}\n` +
+          `Question difficulty band: ${it.difficulty}\n` +
+          `Question: ${it.question}\n\n` +
+          `Learner's reasoning:\n"""${it.reasoning}"""`,
+        image: it.image,
+      });
+      return {
+        subject: it.subject,
+        difficulty: it.difficulty,
+        reasoningScore: clampScore(data?.score) ?? 0,
+        rubric: normalizeRubric(data?.rubric),
+        weakConcepts: normalizeWeakConcepts(data?.weakConcepts),
+        comment: typeof data?.comment === "string" ? data.comment : "",
+      };
+    });
+
+    const results = graded.filter((g) => g.ok).map((g) => g.value);
+    if (results.length === 0) {
+      // Every grade failed (sustained 429 / outage) — retryable error, don't persist
+      // an all-zero baseline.
+      return NextResponse.json(
+        { error: "Grading is temporarily unavailable. Please try again." },
+        { status: 503 }
+      );
+    }
+
+    // Aggregate each subject's graded answers into a difficulty-weighted baseline
+    // (score + rubric profile), mirroring the prior client logic. ACCEPTED RESIDUALS:
+    // (a) a subject whose answers PARTIALLY failed grading is re-weighted from the
+    //     survivors (a missing hard tier slightly inflates that subject) — preferred
+    //     over discarding the subject for one transient failure; retry-once covers most;
+    // (b) the diagnostic is a re-baseline: re-taking it overwrites accumulated scores
+    //     (upsert), the same destructive semantics the client had before.
+    const scores = {};
+    for (const s of ORDER) {
+      const subjectQs = results.filter((r) => r.subject === s);
+      if (subjectQs.length === 0) continue;
+      const score = diagnosticSubjectScore(subjectQs);
+      const rubric = diagnosticSubjectRubric(subjectQs);
+      const weakConcepts = Array.from(
+        new Set(subjectQs.flatMap((r) => r.weakConcepts).filter((c) => typeof c === "string" && c.trim()))
+      ).slice(0, 8);
+      const hardest = [...subjectQs].sort(
+        (a, b) => DIAGNOSTIC_DIFFICULTIES.indexOf(b.difficulty) - DIAGNOSTIC_DIFFICULTIES.indexOf(a.difficulty)
+      )[0];
+      scores[s] = { score, weakConcepts, comment: (hardest && hardest.comment) || "", rubric };
+    }
+
+    const totalAfter = totalPoints(scores);
+    const phdAfter = phdIndex(scores);
+
+    // Auto-grow the concept hub from the baseline's weak concepts (non-blocking).
+    for (const s of ORDER) {
+      if (scores[s] && scores[s].weakConcepts.length) registerWeakConcepts(s, scores[s].weakConcepts);
+    }
+
+    if (uid) {
+      // sb was resolved and null-checked up front (so we never grade for a user we
+      // can't persist for); reuse it here.
+      const t = nowIso();
+      const p_scores = ORDER.filter((s) => scores[s]).map((s) => ({
+        subject: s,
+        score: scores[s].score,
+        weak_concepts: (scores[s].weakConcepts || []).slice(0, 64),
+        comment: scores[s].comment || "",
+        rubric: scores[s].rubric,
+      }));
+      const { error: saveErr } = await sb.rpc("save_progress_for", {
+        p_user: uid,
+        p_scores,
+        p_attempt: { type: "baseline", total_after: totalAfter, phd_after: phdAfter, created_at: t },
+      });
+      if (saveErr) throw saveErr;
+      return NextResponse.json({
+        scores,
+        persisted: true,
+        attempt: {
+          type: "baseline",
+          t,
+          subject: null,
+          reasoningScore: null,
+          delta: null,
+          newScore: null,
+          totalAfter,
+          phdAfter,
+        },
+      });
+    }
+
+    // Guest: return the graded baseline for the client to store locally.
+    return NextResponse.json({ scores, persisted: false, attempt: null });
+  } catch (e) {
+    console.error("[/api/score diagnostic]", e);
+    return NextResponse.json({ error: "Grading is temporarily unavailable. Please try again." }, { status: 500 });
+  }
+}

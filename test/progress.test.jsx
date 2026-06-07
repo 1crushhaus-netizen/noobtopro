@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import ProgressDashboard from "@/components/ProgressDashboard";
 
 afterEach(cleanup);
@@ -49,5 +49,47 @@ describe("ProgressDashboard", () => {
     expect(screen.getByText(/start the trend line/i)).toBeTruthy();
     expect(screen.getByText(/no graded attempts yet/i)).toBeTruthy();
     expect(screen.queryByRole("img")).toBe(null); // no chart rendered yet
+  });
+});
+
+describe("ProgressDashboard — reasoning radar + what-to-work-on", () => {
+  const scoresWithRubric = {
+    math: {
+      score: 60,
+      weakConcepts: ["chain rule"],
+      comment: "",
+      rubric: { conceptual_understanding: 3, logical_structure: 1, strategy: 2, execution_accuracy: 4, communication: 3 },
+    },
+    physics: {
+      score: 30,
+      weakConcepts: [],
+      comment: "",
+      rubric: { conceptual_understanding: 2, logical_structure: 2, strategy: 2, execution_accuracy: 2, communication: 2 },
+    },
+    chemistry: { score: 0, weakConcepts: [], comment: "" }, // no rubric → excluded from the radar
+  };
+
+  it("renders the radar with an accessible name covering the subjects that have a profile", () => {
+    render(<ProgressDashboard scores={scoresWithRubric} history={history} onPractice={() => {}} />);
+    const radar = screen.getByRole("img", { name: /reasoning profile across the five rubric dimensions/i });
+    expect(radar.getAttribute("aria-label")).toMatch(/Mathematics/);
+    expect(radar.getAttribute("aria-label")).toMatch(/Physics/);
+    // chemistry has no rubric, so it is not named in the radar.
+    expect(radar.getAttribute("aria-label")).not.toMatch(/Chemistry/);
+  });
+
+  it("renders a 'What to work on' panel and links a weak concept to the Learn tab", () => {
+    const onLearn = vi.fn();
+    render(<ProgressDashboard scores={scoresWithRubric} history={history} onPractice={() => {}} onLearn={onLearn} />);
+    expect(screen.getByText(/what to work on/i)).toBeTruthy();
+    // Only math has a weak concept among the profiled subjects → exactly one "Learn this".
+    fireEvent.click(screen.getByText("Learn this"));
+    expect(onLearn).toHaveBeenCalledWith("math", "chain rule");
+  });
+
+  it("does NOT render the radar before any subject has a rubric", () => {
+    render(<ProgressDashboard scores={scores} history={history} onPractice={() => {}} />);
+    expect(screen.queryByRole("img", { name: /reasoning profile/i })).toBe(null);
+    expect(screen.getByText(/finish the diagnostic to see your reasoning profile/i)).toBeTruthy();
   });
 });

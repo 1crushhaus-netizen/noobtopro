@@ -78,6 +78,24 @@ describe("migrateGuestToAccount", () => {
     expect(JSON.parse(window.localStorage.getItem(KEY))).toEqual({ scores: null, history: [] });
   });
 
+  it("carries the per-subject rubric profile into the migration payload (radar survives sign-in)", async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        scores: {
+          math: { score: 60, weakConcepts: [], comment: "", rubric: { conceptual_understanding: 3, logical_structure: 2 } },
+          physics: { score: 40, weakConcepts: [], comment: "" }, // no rubric -> null
+        },
+        history: [],
+      })
+    );
+    await migrateGuestToAccount();
+    const [, args] = mocks.rpc.mock.calls[0];
+    const bySubject = Object.fromEntries(args.p_scores.map((s) => [s.subject, s]));
+    expect(bySubject.math.rubric).toEqual({ conceptual_understanding: 3, logical_structure: 2 });
+    expect(bySubject.physics.rubric).toBe(null); // missing -> null (not undefined)
+  });
+
   it("is a no-op when not signed in", async () => {
     mocks.session = guest;
     window.localStorage.setItem(KEY, JSON.stringify({ scores: { math: { score: 50 } }, history: [] }));
@@ -161,15 +179,24 @@ describe("signed-in data layer (Supabase paths)", () => {
 
   it("loadState maps score rows + attempt rows (rowToEvent) on the happy path", async () => {
     mocks.db = {
-      scoresSelect: { data: [{ subject: "math", score: 60, weak_concepts: ["x"], comment: "c" }], error: null },
+      scoresSelect: { data: [{ subject: "math", score: 60, weak_concepts: ["x"], comment: "c", rubric: { conceptual_understanding: 3 } }], error: null },
       attemptsSelect: {
         data: [{ type: "attempt", created_at: "t0", subject: "math", reasoning_score: 70, delta: 2, new_score: 62, total_after: 100, phd_after: 33 }],
         error: null,
       },
     };
     const st = await loadState();
-    expect(st.scores.math).toEqual({ score: 60, weakConcepts: ["x"], comment: "c" });
+    expect(st.scores.math).toEqual({ score: 60, weakConcepts: ["x"], comment: "c", rubric: { conceptual_understanding: 3 } });
     expect(st.history[0]).toMatchObject({ type: "attempt", t: "t0", subject: "math", reasoningScore: 70, newScore: 62, totalAfter: 100, phdAfter: 33 });
+  });
+
+  it("loadState defaults a missing rubric column to null", async () => {
+    mocks.db = {
+      scoresSelect: { data: [{ subject: "physics", score: 40, weak_concepts: [], comment: "" }], error: null },
+      attemptsSelect: { data: [], error: null },
+    };
+    const st = await loadState();
+    expect(st.scores.physics.rubric).toBe(null);
   });
 
   it("loadState scopes BOTH reads to the caller's user_id and orders attempts stably", async () => {
@@ -208,8 +235,8 @@ describe("loadState (guest blob sanitization)", () => {
       })
     );
     const st = await loadState();
-    expect(st.scores.math).toEqual({ score: 0, weakConcepts: [], comment: "x" }); // "wat" -> 0, "vectors" -> []
-    expect(st.scores.physics).toEqual({ score: 100, weakConcepts: ["a", "b"], comment: "" }); // 150 -> 100, non-strings dropped, bad comment -> ""
+    expect(st.scores.math).toEqual({ score: 0, weakConcepts: [], comment: "x", rubric: null }); // "wat" -> 0, "vectors" -> []
+    expect(st.scores.physics).toEqual({ score: 100, weakConcepts: ["a", "b"], comment: "", rubric: null }); // 150 -> 100, non-strings dropped, bad comment -> ""
     expect(st.scores.chemistry).toBeUndefined(); // non-object subject dropped
     expect(st.history).toEqual([]); // non-array history -> []
   });
@@ -233,38 +260,22 @@ describe("saveProgress (atomic score + attempt write)", () => {
   const scores = { math: { score: 62, weakConcepts: ["x"], comment: "c" } };
   const evt = { type: "attempt", t: "t1", subject: "math", reasoningScore: 70, delta: 2, newScore: 62, totalAfter: 62, phdAfter: 21 };
 
-  it("signed-in: calls the single save_progress RPC with snake_cased payload, then refreshes history", async () => {
-    mocks.db = { attemptsSelect: { data: [{ type: "attempt", created_at: "t1", subject: "math", reasoning_score: 70, delta: 2, new_score: 62, total_after: 62, phd_after: 21 }], error: null } };
-    const res = await saveProgress(scores, evt);
-    expect(mocks.rpc).toHaveBeenCalledTimes(1);
-    const [fn, args] = mocks.rpc.mock.calls[0];
-    expect(fn).toBe("save_progress");
-    expect(args.p_scores).toEqual([{ subject: "math", score: 62, weak_concepts: ["x"], comment: "c" }]);
-    expect(args.p_attempt).toMatchObject({ type: "attempt", subject: "math", reasoning_score: 70, new_score: 62, created_at: "t1" });
-    expect(res.history[0]).toMatchObject({ type: "attempt", newScore: 62, reasoningScore: 70 });
+  it("signed-in: REFUSES to write locally — signed-in scoring is server-authoritative (/api/score), never the browser", async () => {
+    // The trust boundary: a signed-in client must NOT persist scores from the browser
+    // (scores/attempts are SELECT-only under RLS now). saveProgress is guest-only and
+    // fails loudly rather than silently writing to the wrong (local) store; it never
+    // calls a save RPC.
+    mocks.session = signedIn;
+    await expect(saveProgress(scores, evt)).rejects.toThrow(/server/i);
+    expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
-  it("signed-in: caps weak_concepts to <=64 elements in the save_progress payload (client-side defense)", async () => {
-    const wc = Array.from({ length: 100 }, (_, i) => `c${i}`);
-    mocks.db = { attemptsSelect: { data: [], error: null } };
-    await saveProgress({ math: { score: 62, weakConcepts: wc, comment: "c" } }, evt);
-    const [, args] = mocks.rpc.mock.calls[0];
-    expect(args.p_scores[0].weak_concepts).toHaveLength(64);
-    expect(args.p_scores[0].weak_concepts[0]).toBe("c0"); // kept the leading slice
-  });
-
-  it("signed-in: throws when the RPC fails and does NOT fall back to a separate score write (atomicity)", async () => {
-    mocks.rpc.mockResolvedValueOnce({ error: { message: "boom" } });
-    await expect(saveProgress(scores, evt)).rejects.toThrow(/boom/);
-    // The only write attempted is the single atomic RPC — no independent scores upsert.
-    expect(mocks.rpc).toHaveBeenCalledTimes(1);
-    expect(mocks.rpc.mock.calls[0][0]).toBe("save_progress");
-  });
-
-  it("signed-in: returns history:null when only the post-write refresh read fails", async () => {
-    mocks.db = { attemptsSelect: { data: null, error: { message: "read failed" } } };
-    const res = await saveProgress(scores, evt);
-    expect(res.history).toBe(null); // the write still committed
+  it("guest: persists the rubric profile on the scores object", async () => {
+    mocks.session = guest;
+    const withRubric = { math: { score: 62, weakConcepts: ["x"], comment: "c", rubric: { conceptual_understanding: 2.5, logical_structure: 3 } } };
+    await saveProgress(withRubric, evt);
+    const local = JSON.parse(window.localStorage.getItem(KEY));
+    expect(local.scores.math.rubric).toEqual({ conceptual_understanding: 2.5, logical_structure: 3 });
   });
 
   it("guest: writes scores + appended history locally in one shot, no RPC", async () => {
