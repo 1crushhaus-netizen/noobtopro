@@ -133,7 +133,7 @@ Other commands: `npm test` (run tests once), `npm run test:watch`, `npm run buil
 
 > **Shipped & live on `main` (all merged):** flatten-for-Vercel + audit hardening (PR #2–#29) · Concept Hub backend/admin/browse (#29–#31) · "Prove it" diagnostic (#32) · server-authoritative scoring + reasoning radar (#34/#35) · fleet-audit fixes (#36) · diagnostic → 6 questions (#37) · durable per-account rate limiter (#38) · **Elo ranking + explainable anti-gaming grading + anonymous leaderboard (PR 3, #40)** · **Concept Hub public seed + canonical de-dup (PR 4, #44)** · **Learn-tab proof/derivation guides + stale-guide auto-heal (PR 5, #45)** · **detailed "how to reach 100" feedback + post-grade worked solution + answer review (PR 6, #43)** · **Concept Hub UI fixes (#46)** · **independent fleet-audit fix round (#48)** · **process-first typed-error grading — 9-axis weighted rubric + path-independent transparent score (#49)** · **curated 9-question diagnostic bank (3 levels, zero Groq) + time-locked "I don't know" skip (#51)**.
 >
-> **Live DB migrations `0001a`–`0008` are ALL applied** to the Supabase project (`vwvhgnlgubctrgksyohr`), so the live DB == `db/schema.sql`. Advisor baseline is the documented/accepted set (§17). **478 tests across 34 files + `npm run build` are green.** The Concept Hub has **9 curated, proof-bearing guides** seeded live (run `node scripts/seed-concept-hub.mjs` with the Groq + service-role keys to fill all 36 topics).
+> **Live DB migrations `0001a`–`0009` are ALL applied** to the Supabase project (`vwvhgnlgubctrgksyohr`), so the live DB == `db/schema.sql`. Advisor baseline is the documented/accepted set (§17). **495 tests across 35 files + `npm run build` are green.** The Concept Hub has **9 curated, proof-bearing guides** seeded live (run `node scripts/seed-concept-hub.mjs` with the Groq + service-role keys to fill all 36 topics).
 
 ### 🔭 NEXT TASK — finish the grading redesign (practice questions + numeric verifier)
 The grading **core** shipped: a process-first **9-axis weighted rubric** with a transparent, path-independent score and a solve-first typed-error grader (#49), plus a **curated, trap-rich 9-question diagnostic bank** and a time-locked "I don't know" skip (#51). Two pieces of the "process over product" redesign remain:
@@ -208,7 +208,7 @@ app/
   error.jsx            App Router error boundary (no white-screen on crashes)
   globals.css          All styles + design tokens (the .np-* system)
   api/
-    generate/route.js  POST: diagnostic (curated 9-Q bank — zero Groq) or practice (1 Q, Groq)
+    generate/route.js  POST: diagnostic (curated 9-Q bank — zero Groq) or practice (1 Q, Groq + anti-repeat variety)
     grade/route.js     POST: grade reasoning (guest practice + low-level); image-aware
     score/route.js     POST: SERVER-AUTHORITATIVE scoring (signed-in) — dock+grade+updateAxisRatings (Glicko)+persist; diagnostic batch
     leaderboard/route.js POST: anonymous rank-tier distribution (JWT-verified → service-role leaderboard_tiers)
@@ -239,6 +239,7 @@ lib/
   supabase.js          Browser Supabase client + auth helpers + PROVIDERS
   supabaseAdmin.js     Server-only service-role client (concept cache); re-exports conceptKey
   taxonomy.js          Concept-hub Subject→Topic taxonomy (36 slugs; mirrors concept_topics) + SEED_CONCEPTS (one core concept per topic, for the public seed)
+  questionVariety.js   Anti-repeat levers for practice generation: pickVariety (theme/angle/nonce) + recentQuestions avoid-list (pure, seedable)
   contentSafety.js     isConceptSafe() gate for public concept-hub entries
   requestGuard.js      Same-origin (Sec-Fetch) + JSON content-type gate for the API routes
   adminAuth.js         Server-only: verify Supabase JWT + deny-by-default admin allowlist
@@ -355,7 +356,8 @@ All three routes are `POST`, `dynamic = "force-dynamic"`, **same-origin-gated** 
 
 ### `POST /api/generate`
 - **Diagnostic:** `{ "kind": "diagnostic" }` → `{ questions: [{subject, topic, topicSlug, difficulty, targetConcept, reasoningSurface, ...} × 9], curated:true }` — **3 per subject** at `beginner`/`intermediate`/`advanced`. Served **directly from the curated bank** (`lib/diagnosticBank.js#buildDiagnostic`) with **ZERO Groq calls** — no generation, no pool, fully standardized (everyone gets the same vetted, reasoning-rich questions, several with deliberate traps). *(The old `diagnostic_pool` read-through/self-fill is removed; the table is drained and unused.)*
-- **Practice:** `{ "kind": "practice", "subject": "math"|"physics"|"chemistry", "score": int, "weakConcepts": string[] }` → `{ subject, topic, topicSlug, targetConcept, difficulty, question }`. Subject validated via `ORDER.includes` (prototype-safe); `weakConcepts` capped. `topicSlug` is the LLM-chosen **taxonomy slug** (normalized server-side via `normalizeTopic`) — it keys the per-`(subject, topic, band)` difficulty bucket the rating engine calibrates (§11); the human-readable `topic` is unchanged.
+- **Practice:** `{ "kind": "practice", "subject": "math"|"physics"|"chemistry", "score": int, "weakConcepts": string[], "recentQuestions"?: string[] }` → `{ subject, topic, topicSlug, targetConcept, difficulty, question }`. Subject validated via `ORDER.includes` (prototype-safe); `weakConcepts` capped. `topicSlug` is the LLM-chosen **taxonomy slug** (normalized server-side via `normalizeTopic`) — it keys the per-`(subject, topic, band)` difficulty bucket the rating engine calibrates (§11); the human-readable `topic` is unchanged.
+- **Question variety (anti-repeat).** Identical conditioning made the model collapse onto the one canonical exemplar (e.g. "2x + 5 = 11") and only reword it, so "Regenerate" felt like a no-op. Three independent levers now diversify each call: **(A)** the client passes a session ring-buffer of recently-shown questions as `recentQuestions`; the route sanitizes them (≤5 items, ≤240 chars each) and injects an **AVOID-list** into the prompt; **(B)** the server rolls a fresh **variation spec** per call (`lib/questionVariety.js#pickVariety` — a cross-subject context theme + structural angle + a base-36 variation key) so the conditioning changes even with no history; **(C)** generation runs at **temperature 0.85** with a **random per-call `seed`** (`groqJSON`/`rawCall`), so identical prompts still sample differently. `PRACTICE_GEN_SYS` is instructed to honor both lists and avoid the canonical textbook example. *(Grading is untouched — still temperature 0, no seed, for determinism.)*
 
 ### `POST /api/grade`
 - `{ kind: "diagnostic"|"practice", subject, question, [targetConcept], [difficulty], [score], reasoning, [image: { mime, data(base64) }] }`. *(practice-only `difficulty` is the question's band, allowlist-validated and used only to calibrate the grader; unknown/missing → `(unspecified)`.)*
@@ -390,7 +392,7 @@ Like `/api/score`, these require a verified token, but additionally an **admin**
 ### The Groq client (`lib/groq.js`)
 - Models: **generation + Learn** use `llama-3.3-70b-versatile` (`GROQ_MODEL`); **grading** uses the cheaper `openai/gpt-oss-120b` (`GROQ_GRADE_MODEL`, via `groqJSON({grade:true})`, with `reasoning_effort` pinned low); **vision** (photo grading) uses `meta-llama/llama-4-scout-17b-16e-instruct` regardless. Every call logs `[groq] <model> in=… out=…` token usage to the server log for cost monitoring. All overridable via env.
 - All system prompts live here: `DIAG_GEN_SYS`, `DIAG_GRADE_SYS`, `PRACTICE_GEN_SYS`, `PRACTICE_GRADE_SYS`, `LEARN_SYS`. Every grading/teaching prompt forbids revealing answers.
-- `groqJSON({system, user, image})` — calls Groq (JSON mode, with a robust fallback that strips ``` fences and does a **balanced-brace, string-aware** extraction), and on an attached image uses the vision model with graceful text-only fallback.
+- `groqJSON({system, user, image, maxTokens, grade, temperature, seed})` — calls Groq (JSON mode, with a robust fallback that strips ``` fences and does a **balanced-brace, string-aware** extraction), and on an attached image uses the vision model with graceful text-only fallback. `grade:true` forces temperature 0 + no seed (deterministic); generation may pass `temperature`/`seed` (practice generation uses 0.85 + a random seed for variety — §10). `rawCall` adds `seed` to the body only when finite.
 
 ---
 
@@ -443,7 +445,7 @@ Components: **SignIn** (provider buttons), **Dashboard** (the merged Profile+Pro
 
 ## 13. Testing
 
-**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **478 tests across 34 files**, all passing.
+**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **495 tests across 35 files**, all passing.
 
 | File | Covers |
 |---|---|
@@ -457,7 +459,8 @@ Components: **SignIn** (provider buttons), **Dashboard** (the merged Profile+Pro
 | `test/noobtopro-score.test.jsx` | signed-in practice routes to `/api/score` **with the Bearer token**, renders the server's trusted result, and **never calls `/api/grade` or `saveProgress`** |
 | `test/groq.test.js` | JSON extraction (fences, prose, braces-in-strings), fallback retry **gating (no retry on hard HTTP errors)**, per-call `max_tokens`, **grade-model routing (gpt-oss + `reasoning_effort` low)**, errors |
 | `test/rateLimit.test.js` | window limit, reset, per-key, memory bound (enforceCap) |
-| `test/api-generate.test.js` | validation/400s, prototype-key rejection, non-leaking 500 (practice path), weakConcepts cap, **diagnostic served from the curated bank (9 Qs, zero Groq, every subject×level, fresh copy)** |
+| `test/api-generate.test.js` | validation/400s, prototype-key rejection, non-leaking 500 (practice path), weakConcepts cap, **diagnostic served from the curated bank (9 Qs, zero Groq, every subject×level, fresh copy)**, **question-variety wiring** (recentQuestions → AVOID-list, rolled variation directives, generation temperature + per-call seed, recentQuestions cap) |
+| `test/questionVariety.test.js` | the **anti-repeat variety module** (`lib/questionVariety.js`): `pickVariety` (independent theme/angle/nonce draws, deterministic for a seeded rng, index clamping), `varietyDirectiveText`, `sanitizeRecentQuestions` (trim/dedupe/cap count+length), `avoidListText` |
 | `test/diagnostic-bank.test.js` | the **curated bank**: one question per (subject × level) = 9, every question substantive + valid topic slug, `buildDiagnostic` returns a fresh uncorruptable copy |
 | `test/api-grade.test.js` | validation, MIME/base64, score/rubric normalization, difficulty-band threading, **valid-image → vision-model forwarding**, **request-guard 403/415**, non-leaking 500 |
 | `test/api-learn.test.js` | validation, normalization, **cache hit/miss via `promote_or_insert_guide` / key-normalization (real `conceptKey`) / LLM-topic validation**, **request-guard 403/415**, tryThisQuestion shaping |

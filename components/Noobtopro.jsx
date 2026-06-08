@@ -307,6 +307,20 @@ export default function Noobtopro() {
   // (double-click, or open-A → leave → reopen-A before it lands) share ONE billable
   // request instead of firing a second Groq generation.
   const learnInflightRef = useRef(new Map());
+
+  // Session ring-buffer of recently-SHOWN practice/regenerate question texts, keyed
+  // (e.g. "practice:math" or "learn:math::solving linear equations"). Sent to
+  // /api/generate as an avoid-list so a new question / "Regenerate" doesn't keep
+  // re-deriving the same canonical problem. Session-only (a ref, not persisted).
+  const recentQuestionsRef = useRef(new Map());
+  function pushRecentQuestion(key, q) {
+    if (!key || typeof q !== "string" || !q.trim()) return;
+    const m = recentQuestionsRef.current;
+    const prev = m.get(key) || [];
+    // De-dupe, keep the most recent 6 (newest last).
+    m.set(key, [...prev.filter((x) => x !== q), q].slice(-6));
+  }
+  const getRecentQuestions = (key) => recentQuestionsRef.current.get(key) || [];
   function openSignIn() {
     if (stage === "signin") return; // don't overwrite the return target with "signin"
     signinReturn.current = { stage, view };
@@ -735,6 +749,10 @@ export default function Noobtopro() {
     // away from — which would otherwise mis-grade the attempt under the wrong
     // concept/subject. No increment: regenerate stays on the current concept.
     const myRun = learnRun.current;
+    const recentKey = `learn:${subject}::${concept}`;
+    // Steer away from the currently-shown question too (the cached guide one isn't in
+    // the buffer yet on the first regenerate), so the very first "Regenerate" already differs.
+    if (learnQuestion?.question) pushRecentQuestion(recentKey, learnQuestion.question);
     setLearnError("");
     setLearnRegen(true);
     try {
@@ -743,6 +761,7 @@ export default function Noobtopro() {
         subject,
         score: scores?.[subject]?.score ?? 0,
         weakConcepts: [concept],
+        recentQuestions: getRecentQuestions(recentKey),
       });
       if (myRun !== learnRun.current) return; // a newer concept was selected
       if (!data || typeof data.question !== "string" || !data.question.trim()) {
@@ -754,6 +773,7 @@ export default function Noobtopro() {
       const BANDS = new Set(["beginner", "foundational", "intermediate", "advanced", "phd"]);
       const d = typeof data.difficulty === "string" ? data.difficulty.trim().toLowerCase() : "";
       const difficulty = BANDS.has(d) ? d : "intermediate";
+      pushRecentQuestion(recentKey, data.question); // remember it so the next regenerate differs again
       setLearnQuestion({ question: data.question, targetConcept: data.targetConcept || concept, difficulty });
     } catch (e) {
       if (myRun !== learnRun.current) return; // don't surface a stale error on a newer concept
@@ -781,11 +801,13 @@ export default function Noobtopro() {
       // where one subject's grades all failed) — fall back to a beginner default so
       // practicing it just generates an easy question instead of crashing.
       const s = scores?.[subject] || { score: 0, weakConcepts: [] };
+      const recentKey = `practice:${subject}`;
       const data = await api("/api/generate", {
         kind: "practice",
         subject,
         score: s.score,
         weakConcepts: s.weakConcepts || [],
+        recentQuestions: getRecentQuestions(recentKey),
       });
       // A newer practice (another startPractice, or "Practice this problem" from
       // Learn) started while this generation was in flight — drop this stale
@@ -802,6 +824,7 @@ export default function Noobtopro() {
       // by migrate_guest_data's case-sensitive band CHECK on sign-in.
       const PBANDS = new Set(["beginner", "foundational", "intermediate", "advanced", "phd"]);
       const pd = typeof data.difficulty === "string" ? data.difficulty.trim().toLowerCase() : "";
+      pushRecentQuestion(recentKey, data.question); // remember it so the next practice in this subject differs
       setPQuestion({ ...data, difficulty: PBANDS.has(pd) ? pd : "intermediate" });
     } catch (e) {
       if (myRun !== practiceRun.current) return; // superseded — don't surface a stale error
