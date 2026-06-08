@@ -1000,8 +1000,11 @@ export default function Noobtopro() {
   const bgInert = (showSaveModal && !user) || overlayActive ? true : undefined;
 
   /* ----------------------------- render ----------------------------- */
+  // np-shell--dash (the viewport-tall height-lock) applies only to the ranked bento
+  // grid; the not-ranked empty state keeps normal page scroll so a short viewport
+  // can't clip its "Prove it" CTA.
   return (
-    <div className="np-shell">
+    <div className={"np-shell" + (view === "dashboard" && user && scores ? " np-shell--dash" : "")}>
       {showSaveModal && !user && (
         <div className="np-modal-backdrop" onClick={() => setShowSaveModal(false)}>
           <div

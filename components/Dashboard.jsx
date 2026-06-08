@@ -27,6 +27,23 @@ import ReviewList from "@/components/ReviewList";
    prompting sign-in (no real data, no auth fetches).
 --------------------------------------------------------------------------- */
 
+// True at the desktop breakpoint where the dashboard becomes a viewport-tall frame
+// and its panels actually scroll internally. The scrollable-region tabIndex is gated
+// on this so the panels aren't empty keyboard tab-stops below 1024px (where they're
+// plain blocks on a normally-scrolling page).
+function useIsWide() {
+  const [wide, setWide] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const sync = () => setWide(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+  return wide;
+}
+
 // Reusable right-side slide-over drawer. Portaled to <body> so it mounts OUTSIDE
 // the inert background subtree (the page is made inert via onOverlayActiveChange,
 // so a drawer rendered inside it would disable its own controls). ARIA dialog
@@ -140,6 +157,8 @@ function KpiStats({ scores, attempts }) {
 
 // Per-subject score + band + a mini-bar and a practice shortcut.
 function BySubject({ scores, onPractice }) {
+  // Always exactly three rows → never overflows, so it stays a plain (non-scroll)
+  // card (no cardbody/scrollbar-gutter).
   return (
     <div className="np-card np-dash-panel">
       <div className="np-charttitle" style={{ marginBottom: 12 }}>By subject</div>
@@ -160,19 +179,21 @@ function BySubject({ scores, onPractice }) {
 
 // Reasoning radar + a compact "what to work on" (weakest axis + weak concept) per
 // profiled subject.
-function RadarPanel({ scores, onPractice, onLearn }) {
+function RadarPanel({ scores, onPractice, onLearn, scrollRegion }) {
   const rubricSubjects = ORDER
     .filter((k) => scores && scores[k] && scores[k].rubric && typeof scores[k].rubric === "object")
     .map((k) => ({ key: k, label: SUBJECTS[k].label, color: SUBJECTS[k].color, rubric: scores[k].rubric }));
 
   return (
     <div className="np-card np-dash-radar">
-      <div className="np-charttitle">Reasoning profile</div>
-      <div className="np-chartsub" style={{ marginBottom: 8 }}>
-        Where you reason well across the dimensions we grade — and where to focus next.
+      <div className="np-dash-cardhead">
+        <div className="np-charttitle">Reasoning profile</div>
+        <div className="np-chartsub" style={{ marginBottom: 0 }}>
+          Where you reason well across the dimensions we grade — and where to focus next.
+        </div>
       </div>
       {rubricSubjects.length >= 1 ? (
-        <>
+        <div className="np-dash-cardbody" tabIndex={scrollRegion ? 0 : undefined} role="region" aria-label="Reasoning profile detail">
           <RadarChart subjects={rubricSubjects} />
           <div className="np-dash-focus">
             {rubricSubjects.map((s) => {
@@ -198,9 +219,9 @@ function RadarPanel({ scores, onPractice, onLearn }) {
               );
             })}
           </div>
-        </>
+        </div>
       ) : (
-        <p className="np-statsub">Finish the diagnostic to see your reasoning profile.</p>
+        <div className="np-dash-cardbody"><p className="np-statsub">Finish the diagnostic to see your reasoning profile.</p></div>
       )}
     </div>
   );
@@ -208,35 +229,41 @@ function RadarPanel({ scores, onPractice, onLearn }) {
 
 // "Why your rank moved" — the most recent graded attempts with their persisted
 // one-line rationale (trimmed for the always-visible grid).
-function RecentMoves({ history }) {
+function RecentMoves({ history, scrollRegion }) {
+  // Newest first. The panel scrolls internally, so we keep a generous slice rather
+  // than the old hard cap of 4 — the learner can scroll back through their history.
   const moves = history
     .filter((a) => a.type === "attempt" && typeof a.rationale === "string" && a.rationale.trim())
-    .slice(-4)
+    .slice(-25)
     .reverse()
     .map((a) => ({ subject: a.subject, delta: Math.round(a.delta || 0), rationale: a.rationale }));
 
   return (
     <div className="np-card np-dash-panel">
-      <div className="np-charttitle" style={{ marginBottom: 4 }}>Why your rank moved</div>
-      <div className="np-chartsub" style={{ marginBottom: 10 }}>Your latest graded attempts, and why each gained or cost points.</div>
-      {moves.length >= 1 ? (
-        moves.map((m, i) => (
-          <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 8 }}>
-            <span style={{ color: SUBJECTS[m.subject]?.color || "var(--muted)", fontFamily: "var(--mono)", width: 14 }}>
-              {SUBJECTS[m.subject]?.glyph || "·"}
-            </span>
-            <span style={{
-              fontFamily: "var(--mono)", fontWeight: 700, width: 40, textAlign: "right",
-              color: m.delta > 0 ? "var(--phys)" : m.delta < 0 ? "var(--chem)" : "var(--muted)",
-            }}>
-              {m.delta > 0 ? "+" : ""}{m.delta}
-            </span>
-            <span className="np-statsub" style={{ flex: 1 }}>{m.rationale}</span>
-          </div>
-        ))
-      ) : (
-        <p className="np-statsub">Answer a practice problem to see why your rank moves.</p>
-      )}
+      <div className="np-dash-cardhead">
+        <div className="np-charttitle" style={{ marginBottom: 4 }}>Why your rank moved</div>
+        <div className="np-chartsub" style={{ marginBottom: 0 }}>Your latest graded attempts, and why each gained or cost points.</div>
+      </div>
+      <div className="np-dash-cardbody" tabIndex={scrollRegion ? 0 : undefined} role="region" aria-label="Recent rank changes">
+        {moves.length >= 1 ? (
+          moves.map((m, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 8 }}>
+              <span style={{ color: SUBJECTS[m.subject]?.color || "var(--muted)", fontFamily: "var(--mono)", width: 14 }}>
+                {SUBJECTS[m.subject]?.glyph || "·"}
+              </span>
+              <span style={{
+                fontFamily: "var(--mono)", fontWeight: 700, width: 40, textAlign: "right",
+                color: m.delta > 0 ? "var(--phys)" : m.delta < 0 ? "var(--chem)" : "var(--muted)",
+              }}>
+                {m.delta > 0 ? "+" : ""}{m.delta}
+              </span>
+              <span className="np-statsub" style={{ flex: 1 }}>{m.rationale}</span>
+            </div>
+          ))
+        ) : (
+          <p className="np-statsub">Answer a practice problem to see why your rank moves.</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -259,6 +286,8 @@ export default function Dashboard({
   const [imgFailed, setImgFailed] = useState(false);
   // Which slide-over drawer is open: null | "charts" | "reviews".
   const [drawer, setDrawer] = useState(null);
+  // ≥1024px (the panels scroll internally there) → mark the scroll regions focusable.
+  const isWide = useIsWide();
 
   // Make the page background inert while a drawer is open (proper modal focus
   // containment). The guest gate does NOT inert the page — it's scoped to the
@@ -347,17 +376,17 @@ export default function Dashboard({
     .map((a) => ({ value: Math.round(a.delta || 0), glyph: SUBJECTS[a.subject]?.glyph || "·" }));
 
   return (
-    <div className="fade-up">
+    <div className="fade-up np-dash-frame">
       <div className="np-dash">
         {identity}
         <KpiStats scores={scores} attempts={attempts} />
-        <RadarPanel scores={scores} onPractice={onPractice} onLearn={onLearn} />
+        <RadarPanel scores={scores} onPractice={onPractice} onLearn={onLearn} scrollRegion={isWide} />
         <div className="np-dash-mid">
           <BySubject scores={scores} onPractice={onPractice} />
-          <RecentMoves history={history} />
+          <RecentMoves history={history} scrollRegion={isWide} />
         </div>
         <div className="np-dash-lead">
-          <Leaderboard loadLeaderboard={loadLeaderboard} />
+          <Leaderboard loadLeaderboard={loadLeaderboard} scrollRegion={isWide} />
         </div>
         <div className="np-dash-actions">
           <button className="np-btn np-outline np-dash-actbtn" onClick={() => setDrawer("charts")}>

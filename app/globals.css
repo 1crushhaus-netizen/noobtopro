@@ -289,7 +289,10 @@ body {
    Wide, space-efficient grid that fits all the always-visible stats on one
    1920×1080 screen with no page scroll. The view widens the centered column
    (.np-main--wide / .np-nav--wide, applied only on the dashboard view) so the
-   12-col grid has room; trend charts + answer review live in slide-over drawers. */
+   12-col grid has room; trend charts + answer review live in slide-over drawers.
+   At ≥1024px the whole view becomes a viewport-tall app frame (see the height-lock
+   block below): the action bar is pinned and each panel scrolls INSIDE its card so
+   nothing pushes the page. Below 1024px it reverts to a single column + page scroll. */
 .np-main--wide, .np-nav--wide { max-width: 1560px; }
 
 .np-dash { display: grid; gap: 14px; grid-template-columns: repeat(12, 1fr); align-items: start; }
@@ -309,6 +312,9 @@ body {
 .np-dash-sublabel { width: 84px; font-size: 14px; }
 .np-dash-focus { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 6px; }
 .np-dash-focusrow { display: flex; align-items: center; gap: 8px; }
+/* Panel header / body split. At base width these are plain blocks (the body only
+   becomes a scroll container under the ≥1024px height-lock below). */
+.np-dash-cardhead { margin-bottom: 10px; }
 
 /* ---- dashboard slide-over drawers (trends + answer review) ----
    Portaled to <body> (outside the inert background); ARIA dialog with Escape,
@@ -344,9 +350,83 @@ body {
   padding: 30px 26px 22px; box-shadow: 0 24px 60px rgba(0, 0, 0, .5);
 }
 
+/* ≥1024px: the Dashboard becomes a VIEWPORT-TALL app frame so the whole grid —
+   including the action bar — fits one screen with NO page scroll; any panel whose
+   content overflows scrolls INSIDE its own card. A flex chain (shell → main → frame
+   → grid) passes the viewport height down, and `min-height: 0` at every level
+   defeats the default min-height:auto blowout that would otherwise re-introduce a
+   page scrollbar. (Pure CSS — `1fr` measures the header/nav chrome for us; no JS.) */
+@media (min-width: 1024px) {
+  .np-shell--dash {
+    height: 100vh;            /* legacy fallback */
+    height: 100svh;          /* fits on first paint, immune to mobile toolbar reflow */
+    display: flex; flex-direction: column; overflow: hidden;
+    padding-bottom: 24px;    /* reclaim the 60px bottom pad for the no-scroll budget */
+  }
+  .np-shell--dash > .np-top,
+  .np-shell--dash > .np-nav { flex: 0 0 auto; }
+  .np-shell--dash > .np-main { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  .np-shell--dash > .np-main > .np-dash-frame { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+
+  /* the grid fills the remaining height as a 3-row frame: identity+KPIs · panels · actions */
+  .np-dash-frame > .np-dash {
+    flex: 1 1 auto; min-height: 0; gap: 12px;
+    grid-template-rows: auto 1fr auto;
+    align-items: stretch;       /* let the row-2 cards fill the 1fr track */
+    overflow: hidden;
+  }
+  .np-dash-frame .np-dash-identity { grid-row: 1; }
+  .np-dash-frame .np-dash-kpis     { grid-row: 1; }
+  .np-dash-frame .np-dash-radar    { grid-row: 2; min-height: 0; }
+  .np-dash-frame .np-dash-mid      { grid-row: 2; min-height: 0; }
+  .np-dash-frame .np-dash-lead     { grid-row: 2; min-height: 0; }
+  .np-dash-frame .np-dash-actions  { grid-row: 3; }
+
+  /* every scrolling card is a flex column: fixed head + one overflow-y body */
+  .np-dash-frame .np-dash-radar,
+  .np-dash-frame .np-dash-mid > .np-card,
+  .np-dash-frame .np-dash-lead > .np-card {
+    display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 16px;
+  }
+  .np-dash-frame .np-dash-lead { display: flex; flex-direction: column; }
+  /* the mid stack: By subject keeps its natural height, Why-rank-moved fills + scrolls */
+  .np-dash-frame .np-dash-mid > .np-card:first-child { flex: 0 0 auto; }
+  .np-dash-frame .np-dash-mid > .np-card:last-child { flex: 1 1 0; }
+
+  .np-dash-frame .np-dash-cardhead { flex: 0 0 auto; }
+  .np-dash-frame .np-dash-cardbody {
+    flex: 1 1 auto; min-height: 0;
+    overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable;
+    scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, .18) transparent;
+    /* scroll-shadow fade affordance (the panel bg is #12161f) so "more below" reads */
+    background:
+      linear-gradient(#12161f 30%, rgba(18, 22, 31, 0)) center top,
+      linear-gradient(rgba(18, 22, 31, 0), #12161f 70%) center bottom,
+      radial-gradient(farthest-side at 50% 0, rgba(0, 0, 0, .4), transparent) center top,
+      radial-gradient(farthest-side at 50% 100%, rgba(0, 0, 0, .4), transparent) center bottom;
+    background-repeat: no-repeat;
+    background-size: 100% 28px, 100% 28px, 100% 10px, 100% 10px;
+    background-attachment: local, local, scroll, scroll;
+  }
+  .np-dash-frame .np-dash-cardbody:focus-visible { outline: 2px solid var(--math); outline-offset: -2px; border-radius: 8px; }
+  .np-dash-frame .np-dash-cardbody::-webkit-scrollbar { width: 8px; }
+  .np-dash-frame .np-dash-cardbody::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .16); border-radius: 4px; }
+
+  /* the radar shrinks to fit and never forces the card taller than its 1fr track */
+  .np-dash-frame .np-dash-radar .np-chart { max-height: 380px; }
+
+  /* compact the fixed rows to buy vertical budget */
+  .np-dash-frame .np-dash-identity { padding: 12px 16px; }
+  .np-dash-frame .np-dash-kpis .np-statcard { padding: 12px; }
+  /* pinned action bar: a clear divider + comfortable 44px touch targets */
+  .np-dash-frame .np-dash-actions { padding-top: 12px; border-top: 1px solid var(--line); }
+  .np-dash-frame .np-dash-actbtn { min-height: 44px; }
+}
+
 /* Dashboard collapses to a single column (and the page may scroll) below the
-   widescreen breakpoint — the no-scroll guarantee is a 1920×1080 desktop goal. */
-@media (max-width: 1024px) {
+   widescreen breakpoint — the no-scroll guarantee is a 1920×1080 desktop goal. The
+   height-lock above is min-width:1024 only, so below it the page scrolls normally. */
+@media (max-width: 1023.98px) {
   .np-dash { grid-template-columns: 1fr; }
   .np-dash-identity, .np-dash-kpis, .np-dash-radar, .np-dash-mid, .np-dash-lead, .np-dash-actions { grid-column: 1 / -1; }
 }

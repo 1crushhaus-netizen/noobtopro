@@ -76,7 +76,7 @@ function TierRow({ label, glyph, color, track }) {
 // loadLeaderboard() (→ /api/leaderboard). Shows overall + per-subject distributions.
 // Self-contained (its own fetch + cancellation guard) so the Dashboard can drop it
 // straight into the grid.
-export default function Leaderboard({ loadLeaderboard }) {
+export default function Leaderboard({ loadLeaderboard, scrollRegion }) {
   const [tiers, setTiers] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -108,24 +108,28 @@ export default function Leaderboard({ loadLeaderboard }) {
 
   return (
     <div className="np-card">
-      <div className="np-charttitle" style={{ marginBottom: 6 }}>Leaderboard</div>
-      <div className="np-chartsub" style={{ marginBottom: 14 }}>
-        Where you stand against every ranked learner — anonymous by design: just how many sit at each rank, and your own place.
+      <div className="np-dash-cardhead">
+        <div className="np-charttitle" style={{ marginBottom: 6 }}>Leaderboard</div>
+        <div className="np-chartsub" style={{ marginBottom: 0 }}>
+          Where you stand against every ranked learner — anonymous by design: just how many sit at each rank, and your own place.
+        </div>
       </div>
-      {loading ? (
-        <p className="np-statsub" role="status" aria-live="polite">Loading the leaderboard…</p>
-      ) : error ? (
-        <p className="np-statsub">{error}</p>
-      ) : tiers ? (
-        <>
-          <TierRow label="Overall" color="var(--math)" track={tiers.overall} />
-          {ORDER.map((k) => (
-            <TierRow key={k} label={SUBJECTS[k].label} glyph={SUBJECTS[k].glyph} color={SUBJECTS[k].color} track={tiers[k]} />
-          ))}
-        </>
-      ) : (
-        <p className="np-statsub">No ranked learners yet — be the first.</p>
-      )}
+      <div className="np-dash-cardbody" tabIndex={scrollRegion ? 0 : undefined} role="region" aria-label="Leaderboard rankings">
+        {loading ? (
+          <p className="np-statsub" role="status" aria-live="polite">Loading the leaderboard…</p>
+        ) : error ? (
+          <p className="np-statsub">{error}</p>
+        ) : tiers ? (
+          <>
+            <TierRow label="Overall" color="var(--math)" track={tiers.overall} />
+            {ORDER.map((k) => (
+              <TierRow key={k} label={SUBJECTS[k].label} glyph={SUBJECTS[k].glyph} color={SUBJECTS[k].color} track={tiers[k]} />
+            ))}
+          </>
+        ) : (
+          <p className="np-statsub">No ranked learners yet — be the first.</p>
+        )}
+      </div>
     </div>
   );
 }
