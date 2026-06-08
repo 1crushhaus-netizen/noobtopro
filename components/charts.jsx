@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { RUBRIC_KEYS, RUBRIC_LABELS, RUBRIC_SHORT, RUBRIC_MAX } from "@/lib/scoring";
+import { SUBJECTS, RUBRIC_KEYS, RUBRIC_LABELS, RUBRIC_SHORT, RUBRIC_MAX } from "@/lib/scoring";
 
 /* ----------------------------------------------------------------------------
    Dependency-free inline-SVG charting shared by the Dashboard grid (radar +
@@ -11,7 +11,7 @@ import { RUBRIC_KEYS, RUBRIC_LABELS, RUBRIC_SHORT, RUBRIC_MAX } from "@/lib/scor
    decorative for screen-reader users).
 ---------------------------------------------------------------------------- */
 
-export function LineChart({ values, yMax = 300, color = "#F2B441" }) {
+export function LineChart({ values, yMax = 300, color = SUBJECTS.math.color }) {
   const W = 620, H = 200, padL = 36, padR = 14, padT = 16, padB = 22;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
@@ -75,7 +75,7 @@ export function BarChart({ items }) {
         const cx = padL + slot * (i + 0.5);
         const top = d.value >= 0 ? y(d.value) : zeroY;
         const h = Math.max(2, Math.abs(zeroY - y(d.value)));
-        const fill = d.value >= 0 ? "#5BD6C4" : "#FF7E74";
+        const fill = d.value >= 0 ? SUBJECTS.physics.color : SUBJECTS.chemistry.color;
         return (
           <g key={i}>
             <rect x={cx - bw / 2} y={top} width={bw} height={h} rx="3" fill={fill} opacity="0.9" />
@@ -94,7 +94,7 @@ export function BarChart({ items }) {
 
 export function MiniBar({ value, color }) {
   return (
-    <div style={{ flex: 1, height: 8, background: "rgba(255,255,255,.08)", borderRadius: 4, overflow: "hidden" }}>
+    <div style={{ flex: 1, height: 8, background: "var(--tint-2)", borderRadius: 4, overflow: "hidden" }}>
       <div style={{ width: `${Math.max(0, Math.min(100, value))}%`, height: "100%", background: color, transition: "width .6s ease" }} />
     </div>
   );

@@ -113,13 +113,16 @@ describe("Dashboard — leaderboard, reset, empty state", () => {
     expect(screen.getAllByText(/ranked/i).length).toBeGreaterThan(0);
   });
 
-  it("fires onSignOut, and onReset only after confirmation", () => {
-    const onSignOut = vi.fn();
-    const onReset = vi.fn();
-    render(<Dashboard user={user} scores={scores} history={history} onSignOut={onSignOut} onReset={onReset} onPractice={() => {}} />);
-    fireEvent.click(screen.getByRole("button", { name: /sign out/i }));
-    expect(onSignOut).toHaveBeenCalled();
+  it("does NOT render a duplicate Sign out (it lives once in the global header)", () => {
+    render(<Dashboard user={user} scores={scores} history={history} onSignOut={vi.fn()} onPractice={() => {}} />);
+    // Sign out is rendered by the app header (Noobtopro), not the Dashboard, so the
+    // signed-in dashboard must not show a second Sign out control.
+    expect(screen.queryByRole("button", { name: /sign out/i })).toBeNull();
+  });
 
+  it("fires onReset only after confirmation", () => {
+    const onReset = vi.fn();
+    render(<Dashboard user={user} scores={scores} history={history} onReset={onReset} onPractice={() => {}} />);
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
     fireEvent.click(screen.getByRole("button", { name: /reset my progress/i }));
     expect(onReset).not.toHaveBeenCalled();

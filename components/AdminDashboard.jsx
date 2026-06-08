@@ -60,7 +60,7 @@ export default function AdminDashboard({ adminApi }) {
 
   if (loading && !data) {
     return (
-      <div className="np-card np-pulse" role="status" aria-live="polite" style={{ textAlign: "center", padding: "40px 24px", fontFamily: "var(--display)", fontSize: 20 }}>
+      <div className="np-card np-pulse np-emptytitle" role="status" aria-live="polite" style={{ textAlign: "center", padding: "40px 24px" }}>
         Loading admin data…
       </div>
     );
@@ -85,9 +85,9 @@ export default function AdminDashboard({ adminApi }) {
       )}
 
       <div className="np-stats" style={{ marginBottom: 22 }}>
-        <div className="np-card np-statcard"><span className="np-statlabel">Awaiting approval</span><span className="np-statnum">{guides.length}</span></div>
-        <div className="np-card np-statcard"><span className="np-statlabel">Security warnings</span><span className="np-statnum" style={{ color: events.length ? "#FF7E74" : undefined }}>{events.length}</span></div>
-        <div className="np-card np-statcard"><span className="np-statlabel">Open reports</span><span className="np-statnum">{reports.length}</span></div>
+        <div className="np-card np-statcard"><span className="np-eyebrow">Awaiting approval</span><span className="np-statnum">{guides.length}</span></div>
+        <div className="np-card np-statcard"><span className="np-eyebrow">Security warnings</span><span className="np-statnum" style={{ color: events.length ? "var(--danger)" : undefined }}>{events.length}</span></div>
+        <div className="np-card np-statcard"><span className="np-eyebrow">Open reports</span><span className="np-statnum">{reports.length}</span></div>
       </div>
 
       {/* ---- Approval queue ---- */}
@@ -115,7 +115,7 @@ export default function AdminDashboard({ adminApi }) {
               <div className="np-admin-actions">
                 <button className="np-btn np-primary" disabled={!ready || busyKey === key} onClick={() => act(key, { target: "guide", action: "approve", subject: g.subject, concept_key: g.concept_key })}>Approve → public</button>
                 <button className="np-ghost" disabled={busyKey === key} onClick={() => act(key, { target: "guide", action: "hide", subject: g.subject, concept_key: g.concept_key })}>Hide</button>
-                <button className="np-ghost np-admin-danger" disabled={busyKey === key} onClick={() => { if (typeof window === "undefined" || window.confirm(`Delete the guide for "${g.concept}"? This cannot be undone.`)) act(key, { target: "guide", action: "delete", subject: g.subject, concept_key: g.concept_key }); }}>Delete</button>
+                <button className="np-ghost np-ghost--danger" disabled={busyKey === key} onClick={() => { if (typeof window === "undefined" || window.confirm(`Delete the guide for "${g.concept}"? This cannot be undone.`)) act(key, { target: "guide", action: "delete", subject: g.subject, concept_key: g.concept_key }); }}>Delete</button>
               </div>
             </div>
           );
