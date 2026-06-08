@@ -3,6 +3,7 @@ import { groqJSON, PRACTICE_GEN_SYS } from "@/lib/groq";
 import { ORDER, clampScore } from "@/lib/scoring";
 import { topicSlugsFor, normalizeTopic } from "@/lib/taxonomy";
 import { pickVariety, varietyDirectiveText, sanitizeRecentQuestions, avoidListText } from "@/lib/questionVariety";
+import { normalizeReasoningSurface, capTrap } from "@/lib/gradeInput";
 import { checkRateLimit, clientKey } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
 import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
@@ -98,7 +99,15 @@ export async function POST(req) {
     // Normalize the LLM's topicSlug to a real taxonomy slug (or general_<subject>) so
     // the per-(subject,topic,band) difficulty bucket on /api/score is always bounded
     // and FK-valid. The human-readable `topic` is left as-is for display.
-    if (data && typeof data === "object") data.topicSlug = normalizeTopic(subject, data.topicSlug);
+    if (data && typeof data === "object") {
+      data.topicSlug = normalizeTopic(subject, data.topicSlug);
+      // Normalize the reasoning-surface metadata: allow-list the surface, and keep the
+      // trap description only for a trap (so an off-list value or a stray trap on a
+      // non-trap question can't reach the grader). These ride to the grader (§ grade/score)
+      // as calibration context for the difficulty-adjusted rubric.
+      data.reasoningSurface = normalizeReasoningSurface(data.reasoningSurface);
+      data.trap = data.reasoningSurface === "trap" ? capTrap(data.trap) : "";
+    }
     return NextResponse.json(data);
   } catch (e) {
     // Log the real cause server-side; return a generic message so upstream Groq

@@ -24,6 +24,7 @@ vi.mock("@/lib/abuseDetection", () => ({ reportInjection: vi.fn(), reportRateLim
 import { POST } from "@/app/api/score/route";
 import { _resetRateLimits } from "@/lib/rateLimit";
 import { updateAxisRatings, scoreFromRubric, defaultDifficultyForBand, normalizeRubric } from "@/lib/scoring";
+import { diagnosticSurfaceFor } from "@/lib/diagnosticBank";
 
 // Complete 9-axis rubric helper (the grader emits these; the server derives the headline).
 const mkRubric = (v, over = {}) => ({
@@ -389,6 +390,25 @@ describe("POST /api/score diagnostic", () => {
     expect(j.scores.math.score).toBeGreaterThan(0);
     expect(Object.keys(j.scores.math.rubric)).toHaveLength(9); // per-subject 9-axis rubric profile
     expect(fetchMock).toHaveBeenCalledTimes(2); // one grade per answer (2 tiers)
+  });
+
+  it("derives the diagnostic reasoning-surface from the BANK, IGNORING a client-supplied spoof", async () => {
+    const fetchMock = mockGroq(DIAG_GRADE);
+    const spoof = "SPOOFED-naive-path-xyzzy";
+    // math:intermediate is a TRAP slot in the curated bank; the client tries to override its trap.
+    const res = await POST(
+      req({
+        kind: "diagnostic",
+        answers: [{ subject: "math", question: "Qm-mid", difficulty: "intermediate", reasoning: REASONING, reasoningSurface: "trap", trap: spoof }],
+      })
+    );
+    expect(res.status).toBe(200);
+    const userMsg = JSON.parse(fetchMock.mock.calls[0][1].body).messages.find((m) => m.role === "user").content;
+    const bank = diagnosticSurfaceFor("math", "intermediate");
+    expect(bank.reasoningSurface).toBe("trap"); // sanity: this slot really is a trap in the bank
+    expect(userMsg).toContain(`Reasoning surface: ${bank.reasoningSurface}`);
+    expect(userMsg).toContain(bank.trap); // the BANK's trap reaches the grader
+    expect(userMsg).not.toContain(spoof); // the client's spoofed trap is ignored
   });
 
   it("SIGNED-IN: persists the baseline for the verified uid and returns the baseline attempt", async () => {
