@@ -23,6 +23,7 @@ import SignIn from "@/components/SignIn";
 import LearnTab from "@/components/LearnTab";
 import AdminDashboard from "@/components/AdminDashboard";
 import ScoreBreakdown, { ErrorList, hasReasoningError } from "@/components/ScoreBreakdown";
+import { SubjectGlyph, deltaColor } from "@/components/ui";
 
 /* ----------------------------- helpers ----------------------------- */
 async function api(path, body) {
@@ -161,7 +162,7 @@ function AnswerComposer({ value, onText, img, onAttach, onRemoveImg, onSubmit, o
   }, [lockKey, onSkip]);
   const skipLocked = skipIn > 0;
   return (
-    <div className="np-card" style={{ padding: 0, overflow: "hidden" }}>
+    <div className="np-card np-input-card">
       <textarea
         className="np-input"
         aria-label="Your reasoning"
@@ -1024,7 +1025,7 @@ export default function Noobtopro() {
       {showSaveModal && !user && (
         <div className="np-modal-backdrop" onClick={() => setShowSaveModal(false)}>
           <div
-            className="np-modal"
+            className="np-surface-elevated np-modal"
             role="dialog"
             aria-modal="true"
             aria-labelledby="np-save-title"
@@ -1048,18 +1049,17 @@ export default function Noobtopro() {
               results carry over automatically.
             </p>
             <button
-              className="np-btn np-primary np-big"
-              style={{ width: "100%", justifyContent: "center" }}
+              className="np-btn np-primary np-big np-btn--block"
               onClick={() => { setShowSaveModal(false); openSignIn(); }}
             >
-              <Icon name="google" size={16} /> Sign in
+              <Icon name="login" size={16} /> Sign in
             </button>
             <button className="np-ghost np-modal-later" onClick={() => setShowSaveModal(false)}>Not now</button>
           </div>
         </div>
       )}
 
-      <header className="np-top" inert={bgInert}>
+      <header className={"np-top" + (view === "dashboard" && user ? " np-top--wide" : "")} inert={bgInert}>
         <button className="np-brand" onClick={reset} title="Restart">
           noob<span className="np-arrow">→</span>topro
         </button>
@@ -1067,7 +1067,7 @@ export default function Noobtopro() {
         <div className="np-signin">
           {user ? (
             <button className="np-signinbtn" onClick={handleSignOut} title={user.email || ""}>
-              <Icon name="google" size={16} /> Sign out
+              <Icon name="logout" size={16} /> Sign out
             </button>
           ) : (
             // Guests on the intro see Sign in beside the primary CTA instead, so the
@@ -1075,11 +1075,11 @@ export default function Noobtopro() {
             stage !== "intro" && (
               isSupabaseConfigured ? (
                 <button className="np-signinbtn" onClick={openSignIn}>
-                  <Icon name="google" size={16} /> Sign in
+                  <Icon name="login" size={16} /> Sign in
                 </button>
               ) : (
                 <button className="np-signinbtn" onClick={() => setShowAuthNote(true)}>
-                  <Icon name="google" size={16} /> Sign in
+                  <Icon name="login" size={16} /> Sign in
                 </button>
               )
             )
@@ -1141,7 +1141,6 @@ export default function Noobtopro() {
             onStartDiagnostic={() => { setView("practice"); beginDiagnostic(); }}
             onPractice={(s) => { setView("practice"); startPractice(s); }}
             onLearn={openLearn}
-            onSignOut={handleSignOut}
             onReset={resetProgress}
             onSignIn={() => (isSupabaseConfigured ? openSignIn() : setShowAuthNote(true))}
             onClose={() => setView("practice")}
@@ -1193,7 +1192,7 @@ export default function Noobtopro() {
                 <div className="np-subjectrow">
                   {ORDER.map((k) => (
                     <span key={k} className="np-chip" style={{ borderColor: SUBJECTS[k].color }}>
-                      <span style={{ color: SUBJECTS[k].color, fontFamily: "var(--mono)" }}>{SUBJECTS[k].glyph}</span> {SUBJECTS[k].label}
+                      <SubjectGlyph subject={k} /> {SUBJECTS[k].label}
                     </span>
                   ))}
                 </div>
@@ -1208,7 +1207,7 @@ export default function Noobtopro() {
                       className="np-signinbtn"
                       onClick={() => (isSupabaseConfigured ? openSignIn() : setShowAuthNote(true))}
                     >
-                      <Icon name="google" size={16} /> Sign in
+                      <Icon name="login" size={16} /> Sign in
                     </button>
                   )}
                 </div>
@@ -1233,8 +1232,8 @@ export default function Noobtopro() {
                   ))}
                 </div>
                 <div className="np-qmeta">
-                  <span style={{ color: SUBJECTS[curSubject].color }}>{SUBJECTS[curSubject].glyph}</span>
-                  <span style={{ fontFamily: "var(--mono)", letterSpacing: 1 }}>
+                  <SubjectGlyph subject={curSubject} />
+                  <span className="np-metaline">
                     {SUBJECTS[curSubject].label.toUpperCase()} · {(DIFFICULTY_LABELS[curQ.difficulty] || "").toUpperCase()} · {qi + 1}/{questions.length}
                   </span>
                   {curQ.topic && <span className="np-topic">{curQ.topic}</span>}
@@ -1269,7 +1268,7 @@ export default function Noobtopro() {
                       <div className="np-savedesc">Your results live only in this browser. Sign in to keep them across devices.</div>
                     </div>
                     <button className="np-btn np-primary" onClick={openSignIn}>
-                      <Icon name="google" size={15} /> Sign in to save
+                      <Icon name="login" size={15} /> Sign in to save
                     </button>
                   </div>
                 )}
@@ -1281,7 +1280,7 @@ export default function Noobtopro() {
                     return (
                       <div key={k} className="np-card np-scorecard">
                         <div className="np-scorehead">
-                          <span style={{ color: SUBJECTS[k].color, fontFamily: "var(--mono)", fontSize: 20 }}>{SUBJECTS[k].glyph}</span>
+                          <SubjectGlyph subject={k} size={20} />
                           <span className="np-scorelabel">{SUBJECTS[k].label}</span>
                         </div>
                         <Ring value={s.score} color={SUBJECTS[k].color} label={SUBJECTS[k].label} />
@@ -1289,7 +1288,7 @@ export default function Noobtopro() {
                         {s.comment && <div className="np-comment">{s.comment}</div>}
                         {s.weakConcepts && s.weakConcepts.length > 0 && (
                           <div className="np-weakwrap">
-                            <div className="np-weaklabel">Work on</div>
+                            <div className="np-eyebrow np-eyebrow--sm">Work on</div>
                             <div className="np-weaktags">
                               {s.weakConcepts.slice(0, 3).map((w, i) => (
                                 <button
@@ -1305,7 +1304,7 @@ export default function Noobtopro() {
                             </div>
                           </div>
                         )}
-                        <button className="np-btn np-outline" style={{ marginTop: 14, borderColor: SUBJECTS[k].color, color: SUBJECTS[k].color }} onClick={() => startPractice(k)}>
+                        <button className="np-btn np-secondary np-btn--block np-btn--subject" style={{ marginTop: 14, "--subject": SUBJECTS[k].color }} onClick={() => startPractice(k)}>
                           Practice {SUBJECTS[k].label} <Icon name="arrow" size={15} />
                         </button>
                       </div>
@@ -1327,15 +1326,15 @@ export default function Noobtopro() {
                 {pQuestion && (
                   <>
                     <div className="np-qmeta">
-                      <span style={{ color: SUBJECTS[pSubject].color }}>{SUBJECTS[pSubject].glyph}</span>
-                      <span style={{ fontFamily: "var(--mono)", letterSpacing: 1 }}>
+                      <SubjectGlyph subject={pSubject} />
+                      <span className="np-metaline">
                         {SUBJECTS[pSubject].label.toUpperCase()} · {(pQuestion.difficulty || "").toUpperCase()}
                       </span>
                       {pQuestion.targetConcept && <span className="np-topic">{pQuestion.targetConcept}</span>}
                       <span className="np-livescore" style={{ borderColor: SUBJECTS[pSubject].color }}>
                         {scores[pSubject]?.score ?? 0}<span style={{ color: "var(--muted)" }}>/100</span>
                         {scoreDelta !== null && scoreDelta !== 0 && (
-                          <span style={{ color: scoreDelta > 0 ? "var(--phys)" : "var(--chem)", marginLeft: 6 }}>
+                          <span style={{ color: deltaColor(scoreDelta), marginLeft: 6 }}>
                             {scoreDelta > 0 ? "+" : ""}{scoreDelta}
                           </span>
                         )}
@@ -1365,7 +1364,7 @@ export default function Noobtopro() {
                       <div className="fade-up">
                         <div className="np-card np-feedhead">
                           <div>
-                            <div className="np-feedlabel">Reasoning quality this attempt</div>
+                            <div className="np-eyebrow">Reasoning quality this attempt</div>
                             <div className="np-feedscore">{feedback.reasoningScore}<span style={{ color: "var(--muted)", fontSize: 18 }}>/100</span></div>
                           </div>
                           <div className="np-feedsub">Your <em>reasoning</em> is scored — not the final answer. The breakdown below shows exactly how.</div>
@@ -1378,7 +1377,7 @@ export default function Noobtopro() {
                         {/* Why your rank moved — the persisted, deterministic explanation. */}
                         {feedback.rationale && (
                           <div className="np-note" style={{ display: "flex", alignItems: "center", gap: 10, fontFamily: "var(--mono)", fontSize: 13 }}>
-                            <span style={{ color: scoreDelta > 0 ? "var(--phys)" : scoreDelta < 0 ? "var(--chem)" : "var(--muted)", fontWeight: 700 }}>
+                            <span style={{ color: deltaColor(scoreDelta), fontWeight: 700 }}>
                               {scoreDelta > 0 ? "▲" : scoreDelta < 0 ? "▼" : "■"}
                             </span>
                             <span>{feedback.rationale}</span>
@@ -1458,7 +1457,7 @@ export default function Noobtopro() {
         )}
       </main>
 
-      <footer className="np-foot" inert={bgInert}>Prototype · grading is performed live by Groq against a reasoning rubric. Scores are demonstrative.</footer>
+      <footer className={"np-foot" + (view === "dashboard" && user ? " np-foot--wide" : "")} inert={bgInert}>Prototype · grading is performed live by Groq against a reasoning rubric. Scores are demonstrative.</footer>
     </div>
   );
 }

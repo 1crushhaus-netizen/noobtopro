@@ -15,6 +15,7 @@ import Icon from "@/components/Icon";
 import { LineChart, BarChart, RadarChart, MiniBar } from "@/components/charts";
 import Leaderboard from "@/components/Leaderboard";
 import ReviewList from "@/components/ReviewList";
+import { SubjectGlyph, deltaColor } from "@/components/ui";
 
 /* ---------------------------------------------------------------------------
    Dashboard — the user's home base. Merges the former Profile (identity, KPIs,
@@ -115,7 +116,7 @@ function Drawer({ open, title, titleId, onClose, children }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="np-drawer-head">
-          <h2 id={titleId} className="np-charttitle" style={{ fontSize: 22, margin: 0 }}>{title}</h2>
+          <h2 id={titleId} className="np-sectiontitle" style={{ margin: 0 }}>{title}</h2>
           <button className="np-iconbtn np-drawer-close" aria-label="Close" onClick={onClose}>
             <Icon name="x" size={18} />
           </button>
@@ -135,19 +136,19 @@ function KpiStats({ scores, attempts }) {
   return (
     <div className="np-dash-kpis">
       <div className="np-card np-statcard">
-        <span className="np-statlabel">PhD-level intelligence</span>
+        <span className="np-eyebrow np-eyebrow--xs">PhD-level intelligence</span>
         <span className="np-statnum" style={{ color: "var(--math)" }}>
           {phdIndex(scores)}<span style={{ color: "var(--muted)", fontSize: 15 }}> / 100</span>
         </span>
       </div>
       <div className="np-card np-statcard">
-        <span className="np-statlabel">Total points</span>
+        <span className="np-eyebrow np-eyebrow--xs">Total points</span>
         <span className="np-statnum">
           {totalPoints(scores)}<span style={{ color: "var(--muted)", fontSize: 15 }}> / 300</span>
         </span>
       </div>
       <div className="np-card np-statcard">
-        <span className="np-statlabel">Problems graded</span>
+        <span className="np-eyebrow np-eyebrow--xs">Problems graded</span>
         <span className="np-statnum">{attempts}</span>
       </div>
     </div>
@@ -163,13 +164,13 @@ function BySubject({ scores, onPractice }) {
       <div className="np-charttitle" style={{ marginBottom: 12 }}>By subject</div>
       {ORDER.map((k) => (
         <div key={k} className="np-dash-subrow">
-          <span style={{ color: SUBJECTS[k].color, fontFamily: "var(--mono)", width: 16 }}>{SUBJECTS[k].glyph}</span>
+          <SubjectGlyph subject={k} width={16} />
           <span className="np-dash-sublabel">{SUBJECTS[k].label}</span>
           <MiniBar value={scores[k]?.score || 0} color={SUBJECTS[k].color} />
           <span style={{ fontFamily: "var(--mono)", fontWeight: 700, width: 58, textAlign: "right" }}>
             {scores[k]?.score || 0}<span style={{ color: "var(--muted)" }}>/100</span>
           </span>
-          <button className="np-ghost" onClick={() => onPractice && onPractice(k)} style={{ whiteSpace: "nowrap" }}>practice</button>
+          <button className="np-ghost" onClick={() => onPractice && onPractice(k)} style={{ whiteSpace: "nowrap" }}>Practice</button>
         </div>
       ))}
     </div>
@@ -201,7 +202,7 @@ function RadarPanel({ scores, onPractice, onLearn, scrollRegion }) {
               const concept = (scores[s.key]?.weakConcepts || []).find((c) => typeof c === "string" && c.trim()) || null;
               return (
                 <div key={s.key} className="np-dash-focusrow">
-                  <span style={{ color: s.color, fontFamily: "var(--mono)", width: 16 }}>{SUBJECTS[s.key].glyph}</span>
+                  <SubjectGlyph subject={s.key} width={16} />
                   <span className="np-statsub" style={{ flex: 1, minWidth: 0 }}>
                     {lowLabel ? (
                       <>Weakest: <strong style={{ color: "var(--text)" }}>{lowLabel}</strong>{concept ? <> — <em>{concept}</em></> : null}</>
@@ -212,7 +213,7 @@ function RadarPanel({ scores, onPractice, onLearn, scrollRegion }) {
                   {concept ? (
                     <button className="np-ghost" onClick={() => onLearn && onLearn(s.key, concept)} style={{ whiteSpace: "nowrap" }}>Learn this</button>
                   ) : (
-                    <button className="np-ghost" onClick={() => onPractice && onPractice(s.key)} style={{ whiteSpace: "nowrap" }}>practice</button>
+                    <button className="np-ghost" onClick={() => onPractice && onPractice(s.key)} style={{ whiteSpace: "nowrap" }}>Practice</button>
                   )}
                 </div>
               );
@@ -247,12 +248,10 @@ function RecentMoves({ history, scrollRegion }) {
         {moves.length >= 1 ? (
           moves.map((m, i) => (
             <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 8 }}>
-              <span style={{ color: SUBJECTS[m.subject]?.color || "var(--muted)", fontFamily: "var(--mono)", width: 14 }}>
-                {SUBJECTS[m.subject]?.glyph || "·"}
-              </span>
+              <SubjectGlyph subject={m.subject} width={16} />
               <span style={{
                 fontFamily: "var(--mono)", fontWeight: 700, width: 40, textAlign: "right",
-                color: m.delta > 0 ? "var(--phys)" : m.delta < 0 ? "var(--chem)" : "var(--muted)",
+                color: deltaColor(m.delta),
               }}>
                 {m.delta > 0 ? "+" : ""}{m.delta}
               </span>
@@ -276,7 +275,6 @@ export default function Dashboard({
   onStartDiagnostic,
   onPractice,
   onLearn,
-  onSignOut,
   onReset,
   onSignIn,
   onClose,
@@ -314,15 +312,15 @@ export default function Dashboard({
           <div className="np-card" style={{ height: 140 }} />
           <div className="np-card" style={{ height: 140 }} />
         </div>
-        <div className="np-dash-gatecard" role="dialog" aria-modal="false" aria-labelledby="np-gate-title">
+        <div className="np-surface-elevated np-dash-gatecard" role="dialog" aria-modal="false" aria-labelledby="np-gate-title">
           <div className="np-modal-spark" aria-hidden="true"><Icon name="lock" size={22} /></div>
           <h2 id="np-gate-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>Sign in to see your Dashboard</h2>
           <p className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
             Your scores, reasoning profile, leaderboard rank, and answer history live here. Sign in to unlock your dashboard
             {scores ? " — your guest results carry over automatically." : "."}
           </p>
-          <button className="np-btn np-primary np-big" style={{ width: "100%", justifyContent: "center" }} onClick={onSignIn}>
-            <Icon name="google" size={16} /> Sign in
+          <button className="np-btn np-primary np-big np-btn--block" onClick={onSignIn}>
+            <Icon name="login" size={16} /> Sign in
           </button>
           {onClose && <button className="np-ghost np-modal-later" onClick={onClose}>Maybe later</button>}
         </div>
@@ -349,7 +347,7 @@ export default function Dashboard({
           {rankFor(phdIndex(scores)).name}
         </span>
       )}
-      <button className="np-ghost" onClick={onSignOut}>Sign out</button>
+      {/* Sign out lives once, in the global header (np-top) — no duplicate here. */}
     </div>
   );
 
@@ -376,6 +374,10 @@ export default function Dashboard({
 
   return (
     <div className="fade-up np-dash-frame">
+      <div className="np-dash-pagehead">
+        <h2 className="np-h2">Your dashboard</h2>
+        <p className="np-lede">Your scores, reasoning profile, rank, and recent progress — all in one place.</p>
+      </div>
       <div className="np-dash">
         {identity}
         <KpiStats scores={scores} attempts={attempts} />
@@ -388,14 +390,14 @@ export default function Dashboard({
           <Leaderboard loadLeaderboard={loadLeaderboard} scrollRegion={isWide} />
         </div>
         <div className="np-dash-actions">
-          <button className="np-btn np-dash-actbtn" onClick={() => setDrawer("charts")}>
+          <button className="np-btn np-secondary np-dash-actbtn" onClick={() => setDrawer("charts")}>
             See trends <Icon name="arrow" size={16} />
           </button>
-          <button className="np-btn np-dash-actbtn" onClick={() => setDrawer("reviews")}>
+          <button className="np-btn np-secondary np-dash-actbtn" onClick={() => setDrawer("reviews")}>
             Review your answers <Icon name="arrow" size={16} />
           </button>
           <button
-            className="np-btn np-dash-actbtn np-dash-actbtn--danger"
+            className="np-btn np-danger np-dash-actbtn"
             style={{ marginLeft: "auto" }}
             onClick={() => {
               if (window.confirm("This permanently deletes all your scores and history. Continue?")) onReset && onReset();
@@ -411,7 +413,7 @@ export default function Dashboard({
           <div className="np-charttitle">Total points over time</div>
           <div className="np-chartsub">From your starting scores through every graded attempt.</div>
           {linePoints.length >= 2 ? (
-            <LineChart values={linePoints} yMax={300} color="#F2B441" />
+            <LineChart values={linePoints} yMax={300} color={SUBJECTS.math.color} />
           ) : (
             <p className="np-statsub">Answer a practice problem to start the trend line.</p>
           )}

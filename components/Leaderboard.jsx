@@ -4,7 +4,9 @@ import React, { useState, useEffect } from "react";
 import { SUBJECTS, ORDER, RANKS } from "@/lib/scoring";
 
 // Cohesive low→high colour ramp for the 5 rank tiers (Absolute beginner → PhD-level).
-const TIER_COLORS = ["#5a6472", "#7a8494", "#5BD6C4", "#F2B441", "#FF7E74"];
+// The top three reuse the subject palette (single source, lib/scoring.js); the two
+// low tiers are neutral grays. Hex (not var()) so it also works if read into SVG.
+const TIER_COLORS = ["#5a6472", "#7a8494", SUBJECTS.physics.color, SUBJECTS.math.color, SUBJECTS.chemistry.color];
 
 // One track's anonymous tier distribution: a 5-segment bar (segment width ∝ how many
 // ranked learners sit in that rank) with the caller's own tier outlined, plus a caption
@@ -48,7 +50,7 @@ function TierRow({ label, glyph, color, track }) {
                 fontFamily: "var(--mono)",
                 fontSize: 11,
                 fontWeight: 700,
-                color: "#0a0d13",
+                color: "var(--text-inverse)",
                 outline: isYou ? "2px solid var(--text)" : "none",
                 outlineOffset: -2,
               }}

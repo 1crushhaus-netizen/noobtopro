@@ -5,7 +5,9 @@
   --panel: #12161f;
   --panel2: #161b26;
   --line: rgba(255, 255, 255, .085);
+  --line-strong: rgba(255, 255, 255, .18);
   --text: #ECECE4;
+  --text-inverse: #0a0d13;       /* text on light fills (mirrors --bg) */
   --muted: #94a0b3;
   --math: #F2B441;
   --phys: #5BD6C4;
@@ -13,6 +15,54 @@
   --display: 'Fraunces', Georgia, serif;
   --ui: 'Hanken Grotesk', system-ui, sans-serif;
   --mono: 'JetBrains Mono', monospace;
+
+  /* --- standardization token scales (single source of truth) --- */
+  /* Semantic — destructive is decoupled from the Chemistry subject hue */
+  --danger: #FF7E74;
+  --danger-soft: rgba(255, 126, 116, .12);
+  --danger-border: rgba(255, 126, 116, .32);
+  --danger-border-strong: rgba(255, 126, 116, .5);
+  --danger-fg: #ffd9d5;          /* alert text on a danger tint */
+  --success-fg: #cdeee8;         /* alert text on a success tint */
+
+  /* White-tint scale (collapses ~21 ad-hoc rgba(255,255,255,.0x) spellings) */
+  --tint-1: rgba(255, 255, 255, .05);   /* subtle surface fill / chips */
+  --tint-2: rgba(255, 255, 255, .08);   /* stronger fill */
+  --tint-hover: rgba(255, 255, 255, .1);
+
+  /* Subject soft tints (fills/borders) */
+  --math-soft: rgba(242, 180, 65, .12);
+  --phys-soft: rgba(91, 214, 196, .12);
+  --chem-soft: rgba(255, 126, 116, .12);
+
+  /* Radius scale (16 card / 18 elevated is an intentional elevation cue) */
+  --radius-card: 16px;
+  --radius-elevated: 18px;
+  --radius-btn: 11px;
+  --radius-inset: 8px;
+  --radius-alert: 12px;
+  --radius-pill: 999px;
+
+  /* Spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* Card padding */
+  --pad-card: 18px;
+  --pad-card-compact: 16px;
+
+  /* Misc shared values */
+  --disabled-opacity: .45;       /* unifies .45/.5/.55 across buttons */
+  --eyebrow-ls: 1px;             /* one tracking for the eyebrow primitive */
+  --w-content: 900px;            /* standard centered column */
+  --w-wide: 1560px;              /* Dashboard bento column */
+  --w-narrow: 460px;             /* dialogs / sign-in / gate cards */
+  --scrim: rgba(5, 7, 11, .6);   /* modal / drawer / gate backdrop */
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, .5);
 }
 
 * { box-sizing: border-box; }
@@ -31,15 +81,18 @@ body {
 
 .np-shell { padding: 28px clamp(16px, 5vw, 56px) 60px; }
 
-.np-top { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+/* The four chrome bands (top · nav · main · foot) share ONE centered column width
+   so the brand bar, tabs, content, and footer left/right edges all align — and they
+   widen together (--wide) on the Dashboard so switching tabs causes no relative shift. */
+.np-top { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; margin: 0 auto 18px; max-width: var(--w-content); }
 .np-brand { font-family: var(--display); font-weight: 700; font-size: 26px; letter-spacing: -.5px; cursor: pointer; color: var(--text); background: none; border: none; padding: 0; }
 .np-arrow { color: var(--math); padding: 0 2px; }
 .np-tag { font-size: 13px; color: var(--muted); font-family: var(--mono); letter-spacing: .3px; }
 .np-signin { margin-left: auto; }
 
-.np-main { max-width: 900px; margin: 0 auto; }
+.np-main { max-width: var(--w-content); margin: 0 auto; }
 
-.np-nav { display: flex; gap: 6px; max-width: 900px; margin: 0 auto 24px; border-bottom: 1px solid var(--line); }
+.np-nav { display: flex; gap: 6px; max-width: var(--w-content); margin: 0 auto 24px; border-bottom: 1px solid var(--line); }
 .np-tab { background: none; border: none; border-bottom: 2px solid transparent; color: var(--muted); font-family: var(--ui); font-size: 15px; font-weight: 600; padding: 10px 14px; cursor: pointer; margin-bottom: -1px; }
 .np-tab:hover { color: var(--text); }
 .np-tab.active { color: var(--text); border-bottom-color: var(--math); }
@@ -56,27 +109,44 @@ body {
 .np-stepdesc { font-size: 14px; color: var(--muted); }
 
 .np-subjectrow { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 30px; }
-.np-chip { border: 1px solid rgba(255,255,255,.18); border-radius: 999px; padding: 7px 15px; font-size: 14px; font-weight: 500; color: var(--text); background: rgba(255,255,255,.05); }
+.np-chip { border: 1px solid var(--line-strong); border-radius: var(--radius-pill); padding: 7px 15px; font-size: 14px; font-weight: 500; color: var(--text); background: var(--tint-1); }
 
-.np-card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px; }
+.np-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-card); padding: var(--pad-card); }
 
-.np-btn { display: inline-flex; align-items: center; gap: 8px; border: none; border-radius: 11px; padding: 11px 18px; font-family: var(--ui); font-size: 15px; font-weight: 600; cursor: pointer; transition: transform .15s ease, filter .15s ease, opacity .15s; }
+/* ---- buttons: ONE base + role modifiers (primary · secondary · danger · ghost) ---- */
+.np-btn { display: inline-flex; align-items: center; gap: 8px; border: none; border-radius: var(--radius-btn); padding: 11px 18px; font-family: var(--ui); font-size: 15px; font-weight: 600; cursor: pointer; transition: transform .15s ease, filter .15s ease, opacity .15s, background .15s ease, border-color .15s ease; }
 .np-btn:active { transform: translateY(1px); }
-.np-btn:disabled { opacity: .45; cursor: not-allowed; }
-.np-primary { background: var(--text); color: #0a0d13; }
+.np-btn:disabled { opacity: var(--disabled-opacity); cursor: not-allowed; }
+/* primary — the single solid CTA per view */
+.np-primary { background: var(--text); color: var(--text-inverse); }
 .np-primary:hover:not(:disabled) { filter: brightness(1.08); }
-.np-outline { background: transparent; border: 1px solid var(--line); width: 100%; justify-content: center; }
-.np-outline:hover { background: rgba(255, 255, 255, .04); }
+/* secondary — the canonical filled panel-tint button for ALL secondary actions
+   (promoted from the old .np-dash-actbtn so Practice/Learn/Dashboard match) */
+.np-secondary { background: var(--panel2); border: 1px solid var(--line-strong); color: var(--text); }
+.np-secondary:hover:not(:disabled) { background: var(--tint-hover); border-color: var(--line-strong); }
+.np-secondary svg { color: var(--math); }
+/* subject-accent: the leading/trailing icon (e.g. the → arrow) takes the subject hue */
+.np-btn--subject svg { color: var(--subject, var(--math)); }
+/* danger — the canonical destructive button (filled panel tint + coral border/text) */
+.np-danger { background: var(--panel2); border: 1px solid var(--danger-border); color: var(--danger); }
+.np-danger:hover:not(:disabled) { background: var(--danger-soft); border-color: var(--danger-border-strong); }
+.np-danger svg { color: var(--danger); }
+/* full-width modifier (replaces inline width:100%;justify-content:center) */
+.np-btn--block { width: 100%; justify-content: center; }
 .np-big { font-size: 17px; padding: 14px 24px; margin-top: 6px; }
 /* Intro primary-action row: the big "Prove it" CTA + (guest) a normal-size,
    secondary Sign in beside it. The row owns the top margin; cancel the CTA's own
    margin-top (from .np-big) so the two buttons line up. */
 .np-introcta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
 .np-introcta .np-big { margin-top: 0; }
+/* ghost — true inline text-links only (dismiss, "See your dashboard", row actions) */
 .np-ghost { display: inline-flex; align-items: center; gap: 6px; background: none; border: none; color: var(--muted); font-family: var(--ui); font-size: 14px; cursor: pointer; padding: 4px 2px; }
-.np-ghost:hover { color: var(--text); }
-.np-iconbtn { background: none; border: none; color: var(--muted); cursor: pointer; display: inline-flex; padding: 4px; border-radius: 6px; }
-.np-iconbtn:hover { color: var(--chem); background: rgba(255, 255, 255, .05); }
+.np-ghost:hover:not(:disabled) { color: var(--text); }
+.np-ghost:disabled { opacity: var(--disabled-opacity); cursor: not-allowed; }
+.np-ghost--danger { color: var(--danger); }
+.np-ghost--danger:hover:not(:disabled) { color: var(--danger); filter: brightness(1.12); }
+.np-iconbtn { background: none; border: none; color: var(--muted); cursor: pointer; display: inline-flex; padding: 4px; border-radius: var(--radius-inset); }
+.np-iconbtn:hover { color: var(--text); background: var(--tint-1); }
 .np-signinbtn { display: inline-flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; color: var(--text); font-family: var(--ui); font-size: 14px; font-weight: 600; padding: 8px 14px; cursor: pointer; }
 .np-signinbtn:hover { background: var(--panel2); }
 
@@ -86,8 +156,11 @@ body {
 .np-diag-progress { display: flex; gap: 16px; margin-bottom: 20px; }
 .np-diag-proggroup { display: flex; gap: 5px; flex: 1; }
 .np-qmeta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-bottom: 12px; }
-.np-topic { background: rgba(255, 255, 255, .05); border-radius: 6px; padding: 3px 9px; font-size: 12px; }
-.np-livescore { margin-left: auto; font-family: var(--mono); font-weight: 700; border: 1px solid; border-radius: 8px; padding: 4px 10px; font-size: 14px; }
+/* The mono "SUBJECT · DIFFICULTY" meta line (text is uppercased in markup) — one class
+   replaces three copy-pasted inline {fontFamily:mono, letterSpacing:1} spans. */
+.np-metaline { font-family: var(--mono); letter-spacing: var(--eyebrow-ls); }
+.np-topic { background: var(--tint-1); border: 1px solid var(--line); border-radius: var(--radius-inset); padding: 3px 9px; font-size: 12px; }
+.np-livescore { margin-left: auto; font-family: var(--mono); font-weight: 700; border: 1px solid; border-radius: var(--radius-pill); padding: 4px 12px; font-size: 14px; }
 .np-question { font-family: var(--display); font-size: 21px; line-height: 1.4; font-weight: 500; margin-bottom: 16px; }
 
 .np-input { width: 100%; background: transparent; border: none; outline: none; resize: vertical; color: var(--text); font-family: var(--ui); font-size: 16px; line-height: 1.6; padding: 18px 18px 8px; min-height: 120px; }
@@ -96,6 +169,9 @@ body {
    (WCAG 2.4.7). outline-offset keeps the ring inside the wrapping .np-card. */
 .np-input:focus-visible { outline: 2px solid var(--math); outline-offset: -2px; border-radius: 4px; }
 .np-input::placeholder { color: var(--muted); }
+/* Canonical textarea wrapper: the .np-input always renders flush to the card edge
+   (Practice + Learn used a padding:0 vs padding:18px card — this unifies them). */
+.np-input-card { padding: 0; overflow: hidden; }
 
 .np-hint { font-size: 13px; color: var(--muted); margin: 12px 2px 0; }
 .np-hint em { color: var(--text); font-style: italic; }
@@ -107,27 +183,45 @@ body {
 .np-bandtag { font-family: var(--mono); font-size: 13px; letter-spacing: .5px; font-weight: 500; margin-top: 4px; }
 .np-comment { font-size: 13px; color: var(--muted); margin-top: 2px; }
 .np-weakwrap { width: 100%; margin-top: 6px; }
-.np-weaklabel { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 6px; }
+.np-weakwrap .np-eyebrow { margin-bottom: 6px; }
 .np-weaktags { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-start; }
-.np-weaktag { background: rgba(255, 255, 255, .05); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; font-size: 12px; }
+.np-weaktag { background: var(--tint-1); border: 1px solid var(--line); border-radius: var(--radius-inset); padding: 3px 8px; font-size: 12px; }
+
+/* ---- canonical eyebrow (the small UPPERCASE section/stat label) ----
+   One recipe replaces the byte-identical np-statlabel/np-feedlabel/np-weaklabel.
+   Default is muted; valence/subject color is opt-in via a modifier (never an ad-hoc
+   inline color). np-cardicon stays as the icon'd, colored *section* eyebrow (13px). */
+.np-eyebrow { font-family: var(--ui); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: var(--eyebrow-ls); color: var(--muted); }
+.np-eyebrow--sm { font-size: 11px; }
+.np-eyebrow--xs { font-size: 10px; letter-spacing: .6px; line-height: 1.25; }
+.np-eyebrow--icon { display: inline-flex; align-items: center; gap: 7px; }
+.np-eyebrow--good { color: var(--phys); }
+.np-eyebrow--improve { color: var(--math); }
+.np-eyebrow--error { color: var(--chem); }
+.np-eyebrow--subject { color: var(--subject, var(--muted)); }
 
 .np-feedhead { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 14px; }
-.np-feedlabel { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
 .np-feedscore { font-family: var(--mono); font-size: 40px; font-weight: 700; line-height: 1.1; }
 .np-rubric { flex: 1; min-width: 240px; display: flex; flex-direction: column; gap: 9px; }
 .np-rubrow { display: grid; grid-template-columns: 130px 1fr; align-items: center; gap: 12px; }
 .np-rublabel { font-size: 13px; color: var(--muted); }
-.np-note { font-size: 14px; color: var(--text); background: rgba(255, 255, 255, .04); border-left: 2px solid var(--muted); border-radius: 0 8px 8px 0; padding: 10px 14px; margin-bottom: 14px; }
+.np-note { font-size: 14px; color: var(--text); background: var(--tint-1); border-left: 2px solid var(--muted); border-radius: 0 var(--radius-inset) var(--radius-inset) 0; padding: 10px 14px; margin-bottom: 14px; }
 
+/* Accent-bordered card: one rule reads a --accent custom prop (replaces ad-hoc
+   per-card border-color overrides like the teal Socratic / gold save-CTA). */
+.np-card--accent { border-color: var(--accent, var(--line)); }
 .np-socratic { margin-bottom: 14px; border-color: rgba(91, 214, 196, .35); }
-.np-cardicon { display: flex; align-items: center; gap: 7px; font-size: 13px; text-transform: uppercase; letter-spacing: .8px; color: var(--phys); margin-bottom: 8px; font-weight: 600; }
+/* The icon'd section eyebrow. Default is NEUTRAL muted; valence/subject color is set
+   explicitly at the use site (--good teal / --improve gold / subject) so the color
+   carries meaning instead of every section defaulting to teal. */
+.np-cardicon { display: flex; align-items: center; gap: 7px; font-size: 13px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin-bottom: 8px; font-weight: 600; }
 .np-socratictext { font-family: var(--display); font-size: 19px; font-weight: 500; line-height: 1.4; }
 .np-lesson { margin-bottom: 18px; }
 .np-lessontext { font-size: 15px; line-height: 1.65; color: var(--text); }
 
 /* --- process-first grading: legible score breakdown + typed errors --- */
 .np-sronly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-.np-feedsub { font-size: 13px; color: var(--muted); margin-top: 8px; max-width: 460px; line-height: 1.5; }
+.np-feedsub { font-size: 13px; color: var(--muted); margin-top: 8px; max-width: var(--w-narrow); line-height: 1.5; }
 .np-scorebreak { margin-bottom: 18px; }
 .np-scorebreak > summary { list-style: none; }
 .np-scorebreak > summary::-webkit-details-marker { display: none; }
@@ -142,31 +236,37 @@ body {
 .np-errlist { list-style: none; margin: 8px 0 0; padding: 0; }
 .np-erritem { display: flex; gap: 10px; align-items: flex-start; padding: 9px 0; border-bottom: 1px solid rgba(255, 255, 255, .05); }
 .np-erritem:last-child { border-bottom: none; }
-.np-errbadge { flex: 0 0 auto; font-family: var(--mono); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; border: 1px solid; border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
+.np-errbadge { flex: 0 0 auto; font-family: var(--mono); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; border: 1px solid; border-radius: var(--radius-pill); padding: 2px 9px; white-space: nowrap; }
 .np-errbody { flex: 1; min-width: 0; }
 .np-errwhat { font-size: 14px; line-height: 1.5; color: var(--text); }
 .np-skip { color: var(--muted); font-size: 13px; white-space: nowrap; }
-.np-skip:disabled { opacity: .5; cursor: not-allowed; }
+.np-skip:disabled { opacity: var(--disabled-opacity); cursor: not-allowed; }
 .np-skip:not(:disabled):hover { color: var(--text); }
 
 .np-feedactions { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 
-.np-error, .np-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-radius: 12px; padding: 12px 16px; margin-bottom: 18px; font-size: 14px; }
-.np-error { background: rgba(255, 126, 116, .12); border: 1px solid rgba(255, 126, 116, .4); color: #ffd9d5; }
-.np-banner { background: rgba(91, 214, 196, .1); border: 1px solid rgba(91, 214, 196, .35); color: #cdeee8; }
+.np-error, .np-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-radius: var(--radius-alert); padding: 12px 16px; margin-bottom: 18px; font-size: 14px; }
+.np-error { background: var(--danger-soft); border: 1px solid rgba(255, 126, 116, .4); color: var(--danger-fg); }
+.np-banner { background: rgba(91, 214, 196, .1); border: 1px solid rgba(91, 214, 196, .35); color: var(--success-fg); }
 
-.np-foot { max-width: 900px; margin: 40px auto 0; font-size: 12px; color: var(--muted); font-family: var(--mono); text-align: center; }
+.np-foot { max-width: var(--w-content); margin: 40px auto 0; font-size: 12px; color: var(--muted); font-family: var(--mono); text-align: center; }
 
 /* ---- progress dashboard ---- */
 .np-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 18px; }
 .np-statcard { display: flex; flex-direction: column; gap: 4px; }
-.np-statlabel { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
 .np-statnum { font-family: var(--mono); font-size: 34px; font-weight: 700; line-height: 1.1; }
 .np-statsub { font-size: 13px; color: var(--muted); }
 .np-chartcard { margin-bottom: 16px; }
 .np-charttitle { font-family: var(--display); font-size: 18px; font-weight: 600; margin-bottom: 2px; }
+/* A larger in-card / drawer / empty-state title (replaces inline fontSize:22 on np-h2
+   and np-charttitle, and the inline 20/22 sizes used for empty-state headings). */
+.np-sectiontitle { font-family: var(--display); font-size: 22px; font-weight: 600; letter-spacing: -.3px; margin: 0 0 4px; }
+.np-emptytitle { font-family: var(--display); font-size: 20px; font-weight: 600; margin: 0 0 8px; }
 .np-chartsub { font-size: 13px; color: var(--muted); margin-bottom: 14px; }
 .np-chart { width: 100%; height: auto; display: block; }
+/* Subject identity glyph (∑ ∂ ⌬): always monospace so the three line up; color is set
+   per-subject at the use site (via the SubjectGlyph component). */
+.np-subjectglyph { font-family: var(--mono); }
 .np-empty { text-align: center; padding: 48px 24px; color: var(--muted); }
 .np-empty .np-question { color: var(--text); margin-bottom: 14px; }
 
@@ -180,21 +280,27 @@ body {
   .np-rubrow { grid-template-columns: 110px 1fr; }
 }
 
+/* ---- elevated surface (shared by the modal AND the dashboard guest-gate card) ----
+   One recipe for "a card that floats above a scrim"; each consumer adds only its own
+   sizing/positioning. */
+.np-surface-elevated {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-elevated); padding: 30px 26px 22px;
+  box-shadow: var(--shadow-lg);
+}
+
 /* ---- "save your progress" modal ---- */
 .np-modal-backdrop {
   position: fixed; inset: 0; z-index: 100;
   display: flex; align-items: center; justify-content: center; padding: 24px;
-  background: rgba(5, 7, 11, .66);
+  background: var(--scrim);
   backdrop-filter: blur(3px);
   -webkit-backdrop-filter: blur(3px);
   animation: npBackdropIn .22s ease both;
 }
 .np-modal {
   position: relative;
-  width: 100%; max-width: 440px;
-  background: var(--panel); border: 1px solid var(--line);
-  border-radius: 18px; padding: 30px 26px 22px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, .5);
+  width: 100%; max-width: var(--w-narrow);
   animation: npModalIn .26s cubic-bezier(.2, .7, .2, 1) both;
 }
 .np-modal-close { position: absolute; top: 12px; right: 12px; }
@@ -202,7 +308,7 @@ body {
   width: 46px; height: 46px; margin: 0 auto 14px;
   display: flex; align-items: center; justify-content: center;
   border-radius: 50%; color: var(--math);
-  background: rgba(242, 180, 65, .12); border: 1px solid rgba(242, 180, 65, .35);
+  background: var(--math-soft); border: 1px solid rgba(242, 180, 65, .35);
 }
 .np-modal-later { display: block; margin: 12px auto 0; }
 @keyframes npBackdropIn { from { opacity: 0; } to { opacity: 1; } }
@@ -213,7 +319,7 @@ body {
   font-family: var(--ui); color: var(--text); cursor: pointer;
   transition: border-color .15s ease, background .15s ease, transform .1s ease;
 }
-.np-weaktag-btn:hover { border-color: rgba(255,255,255,.32); background: rgba(255,255,255,.09); }
+.np-weaktag-btn:hover { border-color: var(--line-strong); background: var(--tint-2); }
 .np-weaktag-btn:active { transform: translateY(1px); }
 
 .np-learngroup { padding: 6px 0; }
@@ -223,12 +329,12 @@ body {
   font-size: 14px; font-weight: 600;
 }
 .np-concepttag {
-  background: rgba(255,255,255,.04); border: 1px solid var(--line); color: var(--text);
-  border-radius: 8px; padding: 6px 12px; font-size: 13px; font-family: var(--ui);
+  background: var(--tint-1); border: 1px solid var(--line); color: var(--text);
+  border-radius: var(--radius-inset); padding: 6px 12px; font-size: 13px; font-family: var(--ui);
   cursor: pointer; transition: border-color .15s ease, background .15s ease, color .15s ease;
 }
-.np-concepttag:hover { border-color: rgba(255,255,255,.3); background: rgba(255,255,255,.08); }
-.np-concepttag.active { background: rgba(255,255,255,.06); font-weight: 600; }
+.np-concepttag:hover { border-color: var(--line-strong); background: var(--tint-2); }
+.np-concepttag.active { background: var(--tint-2); font-weight: 600; }
 
 .np-learnlist { list-style: none; padding: 0; margin: 4px 0 0; display: flex; flex-direction: column; gap: 9px; }
 .np-learnlist li {
@@ -240,6 +346,7 @@ body {
 }
 
 /* ---- keyboard focus visibility (a11y) ---- */
+.np-brand:focus-visible,
 .np-providerbtn:focus-visible,
 .np-btn:focus-visible,
 .np-ghost:focus-visible,
@@ -247,31 +354,32 @@ body {
 .np-tab:focus-visible,
 .np-iconbtn:focus-visible,
 .np-weaktag-btn:focus-visible,
-.np-concepttag:focus-visible {
+.np-concepttag:focus-visible,
+.np-hub-search:focus-visible {
   outline: 2px solid var(--math);
   outline-offset: 2px;
 }
 
 /* ---- sign-in menu ---- */
-.np-signinscreen { max-width: 460px; margin: 0 auto; }
+.np-signinscreen { max-width: var(--w-narrow); margin: 0 auto; }
 .np-providerlist { display: flex; flex-direction: column; gap: 10px; }
 .np-providerbtn {
   display: flex; align-items: center; gap: 12px;
   width: 100%; padding: 14px 16px;
-  border: 1px solid var(--line); border-radius: 12px;
+  border: 1px solid var(--line); border-radius: var(--radius-alert);
   background: var(--panel2); color: var(--text);
   font-family: var(--ui); font-size: 15px; font-weight: 600;
   cursor: pointer; transition: border-color .2s ease, background .2s ease;
 }
-.np-providerbtn:hover:not(:disabled) { border-color: rgba(255,255,255,.25); background: var(--panel); }
-.np-providerbtn:disabled { opacity: .55; cursor: not-allowed; }
+.np-providerbtn:hover:not(:disabled) { border-color: var(--line-strong); background: var(--panel); }
+.np-providerbtn:disabled { opacity: var(--disabled-opacity); cursor: not-allowed; }
 .np-soon {
   margin-left: auto; font-family: var(--mono); font-size: 11px;
   color: var(--muted); border: 1px solid var(--line);
-  border-radius: 999px; padding: 2px 9px;
+  border-radius: var(--radius-pill); padding: 2px 9px;
 }
 
-/* ---- "sign in to save" call-to-action ---- */
+/* ---- "sign in to save" call-to-action (a gold-accent card) ---- */
 .np-savecta {
   display: flex; align-items: center; justify-content: space-between;
   gap: 16px; margin-bottom: 18px; border-color: rgba(242,180,65,.4);
@@ -281,7 +389,7 @@ body {
 
 /* ---- profile / dashboard identity (avatar + name + email) ---- */
 .np-avatar { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; border: 1px solid var(--line); flex: 0 0 auto; }
-.np-avatarfallback { display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.06); font-weight: 700; font-size: 20px; }
+.np-avatarfallback { display: flex; align-items: center; justify-content: center; background: var(--tint-2); font-weight: 700; font-size: 20px; }
 .np-profilename { font-size: 18px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .np-profileemail { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -293,7 +401,18 @@ body {
    At ≥1024px the whole view becomes a viewport-tall app frame (see the height-lock
    block below): the action bar is pinned and each panel scrolls INSIDE its card so
    nothing pushes the page. Below 1024px it reverts to a single column + page scroll. */
-.np-main--wide, .np-nav--wide { max-width: 1560px; }
+/* The wide modifier is applied to ALL FOUR chrome bands on the Dashboard (top · nav ·
+   main · foot) so the brand bar + footer widen with the bento grid instead of staying
+   pinned at the 900px column — no relative shift on Practice↔Dashboard. */
+.np-top--wide, .np-main--wide, .np-nav--wide, .np-foot--wide { max-width: var(--w-wide); }
+
+/* Dashboard page header (title + lede) — every tab opens with the same title+lede
+   pattern. Kept compact (tight margins, lede capped wide) so it costs little of the
+   no-scroll height budget; the bento grid below absorbs the rest and panels scroll
+   internally (see the ≥1024 height-lock). */
+.np-dash-pagehead { margin-bottom: 16px; }
+.np-dash-pagehead .np-h2 { margin-bottom: 2px; }
+.np-dash-pagehead .np-lede { margin-bottom: 0; max-width: 70ch; }
 
 .np-dash { display: grid; gap: 14px; grid-template-columns: repeat(12, 1fr); align-items: start; }
 /* Identity: a slim horizontal bar (compact avatar + tight name/email + rank chip +
@@ -302,26 +421,19 @@ body {
 .np-dash-identity .np-avatar { width: 40px; height: 40px; }
 .np-dash-identity .np-profilename { font-size: 15px; line-height: 1.25; }
 .np-dash-identity .np-profileemail { font-size: 12px; line-height: 1.25; }
-.np-dash-rankchip { font-family: var(--mono); font-size: 12px; letter-spacing: .3px; color: var(--text); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; white-space: nowrap; background: rgba(255,255,255,.04); }
+.np-dash-rankchip { font-family: var(--mono); font-size: 12px; letter-spacing: .3px; color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-pill); padding: 4px 12px; white-space: nowrap; background: var(--tint-1); }
 /* KPI cluster: compact label + number cards (no descriptive sub-line). */
 .np-dash-kpis { grid-column: span 4; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .np-dash-kpis .np-statcard { padding: 10px 14px; gap: 2px; justify-content: center; }
-.np-dash-kpis .np-statlabel { font-size: 10px; letter-spacing: .6px; line-height: 1.25; }
 .np-dash-kpis .np-statnum { font-size: 23px; }
 .np-dash-radar { grid-column: span 5; }
 .np-dash-mid { grid-column: span 3; display: flex; flex-direction: column; gap: 14px; }
 .np-dash-lead { grid-column: span 4; }
 .np-dash-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 2px; }
-/* Action buttons: a clearly-readable secondary button (filled panel tint + border +
-   light label + gold arrow), with a coral "danger" variant for Reset — replaces the
-   near-invisible transparent outline. */
-.np-dash-actbtn { width: auto; min-height: 42px; background: var(--panel2); border: 1px solid rgba(255, 255, 255, .14); color: var(--text); font-weight: 600; }
-.np-dash-actbtn:hover { background: rgba(255, 255, 255, .07); border-color: rgba(255, 255, 255, .28); }
-.np-dash-actbtn svg { color: var(--math); }
-.np-dash-actbtn--danger { color: var(--chem); border-color: rgba(255, 126, 116, .32); }
-.np-dash-actbtn--danger:hover { background: rgba(255, 126, 116, .1); border-color: rgba(255, 126, 116, .5); }
-.np-dash-actbtn--danger svg { color: var(--chem); }
-.np-dash-panel { padding: 16px; }
+/* Dashboard action buttons use the canonical look (.np-secondary / .np-danger, added in
+   the markup); this class only carries the dashboard-specific comfortable touch height. */
+.np-dash-actbtn { min-height: 42px; }
+.np-dash-panel { padding: var(--pad-card-compact); }
 .np-dash-subrow { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .np-dash-subrow:last-child { margin-bottom: 0; }
 .np-dash-sublabel { width: 84px; font-size: 14px; }
@@ -337,7 +449,7 @@ body {
 .np-drawer-backdrop {
   position: fixed; inset: 0; z-index: 110;
   display: flex; justify-content: flex-end;
-  background: rgba(5, 7, 11, .6);
+  background: var(--scrim);
   backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
   animation: npBackdropIn .22s ease both;
 }
@@ -357,12 +469,12 @@ body {
    Scoped to the dashboard body (NOT a full-screen modal) so the nav stays usable
    for a guest who'd rather keep exploring. */
 .np-dash-gatewrap { position: relative; min-height: 440px; }
-.np-dash-gateblur { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; filter: blur(5px); opacity: .45; pointer-events: none; user-select: none; }
+.np-dash-gateblur { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; filter: blur(5px); opacity: var(--disabled-opacity); pointer-events: none; user-select: none; }
+/* The surface recipe comes from .np-surface-elevated (added in the markup); this only
+   positions the card centered over the blurred preview. */
 .np-dash-gatecard {
   position: absolute; inset: 0; margin: auto;
-  width: 100%; max-width: 440px; height: max-content;
-  background: var(--panel); border: 1px solid var(--line); border-radius: 18px;
-  padding: 30px 26px 22px; box-shadow: 0 24px 60px rgba(0, 0, 0, .5);
+  width: 100%; max-width: var(--w-narrow); height: max-content;
 }
 
 /* ≥1024px: the Dashboard becomes a VIEWPORT-TALL app frame so the whole grid —
@@ -380,8 +492,18 @@ body {
   }
   .np-shell--dash > .np-top,
   .np-shell--dash > .np-nav { flex: 0 0 auto; }
+  /* The footer is part of the chrome on scrolling tabs, but the height-locked Dashboard
+     is a no-scroll app frame (overflow:hidden) — so the prototype footer is intentionally
+     hidden here rather than clipped past the viewport. It returns below 1024px. */
+  .np-shell--dash > .np-foot { display: none; }
   .np-shell--dash > .np-main { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
   .np-shell--dash > .np-main > .np-dash-frame { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  /* the page header is a fixed band; the grid below it gets the remaining height.
+     Pin the title smaller here (vs the full clamp other tabs use) to reclaim the
+     no-scroll height budget so the bento panels aren't crowded on ~1080p laptops. */
+  .np-dash-frame > .np-dash-pagehead { flex: 0 0 auto; margin-bottom: 10px; }
+  .np-dash-pagehead .np-h2 { font-size: 24px; }
+  .np-dash-pagehead .np-lede { font-size: 15px; }
 
   /* the grid fills the remaining height as a 3-row frame: identity+KPIs · panels · actions */
   .np-dash-frame > .np-dash {
@@ -450,32 +572,32 @@ body {
 }
 
 /* ---- admin dashboard ---- */
-.np-admin-row { padding: 14px 16px; margin-bottom: 10px; }
+.np-admin-row { padding: var(--pad-card-compact); margin-bottom: 10px; }
 .np-admin-rowhead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .np-admin-rowhead strong { font-size: 15px; }
-.np-admin-badge { font-family: var(--mono); font-size: 11px; letter-spacing: .3px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.np-admin-badge { font-family: var(--mono); font-size: 11px; letter-spacing: .3px; padding: 2px 7px; border-radius: var(--radius-pill); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
 .np-admin-neutral { color: var(--muted); }
 .np-admin-ok { color: var(--phys); border-color: rgba(91,214,196,.4); }
 .np-admin-warn { color: var(--math); border-color: rgba(242,180,65,.4); }
-.np-admin-danger { color: var(--chem); border-color: rgba(255,126,116,.45); }
+.np-admin-danger { color: var(--danger); border-color: var(--danger-border); }
 .np-admin-meta { font-family: var(--mono); font-size: 12px; color: var(--muted); }
 .np-admin-preview { margin-top: 8px; font-size: 14px; color: var(--text); line-height: 1.5; opacity: .9; }
-.np-admin-sample { font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; word-break: break-word; background: rgba(255,255,255,.03); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.np-admin-sample { font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; word-break: break-word; background: var(--tint-1); border: 1px solid var(--line); border-radius: var(--radius-inset); padding: 8px 10px; }
 .np-admin-hint { margin-top: 6px; font-size: 12.5px; color: var(--muted); font-style: italic; }
 .np-admin-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .np-admin-empty { color: var(--muted); padding: 18px 16px; margin-bottom: 10px; }
-.np-ghost.np-admin-danger { color: var(--chem); }
 
 /* ---- concept hub (browse) ---- */
 .np-hub-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; justify-content: space-between; }
 .np-hub-filters { display: flex; flex-wrap: wrap; gap: 8px; }
-.np-hub-filters .np-chip { cursor: pointer; background: rgba(255,255,255,.05); }
-.np-hub-filters .np-chip:hover { background: rgba(255,255,255,.1); }
-.np-hub-filters .np-chip.active { background: rgba(255,255,255,.14); }
+.np-hub-filters .np-chip { cursor: pointer; background: var(--tint-1); }
+.np-hub-filters .np-chip:hover { background: var(--tint-hover); }
+.np-hub-filters .np-chip.active { background: var(--tint-hover); border-color: var(--line-strong); }
 /* The search reuses .np-input (a textarea style: borderless, transparent, min-height
-   120px), so override those to render as a proper one-line input that matches the cards. */
-.np-hub-search { flex: 1; min-width: 200px; max-width: 340px; min-height: 0; padding: 11px 14px; border-radius: 10px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.18); font-size: 15px; line-height: 1.4; }
-.np-hub-search:focus { border-color: rgba(255,255,255,.32); background: rgba(255,255,255,.06); }
+   120px), so override those to render as a proper one-line input that matches the cards.
+   Focus uses the canonical gold :focus-visible ring (a11y block) plus this subtle fill. */
+.np-hub-search { flex: 1; min-width: 200px; max-width: 340px; min-height: 0; padding: 11px 14px; border-radius: 10px; background: var(--tint-1); border: 1px solid var(--line-strong); font-size: 15px; line-height: 1.4; }
+.np-hub-search:focus { border-color: var(--line-strong); background: var(--tint-2); }
 .np-hub-topic { margin: 4px 0 14px; }
 .np-hub-topiclabel { font-family: var(--mono); font-size: 11px; letter-spacing: .5px; text-transform: uppercase; color: var(--muted); margin: 10px 0 7px; }
 .np-concepttag.np-hub-unapproved { border-style: dashed; color: var(--muted); font-style: italic; }
