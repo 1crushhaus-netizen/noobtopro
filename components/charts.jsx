@@ -104,10 +104,13 @@ export function MiniBar({ value, color }) {
 // charts above). Axes = the 9 rubric dimensions (0–RUBRIC_MAX); ONE polygon per
 // subject so the learner compares their reasoning profile across subjects.
 export function RadarChart({ subjects }) {
-  // Sized for the 9 reasoning axes — a touch more room so the diagonal spoke labels
-  // (abbreviated via RUBRIC_SHORT) don't collide.
-  const W = 640, H = 400;
-  const cx = W / 2, cy = H / 2 + 4, R = 108;
+  // Sized for the 9 reasoning axes. The label ring sits well outside the data ring
+  // (1.38·R ≈ 40px clear) and each label is anchored AND baselined per quadrant, so
+  // the spoke names never collide with the plotted polygons (the old 1.26·R + a
+  // single horizontal anchor let high-value vertices crowd the text).
+  const W = 660, H = 410;
+  const cx = W / 2, cy = H / 2, R = 104;
+  const LABEL_R = 1.38; // label ring radius as a multiple of R
   const axes = RUBRIC_KEYS;
   const N = axes.length;
   const angleFor = (i) => -Math.PI / 2 + (i * 2 * Math.PI) / N; // first axis at the top
@@ -143,14 +146,21 @@ export function RadarChart({ subjects }) {
       ))}
       {axes.map((k, i) => {
         const [ex, ey] = coord(i, 1);
-        const [lx, ly] = coord(i, 1.26);
-        const anchor = Math.abs(lx - cx) < 6 ? "middle" : lx > cx ? "start" : "end";
+        const [lx, ly] = coord(i, LABEL_R);
+        const ax = angleFor(i);
+        const cos = Math.cos(ax), sin = Math.sin(ax);
+        // Anchor horizontally toward the side the spoke points (near-vertical → centered).
+        // For the top/bottom spokes, nudge the (centrally-baselined) label off its point so
+        // the text clears the polygon — a numeric dy with the universally-supported `central`
+        // baseline, NOT dominant-baseline:text-before/after-edge (unsupported in Safari/FF).
+        const anchor = cos > 0.2 ? "start" : cos < -0.2 ? "end" : "middle";
+        const dy = sin < -0.5 ? -7 : sin > 0.5 ? 7 : 0; // SVG y grows down: sin<0 = top half
         return (
           <g key={k}>
             <line x1={cx} y1={cy} x2={ex} y2={ey} stroke="rgba(255,255,255,.10)" strokeWidth="1" />
             {/* Abbreviated spoke label (full names live in the breakdown panel + the
                 accessible text summary below), so 9 axes stay legible. */}
-            <text x={lx} y={ly} textAnchor={anchor} dominantBaseline="central" fill="#7a8494" style={{ fontFamily: "var(--ui)", fontSize: 10 }}>
+            <text x={lx} y={ly + dy} textAnchor={anchor} dominantBaseline="central" fill="var(--muted)" style={{ fontFamily: "var(--ui)", fontSize: 12, fontWeight: 500 }}>
               {RUBRIC_SHORT[k] || RUBRIC_LABELS[k]}
             </text>
           </g>
