@@ -53,9 +53,10 @@ describe("Dashboard — signed-in identity + KPIs + by-subject", () => {
     expect(statCard("Total points").querySelector(".np-statnum").textContent).toContain("90");
     expect(statCard("PhD-level intelligence").querySelector(".np-statnum").textContent).toContain("30");
     expect(statCard("Problems graded").querySelector(".np-statnum").textContent).toBe("2");
-    // band(30) === "Foundational" — appears exactly once (no duplicate KPI block).
-    expect(screen.getAllByText(/Foundational overall/i).length).toBe(1);
+    // Each KPI label appears exactly once (one deduped cluster, no duplicate block).
     expect(screen.getAllByText(/Total points/i).length).toBe(1);
+    expect(screen.getAllByText(/PhD-level intelligence/i).length).toBe(1);
+    expect(screen.getAllByText(/Problems graded/i).length).toBe(1);
   });
 
   it("renders the by-subject breakdown with all three subjects", () => {

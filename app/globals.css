@@ -296,16 +296,31 @@ body {
 .np-main--wide, .np-nav--wide { max-width: 1560px; }
 
 .np-dash { display: grid; gap: 14px; grid-template-columns: repeat(12, 1fr); align-items: start; }
-.np-dash-identity { grid-column: span 8; display: flex; align-items: center; gap: 14px; }
+/* Identity: a slim horizontal bar (compact avatar + tight name/email + rank chip +
+   sign out) so the top band stays short and the panels below get the room. */
+.np-dash-identity { grid-column: span 8; display: flex; align-items: center; gap: 12px; padding: 10px 16px; }
+.np-dash-identity .np-avatar { width: 40px; height: 40px; }
+.np-dash-identity .np-profilename { font-size: 15px; line-height: 1.25; }
+.np-dash-identity .np-profileemail { font-size: 12px; line-height: 1.25; }
 .np-dash-rankchip { font-family: var(--mono); font-size: 12px; letter-spacing: .3px; color: var(--text); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; white-space: nowrap; background: rgba(255,255,255,.04); }
+/* KPI cluster: compact label + number cards (no descriptive sub-line). */
 .np-dash-kpis { grid-column: span 4; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-.np-dash-kpis .np-statcard { padding: 14px; }
-.np-dash-kpis .np-statnum { font-size: 26px; }
+.np-dash-kpis .np-statcard { padding: 10px 14px; gap: 2px; justify-content: center; }
+.np-dash-kpis .np-statlabel { font-size: 10px; letter-spacing: .6px; line-height: 1.25; }
+.np-dash-kpis .np-statnum { font-size: 23px; }
 .np-dash-radar { grid-column: span 5; }
 .np-dash-mid { grid-column: span 3; display: flex; flex-direction: column; gap: 14px; }
 .np-dash-lead { grid-column: span 4; }
 .np-dash-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 2px; }
-.np-dash-actbtn { width: auto; }
+/* Action buttons: a clearly-readable secondary button (filled panel tint + border +
+   light label + gold arrow), with a coral "danger" variant for Reset — replaces the
+   near-invisible transparent outline. */
+.np-dash-actbtn { width: auto; min-height: 42px; background: var(--panel2); border: 1px solid rgba(255, 255, 255, .14); color: var(--text); font-weight: 600; }
+.np-dash-actbtn:hover { background: rgba(255, 255, 255, .07); border-color: rgba(255, 255, 255, .28); }
+.np-dash-actbtn svg { color: var(--math); }
+.np-dash-actbtn--danger { color: var(--chem); border-color: rgba(255, 126, 116, .32); }
+.np-dash-actbtn--danger:hover { background: rgba(255, 126, 116, .1); border-color: rgba(255, 126, 116, .5); }
+.np-dash-actbtn--danger svg { color: var(--chem); }
 .np-dash-panel { padding: 16px; }
 .np-dash-subrow { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .np-dash-subrow:last-child { margin-bottom: 0; }
@@ -415,9 +430,8 @@ body {
   /* the radar shrinks to fit and never forces the card taller than its 1fr track */
   .np-dash-frame .np-dash-radar .np-chart { max-height: 380px; }
 
-  /* compact the fixed rows to buy vertical budget */
-  .np-dash-frame .np-dash-identity { padding: 12px 16px; }
-  .np-dash-frame .np-dash-kpis .np-statcard { padding: 12px; }
+  /* (the slim top band is driven by the compact identity/KPI base rules above —
+     no descriptive sub-lines, so row 1 stays ~64px and the panels row gets the rest) */
   /* pinned action bar: a clear divider + comfortable 44px touch targets */
   .np-dash-frame .np-dash-actions { padding-top: 12px; border-top: 1px solid var(--line); }
   .np-dash-frame .np-dash-actbtn { min-height: 44px; }
