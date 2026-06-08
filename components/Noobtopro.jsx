@@ -648,6 +648,8 @@ export default function Noobtopro() {
           subject: q.subject,
           question: q.question,
           difficulty: q.difficulty,
+          // reasoningSurface/trap are NOT sent — the server derives them from the curated
+          // bank by (subject, difficulty), so a crafted payload can't spoof the grader.
           reasoning: a.text,
           image: a.img ? { mime: a.img.mime, data: a.img.data } : undefined,
         };
@@ -774,7 +776,9 @@ export default function Noobtopro() {
       const d = typeof data.difficulty === "string" ? data.difficulty.trim().toLowerCase() : "";
       const difficulty = BANDS.has(d) ? d : "intermediate";
       pushRecentQuestion(recentKey, data.question); // remember it so the next regenerate differs again
-      setLearnQuestion({ question: data.question, targetConcept: data.targetConcept || concept, difficulty });
+      // Preserve the reasoning-surface metadata (server-normalized) so a Learn-tab practice
+      // attempt carries the grader calibration too; harmlessly absent for cached-guide questions.
+      setLearnQuestion({ question: data.question, targetConcept: data.targetConcept || concept, difficulty, reasoningSurface: data.reasoningSurface, trap: data.trap });
     } catch (e) {
       if (myRun !== learnRun.current) return; // don't surface a stale error on a newer concept
       setLearnError(e.message || "Could not regenerate the question.");
@@ -900,6 +904,8 @@ export default function Noobtopro() {
           targetConcept: pQuestion.targetConcept,
           difficulty: pQuestion.difficulty,
           topicSlug: pQuestion.topicSlug, // taxonomy slug → the difficulty-bucket key (normalized server-side)
+          reasoningSurface: pQuestion.reasoningSurface, // grader calibration (server normalizes)
+          trap: pQuestion.trap,
           reasoning,
           image: imagePayload,
         });
@@ -924,6 +930,8 @@ export default function Noobtopro() {
           score: prev.score,
           reasoning,
           difficulty: pQuestion.difficulty,
+          reasoningSurface: pQuestion.reasoningSurface, // grader calibration (server normalizes)
+          trap: pQuestion.trap,
           image: imagePayload,
         });
         if (myRun !== practiceRun.current) return; // abandoned mid-grade — don't persist a stale write
