@@ -190,7 +190,7 @@ describe("signed-in data layer (Supabase paths)", () => {
       },
     };
     const st = await loadState();
-    expect(st.scores.math).toEqual({ score: 60, weakConcepts: ["x"], comment: "c", rubric: { conceptual_understanding: 3 } });
+    expect(st.scores.math).toEqual({ score: 60, weakConcepts: ["x"], comment: "c", rubric: { conceptual_understanding: 3 }, glicko: null });
     expect(st.history[0]).toMatchObject({ type: "attempt", t: "t0", subject: "math", reasoningScore: 70, newScore: 62, totalAfter: 100, phdAfter: 33 });
   });
 
@@ -239,8 +239,8 @@ describe("loadState (guest blob sanitization)", () => {
       })
     );
     const st = await loadState();
-    expect(st.scores.math).toEqual({ score: 0, weakConcepts: [], comment: "x", rubric: null }); // "wat" -> 0, "vectors" -> []
-    expect(st.scores.physics).toEqual({ score: 100, weakConcepts: ["a", "b"], comment: "", rubric: null }); // 150 -> 100, non-strings dropped, bad comment -> ""
+    expect(st.scores.math).toEqual({ score: 0, weakConcepts: [], comment: "x", rubric: null, glicko: null }); // "wat" -> 0, "vectors" -> []
+    expect(st.scores.physics).toEqual({ score: 100, weakConcepts: ["a", "b"], comment: "", rubric: null, glicko: null }); // 150 -> 100, non-strings dropped, bad comment -> ""
     expect(st.scores.chemistry).toBeUndefined(); // non-object subject dropped
     expect(st.history).toEqual([]); // non-array history -> []
   });

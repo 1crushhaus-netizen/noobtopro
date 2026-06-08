@@ -23,7 +23,7 @@ vi.mock("@/lib/abuseDetection", () => ({ reportInjection: vi.fn(), reportRateLim
 
 import { POST } from "@/app/api/score/route";
 import { _resetRateLimits } from "@/lib/rateLimit";
-import { eloUpdate, scoreFromRubric, defaultDifficultyForBand, normalizeRubric } from "@/lib/scoring";
+import { updateAxisRatings, scoreFromRubric, defaultDifficultyForBand, normalizeRubric } from "@/lib/scoring";
 
 // Complete 9-axis rubric helper (the grader emits these; the server derives the headline).
 const mkRubric = (v, over = {}) => ({
@@ -65,11 +65,12 @@ function mockGroq(payload, { failFirstN = 0, failStatus = 500 } = {}) {
 // Fake service-role client. Routes results per table so the new reads (scores +
 // attempts COUNT + item_difficulty maybeSingle) each resolve sensibly, and records
 // every rpc/eq call for assertions.
-function fakeAdmin({ scoresRows = [], scoresError = null, rpcError = null, attemptCount = 0, itemDifficulty = null } = {}) {
+function fakeAdmin({ scoresRows = [], scoresError = null, rpcError = null, recentAttempts = [], itemDifficulty = null } = {}) {
   const calls = { rpc: [], from: [], eq: [] };
   const resultFor = (table) => {
     if (table === "scores") return { data: scoresRows, error: scoresError, count: scoresRows.length };
-    if (table === "attempts") return { data: null, error: null, count: attemptCount };
+    // The practice path reads the recent (topic, band) rows for the anti-farm repeat factor.
+    if (table === "attempts") return { data: recentAttempts, error: null };
     if (table === "item_difficulty") return { data: itemDifficulty, error: null };
     return { data: [], error: null };
   };
@@ -86,6 +87,8 @@ function fakeAdmin({ scoresRows = [], scoresError = null, rpcError = null, attem
           calls.eq.push([col, val]); // capture RLS-scoping filters for assertions
           return chain;
         },
+        order: () => chain,
+        limit: () => chain,
         maybeSingle: async () => resultFor(table),
         then: (resolve, reject) => Promise.resolve(resultFor(table)).then(resolve, reject),
       };
@@ -113,13 +116,16 @@ const DIAG_GRADE = {
 };
 
 // The score /api/score computes for one practice attempt, using the REAL functions: the
-// headline is the TRANSPARENT weighted mean of the rubric (scoreFromRubric), then Elo applies.
-function expectedPracticeScore({ prevScore, grade, band = "intermediate", itemDifficulty = null, attemptCount = 0 }) {
+// per-attempt headline is the TRANSPARENT weighted mean of the rubric (scoreFromRubric, the
+// raw outcome), and the subject score is the unified Glicko-2 derivation (updateAxisRatings,
+// lazy-seeded from prevScore since these fixtures have no stored glicko/rubric; repeatFactor
+// 1 since the mock returns no recent same-bucket attempts).
+function expectedPracticeScore({ prevScore, grade, band = "intermediate", itemDifficulty = null, prevRubric = null }) {
   const rubric = normalizeRubric(grade.rubric);
   const reasoningScore = scoreFromRubric(rubric);
   const difficulty = itemDifficulty == null ? defaultDifficultyForBand(band) : itemDifficulty;
-  const { newRating } = eloUpdate({ rating: prevScore, difficulty, outcome: reasoningScore / 100, attemptCount });
-  return { newScore: newRating, reasoningScore };
+  const { score } = updateAxisRatings({ prevGlicko: null, prevRubric, prevScore, attemptRubric: rubric, difficulty, repeatFactor: 1 });
+  return { newScore: score, reasoningScore };
 }
 
 beforeEach(() => {
@@ -183,10 +189,10 @@ describe("POST /api/score practice — authentication", () => {
   });
 });
 
-describe("POST /api/score practice — server-authoritative Elo score", () => {
-  it("computes the new rating from the STORED level via the item-as-opponent Elo and persists it for the verified uid", async () => {
+describe("POST /api/score practice — server-authoritative Glicko-2 score", () => {
+  it("computes the new score from the STORED per-axis Glicko state (derived aggregate) and persists glicko + topic/band for the verified uid", async () => {
     auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
-    const { sb, calls } = fakeAdmin({ scoresRows: [{ subject: "math", score: 40, weak_concepts: ["old"], comment: "c", rubric: null }] });
+    const { sb, calls } = fakeAdmin({ scoresRows: [{ subject: "math", score: 40, weak_concepts: ["old"], comment: "c", rubric: null, glicko: null }] });
     storage.getAdmin.mockReturnValue(sb);
     mockGroq(PRACTICE_GRADE);
 
@@ -213,7 +219,13 @@ describe("POST /api/score practice — server-authoritative Elo score", () => {
     expect(save.args.p_user).toBe("u1"); // bound to the VERIFIED uid
     expect(save.args.p_scores[0].score).toBe(newScore);
     expect(save.args.p_scores[0].subject).toBe("math");
+    // The per-axis Glicko state (source of truth) is persisted, with a finite rating per axis.
+    expect(save.args.p_scores[0].glicko).toBeTruthy();
+    expect(Number.isFinite(save.args.p_scores[0].glicko.principle.rating)).toBe(true);
     expect(save.args.p_attempt.rationale).toBe(j.rationale); // rationale is persisted
+    // The practiced bucket (topic, band) is persisted for the anti-farm repeat window.
+    expect(save.args.p_attempt.topic).toBe("calculus_analysis");
+    expect(save.args.p_attempt.band).toBe("intermediate");
     // The stored-prev read MUST be scoped to the verified uid (defense-in-depth
     // alongside RLS) — otherwise a cross-user prev could leak into the rating.
     expect(calls.eq).toContainEqual(["user_id", "u1"]);
@@ -312,7 +324,7 @@ describe("POST /api/score practice — server-authoritative Elo score", () => {
     expect(save.args.p_review.feedback.workedSolution).toMatch(/Final answer/);
   });
 
-  it("RECONCILES a score that contradicts its rubric (all-zero rubric can't ship an 85)", async () => {
+  it("ignores a model-supplied score that contradicts its rubric — the headline is ALWAYS the transparent rubric mean (all-zero rubric can't ship an 85)", async () => {
     auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
     const { sb } = fakeAdmin({ scoresRows: [{ subject: "math", score: 50 }] });
     storage.getAdmin.mockReturnValue(sb);
