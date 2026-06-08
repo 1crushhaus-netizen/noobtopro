@@ -5,7 +5,6 @@ import { createPortal } from "react-dom";
 import {
   SUBJECTS,
   ORDER,
-  band,
   rankFor,
   totalPoints,
   phdIndex,
@@ -129,27 +128,27 @@ function Drawer({ open, title, titleId, onClose, children }) {
 }
 
 // The three headline KPI cards (deduped from the two former tabs into one cluster).
+// Compact: label + number only — the descriptive sub-lines were dropped so the whole
+// top band stays slim, freeing vertical space for the panels below. (The rank that the
+// PhD sub used to repeat is already shown as the identity rank chip.)
 function KpiStats({ scores, attempts }) {
   return (
     <div className="np-dash-kpis">
       <div className="np-card np-statcard">
         <span className="np-statlabel">PhD-level intelligence</span>
         <span className="np-statnum" style={{ color: "var(--math)" }}>
-          {phdIndex(scores)}<span style={{ color: "var(--muted)", fontSize: 16 }}> / 100</span>
+          {phdIndex(scores)}<span style={{ color: "var(--muted)", fontSize: 15 }}> / 100</span>
         </span>
-        <span className="np-statsub">{band(phdIndex(scores))} overall</span>
       </div>
       <div className="np-card np-statcard">
         <span className="np-statlabel">Total points</span>
         <span className="np-statnum">
-          {totalPoints(scores)}<span style={{ color: "var(--muted)", fontSize: 16 }}> / 300</span>
+          {totalPoints(scores)}<span style={{ color: "var(--muted)", fontSize: 15 }}> / 300</span>
         </span>
-        <span className="np-statsub">across all three subjects</span>
       </div>
       <div className="np-card np-statcard">
         <span className="np-statlabel">Problems graded</span>
         <span className="np-statnum">{attempts}</span>
-        <span className="np-statsub">reasoning attempts coached</span>
       </div>
     </div>
   );
@@ -389,15 +388,15 @@ export default function Dashboard({
           <Leaderboard loadLeaderboard={loadLeaderboard} scrollRegion={isWide} />
         </div>
         <div className="np-dash-actions">
-          <button className="np-btn np-outline np-dash-actbtn" onClick={() => setDrawer("charts")}>
+          <button className="np-btn np-dash-actbtn" onClick={() => setDrawer("charts")}>
             See trends <Icon name="arrow" size={16} />
           </button>
-          <button className="np-btn np-outline np-dash-actbtn" onClick={() => setDrawer("reviews")}>
+          <button className="np-btn np-dash-actbtn" onClick={() => setDrawer("reviews")}>
             Review your answers <Icon name="arrow" size={16} />
           </button>
           <button
-            className="np-ghost"
-            style={{ color: "var(--chem)", marginLeft: "auto" }}
+            className="np-btn np-dash-actbtn np-dash-actbtn--danger"
+            style={{ marginLeft: "auto" }}
             onClick={() => {
               if (window.confirm("This permanently deletes all your scores and history. Continue?")) onReset && onReset();
             }}
