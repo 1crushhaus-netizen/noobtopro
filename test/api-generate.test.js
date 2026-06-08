@@ -152,8 +152,48 @@ describe("POST /api/generate — practice (Groq-generated)", () => {
     const many = Array.from({ length: 500 }, (_, i) => `concept-${i}-${"x".repeat(500)}`);
     const res = await POST(req({ kind: "practice", subject: "math", score: 50, weakConcepts: many }));
     expect(res.status).toBe(200);
-    // 10 concepts × 200 chars max + small prompt overhead — far below the raw input.
+    // 10 concepts × 200 chars max + the (constant) system prompt + variety directives —
+    // far below the 500 × 500 ≈ 250k-char raw input. Proves the concept cap fired.
     const sentBody = fetchMock.mock.calls[0][1].body;
-    expect(sentBody.length).toBeLessThan(5000);
+    expect(sentBody.length).toBeLessThan(6000);
+  });
+
+  it("injects an AVOID-list from recentQuestions and rolls variation directives into the prompt", async () => {
+    const fetchMock = mockGroqReturning({ subject: "math", topic: "t", targetConcept: "c", difficulty: "foundational", question: "q" });
+    const res = await POST(
+      req({
+        kind: "practice",
+        subject: "math",
+        score: 43,
+        weakConcepts: ["equation balancing"],
+        recentQuestions: ["Consider the equation 2x + 5 = 11. Explain the steps to isolate x."],
+      })
+    );
+    expect(res.status).toBe(200);
+    const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const userMsg = sent.messages.find((m) => m.role === "user").content;
+    expect(userMsg).toMatch(/AVOID repeating/i);
+    expect(userMsg).toContain("2x + 5 = 11"); // the recent question is echoed into the avoid-list
+    expect(userMsg).toMatch(/Variation directives/);
+    expect(userMsg).toMatch(/Variation key:/);
+  });
+
+  it("samples generation: sends a higher temperature and a per-call seed (so repeats diverge)", async () => {
+    const fetchMock = mockGroqReturning({ subject: "math", topic: "t", targetConcept: "c", difficulty: "foundational", question: "q" });
+    await POST(req({ kind: "practice", subject: "math", score: 50, weakConcepts: ["x"] }));
+    const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(sent.temperature).toBeGreaterThan(0.5); // not the deterministic-grade 0, not the old 0.4 default
+    expect(Number.isInteger(sent.seed)).toBe(true);
+  });
+
+  it("caps recentQuestions (count + length) before echoing them into the prompt", async () => {
+    const fetchMock = mockGroqReturning({ subject: "math", topic: "t", targetConcept: "c", difficulty: "foundational", question: "q" });
+    const many = Array.from({ length: 50 }, (_, i) => `recent-${i}-${"y".repeat(800)}`);
+    const res = await POST(req({ kind: "practice", subject: "math", score: 50, weakConcepts: ["x"], recentQuestions: many }));
+    expect(res.status).toBe(200);
+    const userMsg = JSON.parse(fetchMock.mock.calls[0][1].body).messages.find((m) => m.role === "user").content;
+    // at most 5 items survive, each ≤240 chars → the avoid-list block stays bounded
+    expect((userMsg.match(/recent-\d+/g) || []).length).toBeLessThanOrEqual(5);
+    expect(userMsg).not.toContain("y".repeat(241));
   });
 });
