@@ -110,7 +110,7 @@ export async function POST(req) {
 
   // DETERMINISTIC pre-grade dock (no LLM call): empty / "idk" / off-topic / gibberish
   // → forced low score + all-zero rubric, for guests too (the client then runs the
-  // same Elo update locally). Identical anti-gaming lever as /api/score. Skip the dock
+  // same Glicko update locally). Identical anti-gaming lever as /api/score. Skip the dock
   // when a photo is attached — preGradeDock only inspects TEXT, so an image-only answer
   // (worked notes in the photo, empty text box) must reach the vision grader.
   const dock = img.image ? null : preGradeDock(reasoning);
@@ -188,7 +188,7 @@ export async function POST(req) {
     });
     // Normalize every field the UI renders so malformed model output can't show NaN or
     // out-of-range values. reasoningScore is reconciled against the rubric; rubric -> 0–4
-    // bars; newScoreSuggestion -> the client's local Elo update (null = no change). The
+    // bars; newScoreSuggestion -> the client's local Glicko update (null = no change). The
     // worked solution is revealed post-grade (this path is a genuine attempt, not docked).
     const rubric = normalizeRubric(data?.rubric);
     const weakConcepts = normalizeWeakConcepts(data?.weakConcepts);
@@ -197,7 +197,7 @@ export async function POST(req) {
     return NextResponse.json({
       ...data,
       reasoningScore,
-      newScoreSuggestion: reasoningScore, // the guest's local Elo target = the same axis-derived score
+      newScoreSuggestion: reasoningScore, // the guest's local Glicko target = the same axis-derived score
       rubric,
       solve: normalizeSolve(data?.solve),
       errors: normalizeErrors(data?.errors),

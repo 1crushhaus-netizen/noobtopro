@@ -21,15 +21,20 @@ create table if not exists public.scores (
   score int not null default 0,
   weak_concepts text[] not null default '{}',
   comment text,
-  -- Per-subject reasoning rubric ({conceptual_understanding, logical_structure,
-  -- strategy, execution_accuracy, communication} each 0–4) powering the radar chart.
-  -- Server-computed only (see save_progress_for); NULL until a first graded result.
+  -- Per-subject reasoning radar (9 axes, 0–4 each) — now DERIVED from `glicko` below
+  -- (radarFromGlicko). Opaque jsonb; server-computed only (see save_progress_for); NULL
+  -- until a first graded result. RadarChart/lowestRubricDimensions read it unchanged.
   rubric jsonb,
+  -- Per-axis Glicko-2 state {axis:{rating,rd,vol}} over the 9 RUBRIC_KEYS — the unified
+  -- SOURCE OF TRUTH from which `score` (RUBRIC_WEIGHTS-weighted aggregate, via
+  -- subjectScoreFromGlicko) and `rubric` (0–4 radar) are derived. Opaque; NULL until seeded.
+  glicko jsonb,
   updated_at timestamptz not null default now(),
   primary key (user_id, subject)
 );
--- Add the rubric column to an already-provisioned scores table (idempotent).
+-- Add the rubric/glicko columns to an already-provisioned scores table (idempotent).
 alter table public.scores add column if not exists rubric jsonb;
+alter table public.scores add column if not exists glicko jsonb;
 
 create table if not exists public.attempts (
   id bigint generated always as identity primary key,
@@ -42,12 +47,19 @@ create table if not exists public.attempts (
   new_score int,
   total_after int,
   phd_after int,
-  -- One-line, server-computed "why your rank moved" explanation (Elo delta + dock
+  -- One-line, server-computed "why your rank moved" explanation (rating delta + dock
   -- signals), shown to the learner. NULL for pre-0004 rows / baseline attempts.
-  rationale text
+  rationale text,
+  -- The practiced item's (topic slug, difficulty band) — used by the anti-farm
+  -- "diminishing returns on repeats" rule to detect grinding the same bucket. NULL for
+  -- baselines / pre-0009 rows.
+  topic text,
+  band text
 );
--- Add the rationale column to an already-provisioned attempts table (idempotent).
+-- Add the rationale/topic/band columns to an already-provisioned attempts table (idempotent).
 alter table public.attempts add column if not exists rationale text;
+alter table public.attempts add column if not exists topic text;
+alter table public.attempts add column if not exists band text;
 
 create index if not exists attempts_user_created_idx
   on public.attempts (user_id, created_at, id);
@@ -156,7 +168,7 @@ begin
     return false;  -- account already has data; nothing to migrate
   end if;
 
-  insert into public.scores (user_id, subject, score, weak_concepts, comment, rubric, updated_at)
+  insert into public.scores (user_id, subject, score, weak_concepts, comment, rubric, glicko, updated_at)
   select uid,
          s->>'subject',
          greatest(0, least(100, coalesce(case when pg_input_is_valid(s->>'score', 'numeric') then round((s->>'score')::numeric) end, 0)))::int,
@@ -169,6 +181,7 @@ begin
          ),
          left(coalesce(s->>'comment', ''), 2000),
          case when jsonb_typeof(s->'rubric') = 'object' then s->'rubric' else null end,
+         case when jsonb_typeof(s->'glicko') = 'object' then s->'glicko' else null end,
          now()
   from jsonb_array_elements(coalesce(p_scores, '[]'::jsonb)) as s
   where s->>'subject' in ('math', 'physics', 'chemistry')
@@ -187,7 +200,7 @@ begin
     v_subject := v_a->>'subject';
     if v_subject is not null and v_subject not in ('math', 'physics', 'chemistry') then continue; end if;
 
-    insert into public.attempts (user_id, type, subject, reasoning_score, delta, new_score, total_after, phd_after, created_at)
+    insert into public.attempts (user_id, type, subject, reasoning_score, delta, new_score, total_after, phd_after, created_at, topic, band)
     values (
       uid, v_type, v_subject,
       case when pg_input_is_valid(v_a->>'reasoning_score', 'numeric') then greatest(-2147483648, least(2147483647, round((v_a->>'reasoning_score')::numeric)))::int end,
@@ -198,7 +211,9 @@ begin
       -- created_at clamped to (now() - 5y, now()] so a hand-edited blob can't back- or
       -- forward-date an attempt (the upper bound was already enforced; add the floor).
       greatest(now() - interval '5 years',
-               least(coalesce(case when pg_input_is_valid(v_a->>'created_at', 'timestamptz') then (v_a->>'created_at')::timestamptz end, now()), now()))
+               least(coalesce(case when pg_input_is_valid(v_a->>'created_at', 'timestamptz') then (v_a->>'created_at')::timestamptz end, now()), now())),
+      case when v_a->>'topic' is not null then left(v_a->>'topic', 64) else null end,
+      case when v_a->>'band' in ('beginner','foundational','intermediate','advanced','phd') then v_a->>'band' else null end
     )
     returning id into v_attempt_id;
 
@@ -299,7 +314,7 @@ begin
     raise exception 'too many score rows';
   end if;
 
-  insert into public.scores (user_id, subject, score, weak_concepts, comment, rubric, updated_at)
+  insert into public.scores (user_id, subject, score, weak_concepts, comment, rubric, glicko, updated_at)
   select p_user,
          s->>'subject',
          greatest(0, least(100, coalesce(case when pg_input_is_valid(s->>'score', 'numeric') then round((s->>'score')::numeric) end, 0)))::int,
@@ -312,6 +327,7 @@ begin
          ),
          left(coalesce(s->>'comment', ''), 2000),
          case when jsonb_typeof(s->'rubric') = 'object' then s->'rubric' else null end,
+         case when jsonb_typeof(s->'glicko') = 'object' then s->'glicko' else null end,
          now()
   from jsonb_array_elements(coalesce(p_scores, '[]'::jsonb)) as s
   where s->>'subject' in ('math', 'physics', 'chemistry')
@@ -320,6 +336,7 @@ begin
         weak_concepts = excluded.weak_concepts,
         comment = excluded.comment,
         rubric = excluded.rubric,
+        glicko = excluded.glicko,
         updated_at = excluded.updated_at;
 
   -- Append the attempt (skip if no usable attempt was supplied). Validate type +
@@ -334,7 +351,7 @@ begin
     if p_attempt->>'subject' is not null and p_attempt->>'subject' not in ('math', 'physics', 'chemistry') then
       raise exception 'invalid attempt subject: %', p_attempt->>'subject';
     end if;
-    insert into public.attempts (user_id, type, subject, reasoning_score, delta, new_score, total_after, phd_after, created_at, rationale)
+    insert into public.attempts (user_id, type, subject, reasoning_score, delta, new_score, total_after, phd_after, created_at, rationale, topic, band)
     values (p_user,
             coalesce(p_attempt->>'type', 'attempt'),
             p_attempt->>'subject',
@@ -344,7 +361,9 @@ begin
             case when pg_input_is_valid(p_attempt->>'total_after', 'numeric') then greatest(-2147483648, least(2147483647, round((p_attempt->>'total_after')::numeric)))::int end,
             case when pg_input_is_valid(p_attempt->>'phd_after', 'numeric') then greatest(-2147483648, least(2147483647, round((p_attempt->>'phd_after')::numeric)))::int end,
             least(coalesce(case when pg_input_is_valid(p_attempt->>'created_at', 'timestamptz') then (p_attempt->>'created_at')::timestamptz end, now()), now()),
-            left(p_attempt->>'rationale', 500))
+            left(p_attempt->>'rationale', 500),
+            case when p_attempt->>'topic' is not null then left(p_attempt->>'topic', 64) else null end,
+            case when p_attempt->>'band' in ('beginner','foundational','intermediate','advanced','phd') then p_attempt->>'band' else null end)
     returning id into v_attempt_id;
 
     -- Answer-review detail (PR 6) for a graded practice attempt — same transaction.

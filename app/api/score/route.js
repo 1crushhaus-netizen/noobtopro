@@ -5,8 +5,8 @@
 // is GRADED, COMPUTED, and PERSISTED entirely server-side:
 //   1. the caller's Supabase JWT is verified (requireUser → supabase.auth.getUser),
 //   2. the reasoning is graded by Groq,
-//   3. the new score is blended from the user's STORED level (read here, never
-//      client-supplied), and
+//   3. the new score is computed from the user's STORED per-axis Glicko-2 state (read
+//      here, never client-supplied) — the difficulty-adjusted aggregate of the 9 axes, and
 //   4. it is written for the verified auth.uid() via the service-role-only
 //      save_progress_for RPC.
 // Because scores/attempts are SELECT-only under RLS, the client can no longer
@@ -14,7 +14,7 @@
 //
 // kind:"practice"   → REQUIRES a verified user (it persists). Grades one question,
 //                     returns the coaching feedback + the trusted new score.
-// kind:"diagnostic" → auth-OPTIONAL. Grades the (≤6) answers server-side with
+// kind:"diagnostic" → auth-OPTIONAL. Grades the (≤9) answers server-side with
 //                     bounded concurrency + retry-once-on-429 + allSettled (so the
 //                     old per-question parallel client burst can't 429 the whole set). A verified
 //                     user gets the baseline persisted; a guest gets it back to
@@ -29,17 +29,18 @@ import { NextResponse, after } from "next/server";
 import { groqJSON, PRACTICE_GRADE_SYS, DIAG_GRADE_SYS } from "@/lib/groq";
 import {
   ORDER,
-  blendRubric,
   normalizeRubric,
-  diagnosticSubjectScore,
-  diagnosticSubjectRubric,
   totalPoints,
   phdIndex,
   DIAGNOSTIC_DIFFICULTIES,
-  eloUpdate,
   defaultDifficultyForBand,
   scoreFromRubric,
   explainRankMove,
+  updateAxisRatings,
+  diagnosticSeedGlicko,
+  repeatFactorFromRecent,
+  itemDifficultyDelta,
+  REPEAT_WINDOW_K,
 } from "@/lib/scoring";
 import { normalizeTopic } from "@/lib/taxonomy";
 import { preGradeDock } from "@/lib/preGrade";
@@ -53,7 +54,7 @@ import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, no
 export const dynamic = "force-dynamic";
 
 const GRADE_CONCURRENCY = 3; // simultaneous Groq grade calls per diagnostic
-const MAX_DIAGNOSTIC_ANSWERS = ORDER.length * DIAGNOSTIC_DIFFICULTIES.length; // 6 (3 subjects × 2 tiers)
+const MAX_DIAGNOSTIC_ANSWERS = ORDER.length * DIAGNOSTIC_DIFFICULTIES.length; // 9 (3 subjects × 3 tiers)
 const RETRY_DELAY_MS = 700;
 
 const nowIso = () => new Date().toISOString();
@@ -80,7 +81,7 @@ function registerWeakConcepts(subject, weakConcepts) {
 }
 
 // Calibrate the item-difficulty bucket for (subject, topic, band) AFTER the response —
-// an atomic, clamped nudge by the Elo difficulty delta. Best-effort + non-blocking:
+// an atomic, clamped nudge by the aggregate-outcome difficulty delta. Best-effort + non-blocking:
 // a calibration write must never fail or slow the learner's grade. No-op without the
 // service-role key (sb null). The seed lands a brand-new bucket at the band midpoint.
 function bumpItemDifficulty(sb, subject, topic, band, delta, seed) {
@@ -226,7 +227,7 @@ async function handlePractice(req, body) {
   }
 
   // The difficulty band + the calibration bucket key (subject, taxonomy slug, band).
-  // safeDifficulty is allow-listed; "(unspecified)" → intermediate so the Elo math
+  // safeDifficulty is allow-listed; "(unspecified)" → intermediate so the rating math
   // always has a real band. normalizeTopic bounds the topic to a real slug or
   // general_<subject>, so the bucket key space is bounded + FK-valid.
   const bandKey = safeDifficulty !== "(unspecified)" ? safeDifficulty : "intermediate";
@@ -234,22 +235,22 @@ async function handlePractice(req, body) {
   const seedDifficulty = defaultDifficultyForBand(bandKey);
 
   try {
-    // ACCEPTED RESIDUAL: the rating is a read-modify-write (read prev → Elo → write).
+    // ACCEPTED RESIDUAL: the rating is a read-modify-write (read prev → Glicko → write).
     // Two concurrent same-user, same-subject grades could lose one update; single-user
     // and low-stakes (the practiceRun guard + one-question-at-a-time UI make it rare),
     // so it's accepted rather than serialized. (The item-difficulty bump is commutative,
     // so it's safe under concurrency regardless.)
-    // 1) Server-authoritative PREV + the learner's attempt count (sets the Elo K) + the
+    // 1) Server-authoritative PREV (incl. the per-axis Glicko state) + the learner's recent
+    //    attempts in this subject (the last K, for the anti-farm repeat factor) + the
     //    calibrated item difficulty for this bucket — ALL read server-side; the client
     //    supplies none of the values the new rating is computed from.
-    const [scoresRes, countRes, diffRes] = await Promise.all([
-      sb.from("scores").select("subject, score, weak_concepts, comment, rubric").eq("user_id", uid),
-      sb.from("attempts").select("id", { count: "exact", head: true }).eq("user_id", uid).eq("subject", subject).eq("type", "attempt"),
+    const [scoresRes, recentRes, diffRes] = await Promise.all([
+      sb.from("scores").select("subject, score, weak_concepts, comment, rubric, glicko").eq("user_id", uid),
+      sb.from("attempts").select("topic, band").eq("user_id", uid).eq("subject", subject).eq("type", "attempt").order("created_at", { ascending: false }).limit(REPEAT_WINDOW_K),
       sb.from("item_difficulty").select("difficulty").eq("subject", subject).eq("topic", topicSlug).eq("band", bandKey).maybeSingle(),
     ]);
     if (scoresRes.error) throw scoresRes.error;
     const rows = scoresRes.data;
-    const attemptCount = typeof countRes.count === "number" ? countRes.count : 0;
     const itemDifficulty =
       diffRes && diffRes.data && Number.isFinite(Number(diffRes.data.difficulty))
         ? Number(diffRes.data.difficulty)
@@ -262,6 +263,7 @@ async function handlePractice(req, body) {
         weakConcepts: r.weak_concepts || [],
         comment: r.comment || "",
         rubric: r.rubric || null,
+        glicko: r.glicko || null,
       };
     }
     const prev = current[subject] || null;
@@ -308,21 +310,24 @@ async function handlePractice(req, body) {
     const socraticHint = typeof data?.socraticHint === "string" ? data.socraticHint : "";
     const microLesson = typeof data?.microLesson === "string" ? data.microLesson : "";
 
-    // 4) Item-as-opponent Elo update (NON-ADDITIVE): outcome = reasoningScore/100 drives
-    //    the rating against the item's calibrated difficulty; the item difficulty
-    //    self-calibrates by the same surprise.
-    const { newRating, diffDelta, expected } = eloUpdate({
-      rating: prevScore,
+    // 4) UNIFIED GLICKO-2 update: each of the 9 reasoning axes is rated against the item's
+    //    calibrated difficulty (the opponent), with that axis's rubric value (/RUBRIC_MAX)
+    //    as the outcome. The subject score is the RUBRIC_WEIGHTS-weighted aggregate of the
+    //    9 axis ratings (subjectScoreFromGlicko), and the radar is derived from the same
+    //    ratings — ONE difficulty-adjusted source of truth. Anti-farm: repeated attempts on
+    //    this (subject, topic, band) bucket damp the rating GAIN (not losses). A dock carries
+    //    an all-zero rubric → a real low outcome that legitimately drops the axes/score (the
+    //    radar IS the rating now, so we no longer special-case the dock). Existing users
+    //    lazy-seed from their prior rubric/score (continuity — no rank jump).
+    const repeatFactor = repeatFactorFromRecent(recentRes && recentRes.data, topicSlug, bandKey);
+    const { glicko: newGlicko, rubric: newRubric, score: newScore, expected } = updateAxisRatings({
+      prevGlicko: prev ? prev.glicko : null,
+      prevRubric: prev ? prev.rubric : null,
+      prevScore,
+      attemptRubric,
       difficulty: itemDifficulty,
-      outcome: reasoningScore / 100,
-      attemptCount,
+      repeatFactor,
     });
-    const newScore = newRating;
-
-    // Radar profile: blend toward this attempt EXCEPT on a dock — a non-answer is no
-    // signal for the rubric dimensions (the rating already absorbs the penalty), so a
-    // stray "idk" must not collapse a learner's persisted reasoning profile.
-    const newRubric = dock ? (prev ? prev.rubric : null) : blendRubric(prev ? prev.rubric : null, attemptRubric);
     const newWeak = weakConcepts.length ? weakConcepts : prev ? prev.weakConcepts : [];
     const comment = prev ? prev.comment : "";
 
@@ -341,7 +346,7 @@ async function handlePractice(req, body) {
     const { error: saveErr } = await sb.rpc("save_progress_for", {
       p_user: uid,
       p_scores: [
-        { subject, score: newScore, weak_concepts: (newWeak || []).slice(0, 64), comment, rubric: newRubric },
+        { subject, score: newScore, weak_concepts: (newWeak || []).slice(0, 64), comment, rubric: newRubric, glicko: newGlicko },
       ],
       p_attempt: {
         type: "attempt",
@@ -353,6 +358,8 @@ async function handlePractice(req, body) {
         phd_after: phdAfter,
         created_at: t,
         rationale,
+        topic: topicSlug,
+        band: bandKey,
       },
       // Answer-review detail (persisted atomically with the attempt) so the learner can
       // review this answer later. `answer` is the learner's own reasoning (`work`).
@@ -368,8 +375,13 @@ async function handlePractice(req, body) {
     if (saveErr) throw saveErr;
 
     // 7) Calibrate the item-difficulty bucket (non-blocking; only on a real grade — a
-    //    docked non-answer carries no signal about the item's difficulty).
-    if (!dock) bumpItemDifficulty(sb, subject, topicSlug, bandKey, diffDelta, seedDifficulty);
+    //    docked non-answer carries no signal about the item's difficulty). The nudge is
+    //    the aggregate-outcome surprise vs the learner's prior level — a commutative
+    //    additive delta (concurrent bumps still commute), same shape as before.
+    if (!dock) {
+      const diffDelta = itemDifficultyDelta({ prevSubjectScore: prevScore, itemDifficulty, aggregateOutcome: reasoningScore / 100 });
+      bumpItemDifficulty(sb, subject, topicSlug, bandKey, diffDelta, seedDifficulty);
+    }
     registerWeakConcepts(subject, weakConcepts); // auto-grow the hub (non-blocking)
 
     return NextResponse.json({
@@ -553,15 +565,17 @@ async function handleDiagnostic(req, body) {
     for (const s of ORDER) {
       const subjectQs = results.filter((r) => r.subject === s);
       if (subjectQs.length === 0) continue;
-      const score = diagnosticSubjectScore(subjectQs);
-      const rubric = diagnosticSubjectRubric(subjectQs);
+      // Seed the per-axis Glicko state by running each tier's per-axis rubric through the
+      // engine at its band difficulty (3 difficulty bands place the profile); the subject
+      // score + radar are derived from it — one unified, difficulty-aware baseline.
+      const seed = diagnosticSeedGlicko(subjectQs);
       const weakConcepts = Array.from(
         new Set(subjectQs.flatMap((r) => r.weakConcepts).filter((c) => typeof c === "string" && c.trim()))
       ).slice(0, 8);
       const hardest = [...subjectQs].sort(
         (a, b) => DIAGNOSTIC_DIFFICULTIES.indexOf(b.difficulty) - DIAGNOSTIC_DIFFICULTIES.indexOf(a.difficulty)
       )[0];
-      scores[s] = { score, weakConcepts, comment: (hardest && hardest.comment) || "", rubric };
+      scores[s] = { score: seed.score, weakConcepts, comment: (hardest && hardest.comment) || "", rubric: seed.rubric, glicko: seed.glicko };
     }
 
     // Auto-grow the concept hub from the baseline's weak concepts (non-blocking).
@@ -588,6 +602,7 @@ async function handleDiagnostic(req, body) {
         weak_concepts: (scores[s].weakConcepts || []).slice(0, 64),
         comment: scores[s].comment || "",
         rubric: scores[s].rubric,
+        glicko: scores[s].glicko,
       }));
       const { error: saveErr } = await sb.rpc("save_progress_for", {
         p_user: uid,

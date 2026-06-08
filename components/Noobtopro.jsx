@@ -6,12 +6,12 @@ import {
   ORDER,
   SCALE_NOTE,
   band,
-  blendRubric,
   totalPoints,
   phdIndex,
   DIAGNOSTIC_DIFFICULTIES,
   DIFFICULTY_LABELS,
-  eloUpdate,
+  updateAxisRatings,
+  repeatFactorFromHistory,
   defaultDifficultyForBand,
   explainRankMove,
 } from "@/lib/scoring";
@@ -795,7 +795,14 @@ export default function Noobtopro() {
       if (!data || typeof data.question !== "string" || !data.question.trim()) {
         throw new Error("Could not generate a question. Please try again.");
       }
-      setPQuestion(data);
+      // Normalize the generator's difficulty to a canonical band BEFORE it's stored —
+      // it becomes the anti-farm repeat-window key and the persisted attempts.band, and
+      // must match the server's bandKey (normalizeDifficulty → intermediate default) so a
+      // capitalized/off-band token can't fragment the repeat window or be dropped to NULL
+      // by migrate_guest_data's case-sensitive band CHECK on sign-in.
+      const PBANDS = new Set(["beginner", "foundational", "intermediate", "advanced", "phd"]);
+      const pd = typeof data.difficulty === "string" ? data.difficulty.trim().toLowerCase() : "";
+      setPQuestion({ ...data, difficulty: PBANDS.has(pd) ? pd : "intermediate" });
     } catch (e) {
       if (myRun !== practiceRun.current) return; // superseded — don't surface a stale error
       setError(e.message || "Could not generate a question.");
@@ -882,7 +889,7 @@ export default function Noobtopro() {
         setScoreDelta(data.delta);
         setFeedback(data); // coaching fields (reasoningScore/rubric/hints) are top-level
       } else {
-        // Guest: grade only, then run the SAME item-as-opponent Elo update LOCALLY and
+        // Guest: grade only, then run the SAME unified Glicko-2 axis update LOCALLY and
         // persist to localStorage (no account to protect, so a client-computed score is
         // fine here). The guest has no persisted item-difficulty bucket, so the item's
         // difficulty is the static band anchor (no population calibration off-device).
@@ -898,19 +905,26 @@ export default function Noobtopro() {
         });
         if (myRun !== practiceRun.current) return; // abandoned mid-grade — don't persist a stale write
         const reasoningScore = r.reasoningScore ?? 0;
-        const guestAttempts = history.filter((h) => h.type === "attempt" && h.subject === pSubject).length;
-        const elo = eloUpdate({
-          rating: prev.score,
+        // UNIFIED GLICKO-2 (mirrors /api/score): update the 9 per-axis ratings against the
+        // question difficulty (the static band anchor for guests — no population-calibrated
+        // bucket off-device), derive the subject score + radar. Anti-farm: damp the gain
+        // when this (subject, topic, band) bucket repeats in the recent local history. A dock
+        // (all-zero rubric) is a real low outcome → drops the axes. Lazy-seed from prev for
+        // continuity.
+        const repeatFactor = repeatFactorFromHistory(history, pSubject, pQuestion.topicSlug, pQuestion.difficulty);
+        const { glicko: newGlicko, rubric: newRubric, score: updatedScore, expected } = updateAxisRatings({
+          prevGlicko: prev.glicko || null,
+          prevRubric: prev.rubric || null,
+          prevScore: prev.score,
+          attemptRubric: r.rubric,
           difficulty: defaultDifficultyForBand(pQuestion.difficulty),
-          outcome: reasoningScore / 100,
-          attemptCount: guestAttempts,
+          repeatFactor,
         });
-        const updatedScore = elo.newRating;
         const delta = updatedScore - prev.score;
         const rationale = explainRankMove({
           delta,
           reasoningScore,
-          expected: elo.expected,
+          expected,
           difficultyBand: pQuestion.difficulty,
           docked: !!r.docked,
         });
@@ -918,9 +932,8 @@ export default function Noobtopro() {
           score: updatedScore,
           weakConcepts: r.weakConcepts && r.weakConcepts.length ? r.weakConcepts : prev.weakConcepts,
           comment: prev.comment,
-          // A docked non-answer carries no rubric signal — leave the radar profile intact
-          // (the rating already absorbed the penalty), matching /api/score.
-          rubric: r.docked ? prev.rubric : blendRubric(prev.rubric, r.rubric),
+          rubric: newRubric,
+          glicko: newGlicko,
         };
         const updatedScores = { ...scores, [pSubject]: updatedSubject };
         // Atomic local write of the changed subject + its attempt. Send ONLY the
@@ -935,6 +948,9 @@ export default function Noobtopro() {
           totalAfter: totalPoints(updatedScores),
           phdAfter: phdIndex(updatedScores),
           rationale,
+          // The practiced bucket — read back by repeatFactorFromHistory on later attempts.
+          topic: pQuestion.topicSlug,
+          band: pQuestion.difficulty,
           // Embed the answer-review detail so guests can review past answers too
           // (signed-in users get it persisted server-side in attempt_reviews).
           review: {
