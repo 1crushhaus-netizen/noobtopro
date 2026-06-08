@@ -13,7 +13,7 @@
 // ---------------------------------------------------------------------------
 
 import { NextResponse } from "next/server";
-import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
+import { isCrossSiteRequest, isWrongContentType, isBodyTooLarge, MAX_BODY_BYTES_TEXT } from "@/lib/requestGuard";
 import { checkRateLimit, clientKey } from "@/lib/rateLimit";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireUser } from "@/lib/adminAuth";
@@ -27,6 +27,11 @@ export async function POST(req) {
   }
   if (isWrongContentType(req)) {
     return NextResponse.json({ error: "Content-Type must be application/json." }, { status: 415 });
+  }
+  // This route ignores the request body (the rank tiers are derived from the
+  // JWT-verified uid), so just reject an oversized one outright rather than buffer it.
+  if (isBodyTooLarge(req, MAX_BODY_BYTES_TEXT)) {
+    return NextResponse.json({ error: "Request body is too large." }, { status: 413 });
   }
 
   const rl = await checkRateLimit(clientKey(req));

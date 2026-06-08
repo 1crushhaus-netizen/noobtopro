@@ -3,7 +3,7 @@ import { groqJSON, DIAG_GRADE_SYS, PRACTICE_GRADE_SYS } from "@/lib/groq";
 import { clampScore, ORDER, normalizeRubric, scoreFromRubric } from "@/lib/scoring";
 import { preGradeDock } from "@/lib/preGrade";
 import { checkRateLimit, clientKey } from "@/lib/rateLimit";
-import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
+import { isCrossSiteRequest, isWrongContentType, readJsonLimited, MAX_BODY_BYTES_IMAGE } from "@/lib/requestGuard";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
 import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, normalizeFeedbackList, capSolution, normalizeErrors, normalizeSolve } from "@/lib/gradeInput";
@@ -51,8 +51,11 @@ export async function POST(req) {
 
   let body;
   try {
-    body = await req.json();
-  } catch {
+    body = await readJsonLimited(req, MAX_BODY_BYTES_IMAGE);
+  } catch (e) {
+    if (e && e.code === "BODY_TOO_LARGE") {
+      return NextResponse.json({ error: "Request body is too large." }, { status: 413 });
+    }
     return NextResponse.json({ error: "Request body must be valid JSON." }, { status: 400 });
   }
 
@@ -113,7 +116,9 @@ export async function POST(req) {
   // same Glicko update locally). Identical anti-gaming lever as /api/score. Skip the dock
   // when a photo is attached — preGradeDock only inspects TEXT, so an image-only answer
   // (worked notes in the photo, empty text box) must reach the vision grader.
-  const dock = img.image ? null : preGradeDock(reasoning);
+  // Cap before the dock so its regex/Set work is bounded even on a large body (the
+  // dock's verdict is unchanged — 12k chars is far more than any blank/idk/gibberish test needs).
+  const dock = img.image ? null : preGradeDock(capText(reasoning));
 
   try {
     if (kind === "diagnostic") {
@@ -132,7 +137,7 @@ export async function POST(req) {
         user:
           `Subject: ${subject}\n` +
           `Question difficulty band: ${safeDifficulty}\n` +
-          `Question: ${safeQuestion}\n\n` +
+          `Question:\n"""${safeQuestion}"""\n\n` +
           `Learner's reasoning:\n"""${work}"""`,
         image: img.image,
         grade: true, // route to the cheaper grading model
@@ -177,8 +182,8 @@ export async function POST(req) {
       system: PRACTICE_GRADE_SYS,
       user:
         `Subject: ${subject}\n` +
-        `Question: ${safeQuestion}\n` +
-        `Concept being probed: ${safeConcept}\n` +
+        `Question:\n"""${safeQuestion}"""\n` +
+        `Concept being probed:\n"""${safeConcept}"""\n` +
         `Question difficulty band: ${safeDifficulty}\n` +
         `Learner's current level: ${safeScore}/100\n\n` +
         `Learner's reasoning:\n"""${work}"""`,

@@ -149,7 +149,9 @@ describe("POST /api/generate — practice (Groq-generated)", () => {
 
   it("caps weakConcepts (count + length) before sending them upstream", async () => {
     const fetchMock = mockGroqReturning({ subject: "math", topic: "t", targetConcept: "c", difficulty: "intermediate", question: "q" });
-    const many = Array.from({ length: 500 }, (_, i) => `concept-${i}-${"x".repeat(500)}`);
+    // Over the 10×200 field cap (50 concepts × ~300 chars), but within the 64 KB
+    // text-route body ceiling so this still exercises the post-parse field cap.
+    const many = Array.from({ length: 50 }, (_, i) => `concept-${i}-${"x".repeat(300)}`);
     const res = await POST(req({ kind: "practice", subject: "math", score: 50, weakConcepts: many }));
     expect(res.status).toBe(200);
     // 10 concepts × 200 chars max + small prompt overhead — far below the raw input.

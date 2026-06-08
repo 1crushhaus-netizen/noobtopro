@@ -55,7 +55,14 @@ const securityHeaders = [
   { key: "X-Frame-Options", value: "DENY" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
-  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+  // Deny every powerful feature the app never uses (it only renders text + reads an
+  // optional uploaded photo, which does NOT need the camera API). Shrinks the browser
+  // attack surface a compromised script could reach.
+  {
+    key: "Permissions-Policy",
+    value:
+      "camera=(), microphone=(), geolocation=(), payment=(), usb=(), bluetooth=(), serial=(), hid=(), midi=(), magnetometer=(), gyroscope=(), accelerometer=(), browsing-topics=(), interest-cohort=()",
+  },
   { key: "X-DNS-Prefetch-Control", value: "on" },
 ];
 
