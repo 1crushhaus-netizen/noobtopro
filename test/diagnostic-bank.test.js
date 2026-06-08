@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { DIAGNOSTIC_BANK, buildDiagnostic } from "@/lib/diagnosticBank";
+import { DIAGNOSTIC_BANK, buildDiagnostic, diagnosticSurfaceFor } from "@/lib/diagnosticBank";
 import { ORDER, DIAGNOSTIC_DIFFICULTIES } from "@/lib/scoring";
 import { isValidTopic } from "@/lib/taxonomy";
 
@@ -33,5 +33,28 @@ describe("curated diagnostic bank", () => {
     a.questions[0].question = "MUTATED";
     expect(buildDiagnostic().questions[0].question).not.toBe("MUTATED");
     expect(DIAGNOSTIC_BANK[0].question).not.toBe("MUTATED");
+  });
+
+  it("every question declares an allow-listed reasoningSurface (trap ⇒ a trap description)", () => {
+    const ALLOWED = new Set(["multi-step", "branch", "trap"]);
+    for (const q of DIAGNOSTIC_BANK) {
+      expect(ALLOWED.has(q.reasoningSurface)).toBe(true);
+      if (q.reasoningSurface === "trap") expect(typeof q.trap === "string" && q.trap.trim().length > 0).toBe(true);
+    }
+  });
+});
+
+describe("diagnosticSurfaceFor (server-side bank lookup — the grader's source of truth)", () => {
+  it("returns the bank's surface/trap for every real slot", () => {
+    for (const q of DIAGNOSTIC_BANK) {
+      const s = diagnosticSurfaceFor(q.subject, q.difficulty);
+      expect(s.reasoningSurface).toBe(q.reasoningSurface);
+      expect(s.trap).toBe(q.trap || "");
+    }
+  });
+  it("returns an empty surface for an unknown/prototype slot (never throws)", () => {
+    expect(diagnosticSurfaceFor("math", "phd")).toEqual({ reasoningSurface: null, trap: "" });
+    expect(diagnosticSurfaceFor("astrology", "beginner")).toEqual({ reasoningSurface: null, trap: "" });
+    expect(diagnosticSurfaceFor("__proto__", "beginner")).toEqual({ reasoningSurface: null, trap: "" });
   });
 });

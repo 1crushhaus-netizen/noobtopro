@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { groqJSON, PRACTICE_GEN_SYS } from "@/lib/groq";
 import { ORDER, clampScore } from "@/lib/scoring";
 import { topicSlugsFor, normalizeTopic } from "@/lib/taxonomy";
+import { pickVariety, varietyDirectiveText, sanitizeRecentQuestions, avoidListText } from "@/lib/questionVariety";
+import { normalizeReasoningSurface, capTrap } from "@/lib/gradeInput";
 import { checkRateLimit, clientKey } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
 import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
@@ -34,7 +36,7 @@ export async function POST(req) {
     return NextResponse.json({ error: "Request body must be valid JSON." }, { status: 400 });
   }
 
-  const { kind, subject, score, weakConcepts } = body || {};
+  const { kind, subject, score, weakConcepts, recentQuestions } = body || {};
 
   try {
     if (kind === "diagnostic") {
@@ -66,8 +68,18 @@ export async function POST(req) {
       .filter((c) => typeof c === "string")
       .slice(0, 10)
       .map((c) => c.slice(0, 200));
-    // Flag (don't block) obvious prompt-injection in the client-supplied concepts.
-    reportInjection({ req, route: "/api/generate", subject, text: concepts.join(" ") });
+    // Recently-shown questions (session ring-buffer from the client) to steer AWAY from,
+    // so "regenerate" / a new practice produces a genuinely different problem (count +
+    // length bounded — they are echoed into the prompt).
+    const recent = sanitizeRecentQuestions(recentQuestions);
+    // Flag (don't block) obvious prompt-injection in the client-supplied free text.
+    reportInjection({ req, route: "/api/generate", subject, text: [concepts.join(" "), recent.join(" ")].join(" ") });
+
+    // Roll a fresh variation spec per call so the conditioning changes every time —
+    // the core defense against the model collapsing onto the canonical exemplar.
+    const variety = pickVariety();
+    const directive = varietyDirectiveText(variety);
+    const avoid = avoidListText(recent);
 
     const data = await groqJSON({
       system: PRACTICE_GEN_SYS,
@@ -76,12 +88,26 @@ export async function POST(req) {
         `Learner score: ${safeScore}/100\n` +
         `Weak concepts: ${concepts.join(", ") || "none recorded"}\n` +
         `Allowed topics (pick exactly one slug for topicSlug): ${topicSlugsFor(subject)}\n` +
+        (directive ? directive + "\n" : "") +
+        (avoid ? avoid + "\n" : "") +
         `Generate the question now.`,
+      // Higher temperature + a random per-call seed (C) on top of the rolled spec (B)
+      // and avoid-list (A): three independent diversity levers against a peaked prior.
+      temperature: 0.85,
+      seed: Math.floor(Math.random() * 1e9),
     });
     // Normalize the LLM's topicSlug to a real taxonomy slug (or general_<subject>) so
     // the per-(subject,topic,band) difficulty bucket on /api/score is always bounded
     // and FK-valid. The human-readable `topic` is left as-is for display.
-    if (data && typeof data === "object") data.topicSlug = normalizeTopic(subject, data.topicSlug);
+    if (data && typeof data === "object") {
+      data.topicSlug = normalizeTopic(subject, data.topicSlug);
+      // Normalize the reasoning-surface metadata: allow-list the surface, and keep the
+      // trap description only for a trap (so an off-list value or a stray trap on a
+      // non-trap question can't reach the grader). These ride to the grader (§ grade/score)
+      // as calibration context for the difficulty-adjusted rubric.
+      data.reasoningSurface = normalizeReasoningSurface(data.reasoningSurface);
+      data.trap = data.reasoningSurface === "trap" ? capTrap(data.trap) : "";
+    }
     return NextResponse.json(data);
   } catch (e) {
     // Log the real cause server-side; return a generic message so upstream Groq
