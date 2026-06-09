@@ -160,6 +160,17 @@ describe("POST /api/grade — input validation (no network)", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects an oversized request body with 413 before any Groq call (memory-DoS guard)", async () => {
+    const failFetch = vi.fn(() => { throw new Error("must not call Groq on an oversized body"); });
+    vi.stubGlobal("fetch", failFetch);
+    // A JSON body larger than the 10 MB image-route ceiling.
+    const huge = JSON.stringify({ kind: "diagnostic", subject: "math", question: "Q", reasoning: "z".repeat(10_000_001) });
+    const res = await POST(req(huge));
+    expect(res.status).toBe(413);
+    expect((await res.json()).error).toMatch(/too large/i);
+    expect(failFetch).not.toHaveBeenCalled();
+  });
+
   it("rejects a missing subject/question with 400", async () => {
     const res = await POST(req({ kind: "diagnostic" }));
     expect(res.status).toBe(400);

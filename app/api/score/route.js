@@ -46,7 +46,7 @@ import { normalizeTopic } from "@/lib/taxonomy";
 import { diagnosticSurfaceFor } from "@/lib/diagnosticBank";
 import { preGradeDock } from "@/lib/preGrade";
 import { checkRateLimit, clientKey } from "@/lib/rateLimit";
-import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
+import { isCrossSiteRequest, isWrongContentType, readJsonLimited, MAX_BODY_BYTES_IMAGE } from "@/lib/requestGuard";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireUser } from "@/lib/adminAuth";
 import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
@@ -161,8 +161,11 @@ export async function POST(req) {
 
   let body;
   try {
-    body = await req.json();
-  } catch {
+    body = await readJsonLimited(req, MAX_BODY_BYTES_IMAGE);
+  } catch (e) {
+    if (e && e.code === "BODY_TOO_LARGE") {
+      return NextResponse.json({ error: "Request body is too large." }, { status: 413 });
+    }
     return NextResponse.json({ error: "Request body must be valid JSON." }, { status: 400 });
   }
 
@@ -277,15 +280,15 @@ async function handlePractice(req, body) {
     //    Skip the dock when a photo is attached — preGradeDock only inspects TEXT, so an
     //    image-only answer (worked notes in the photo, empty text box) is a substantive
     //    submission that must reach the vision grader, not be docked to a non-attempt.
-    const dock = img.image ? null : preGradeDock(reasoning);
+    const dock = img.image ? null : preGradeDock(capText(reasoning)); // cap before the dock (bounded regex/Set work)
     const data = dock
       ? dock
       : await gradeOne({
           system: PRACTICE_GRADE_SYS,
           user:
             `Subject: ${subject}\n` +
-            `Question: ${safeQuestion}\n` +
-            `Concept being probed: ${safeConcept}\n` +
+            `Question:\n"""${safeQuestion}"""\n` +
+            `Concept being probed:\n"""${safeConcept}"""\n` +
             `Question difficulty band: ${safeDifficulty}\n` +
             (surfaceCtx ? surfaceCtx + "\n" : "") +
             `Learner's current level: ${prevScore}/100\n\n` +
@@ -492,7 +495,7 @@ async function handleDiagnostic(req, body) {
       // above), so a blank / "idk" / off-topic diagnostic answer is graded low with no
       // LLM call, just like practice. Skip the dock when a photo is attached — an
       // image-only answer must reach the vision grader (preGradeDock only sees text).
-      dock: img.image ? null : preGradeDock(a.reasoning),
+      dock: img.image ? null : preGradeDock(capText(a.reasoning)), // cap before the dock (bounded regex/Set work)
       image: img.image,
     });
   }
@@ -534,7 +537,7 @@ async function handleDiagnostic(req, body) {
               `Subject: ${it.subject}\n` +
               `Question difficulty band: ${it.difficulty}\n` +
               (it.surfaceCtx ? it.surfaceCtx + "\n" : "") +
-              `Question: ${it.question}\n\n` +
+              `Question:\n"""${it.question}"""\n\n` +
               `Learner's reasoning:\n"""${it.reasoning}"""`,
             image: it.image,
             maxTokens: 1800, // room for the grader's solve block + 9-axis rubric + typed errors

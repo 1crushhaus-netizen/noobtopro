@@ -5,7 +5,7 @@ import { topicSlugsFor, normalizeTopic } from "@/lib/taxonomy";
 import { pickVariety, varietyDirectiveText, sanitizeRecentQuestions, avoidListText } from "@/lib/questionVariety";
 import { normalizeReasoningSurface, capTrap } from "@/lib/gradeInput";
 import { checkRateLimit, clientKey } from "@/lib/rateLimit";
-import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
+import { isCrossSiteRequest, isWrongContentType, readJsonLimited, MAX_BODY_BYTES_TEXT } from "@/lib/requestGuard";
 import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
 import { buildDiagnostic } from "@/lib/diagnosticBank";
 
@@ -31,8 +31,11 @@ export async function POST(req) {
 
   let body;
   try {
-    body = await req.json();
-  } catch {
+    body = await readJsonLimited(req, MAX_BODY_BYTES_TEXT);
+  } catch (e) {
+    if (e && e.code === "BODY_TOO_LARGE") {
+      return NextResponse.json({ error: "Request body is too large." }, { status: 413 });
+    }
     return NextResponse.json({ error: "Request body must be valid JSON." }, { status: 400 });
   }
 

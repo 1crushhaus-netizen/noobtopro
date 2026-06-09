@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { groqJSON, LEARN_SYS } from "@/lib/groq";
 import { ORDER } from "@/lib/scoring";
 import { checkRateLimit, clientKey } from "@/lib/rateLimit";
-import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
+import { isCrossSiteRequest, isWrongContentType, readJsonLimited, MAX_BODY_BYTES_TEXT } from "@/lib/requestGuard";
 import { getSupabaseAdmin, conceptKey } from "@/lib/supabaseAdmin";
 import { normalizeTopic, topicSlugsFor } from "@/lib/taxonomy";
 import { isConceptSafe } from "@/lib/contentSafety";
@@ -82,8 +82,11 @@ export async function POST(req) {
 
   let body;
   try {
-    body = await req.json();
-  } catch {
+    body = await readJsonLimited(req, MAX_BODY_BYTES_TEXT);
+  } catch (e) {
+    if (e && e.code === "BODY_TOO_LARGE") {
+      return NextResponse.json({ error: "Request body is too large." }, { status: 413 });
+    }
     return NextResponse.json({ error: "Request body must be valid JSON." }, { status: 400 });
   }
 
