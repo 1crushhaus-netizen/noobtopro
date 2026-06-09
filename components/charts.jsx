@@ -34,7 +34,7 @@ export function LineChart({ values, yMax = 300, color = SUBJECTS.math.color }) {
       {grid.map((g, i) => (
         <g key={i}>
           <line x1={padL} x2={W - padR} y1={y(g)} y2={y(g)} stroke="rgba(255,255,255,.07)" strokeWidth="1" />
-          <text x={padL - 8} y={y(g)} dominantBaseline="central" textAnchor="end" fill="var(--muted)" style={{ fontFamily: "var(--mono)", fontSize: 11 }}>
+          <text x={padL - 8} y={y(g)} dominantBaseline="central" textAnchor="end" fill="var(--muted)" style={{ fontFamily: "var(--mono)", fontSize: 13 }}>
             {Math.round(g)}
           </text>
         </g>
@@ -79,10 +79,10 @@ export function BarChart({ items }) {
         return (
           <g key={i}>
             <rect x={cx - bw / 2} y={top} width={bw} height={h} rx="3" fill={fill} opacity="0.9" />
-            <text x={cx} y={d.value >= 0 ? top - 6 : top + h + 13} textAnchor="middle" fill={fill} style={{ fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700 }}>
+            <text x={cx} y={d.value >= 0 ? top - 6 : top + h + 13} textAnchor="middle" fill={fill} style={{ fontFamily: "var(--mono)", fontSize: 13, fontWeight: 700 }}>
               {d.value > 0 ? "+" : ""}{d.value}
             </text>
-            <text x={cx} y={H - 8} textAnchor="middle" fill="var(--muted)" style={{ fontFamily: "var(--mono)", fontSize: 11 }}>
+            <text x={cx} y={H - 8} textAnchor="middle" fill="var(--muted)" style={{ fontFamily: "var(--mono)", fontSize: 13 }}>
               {d.glyph}
             </text>
           </g>
@@ -160,7 +160,7 @@ export function RadarChart({ subjects }) {
             <line x1={cx} y1={cy} x2={ex} y2={ey} stroke="rgba(255,255,255,.10)" strokeWidth="1" />
             {/* Abbreviated spoke label (full names live in the breakdown panel + the
                 accessible text summary below), so 9 axes stay legible. */}
-            <text x={lx} y={ly + dy} textAnchor={anchor} dominantBaseline="central" fill="var(--muted)" style={{ fontFamily: "var(--ui)", fontSize: 12, fontWeight: 500 }}>
+            <text x={lx} y={ly + dy} textAnchor={anchor} dominantBaseline="central" fill="var(--muted)" style={{ fontFamily: "var(--ui)", fontSize: 16, fontWeight: 500 }}>
               {RUBRIC_SHORT[k] || RUBRIC_LABELS[k]}
             </text>
           </g>
