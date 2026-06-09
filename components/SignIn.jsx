@@ -1,19 +1,12 @@
 "use client";
 
 import React from "react";
+import Icon from "./Icon";
 
-/* Provider glyphs (inline, no deps). */
+/* Provider brand marks (inline, no deps). The Google mark is the shared Icon (single
+   source); GitHub/Discord live here since they're only used on this provider menu. */
 function ProviderGlyph({ id, size = 18 }) {
-  if (id === "google") {
-    return (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-        <path d="M21.8 10.04H12v3.96h5.62c-.25 1.34-1 2.48-2.13 3.24v2.69h3.45c2.02-1.86 3.18-4.6 3.18-7.85 0-.73-.07-1.43-.2-2.08z" />
-        <path d="M12 22c2.7 0 4.96-.9 6.62-2.43l-3.45-2.69c-.96.64-2.18 1.02-3.17 1.02-2.6 0-4.8-1.76-5.59-4.12H2.84v2.78A10 10 0 0 0 12 22z" />
-        <path d="M6.41 13.78a6 6 0 0 1 0-3.56V7.44H2.84a10 10 0 0 0 0 9.12z" />
-        <path d="M12 5.98c1.47 0 2.79.51 3.83 1.5l2.86-2.86A9.6 9.6 0 0 0 12 2 10 10 0 0 0 2.84 7.44l3.57 2.78C7.2 7.74 9.4 5.98 12 5.98z" />
-      </svg>
-    );
-  }
+  if (id === "google") return <Icon name="google" size={size} />;
   if (id === "github") {
     return (
       <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -38,7 +31,7 @@ function ProviderGlyph({ id, size = 18 }) {
 export default function SignIn({ providers, onProvider, onBack }) {
   return (
     <div className="fade-up np-signinscreen">
-      <button className="np-ghost" style={{ marginBottom: 14 }} onClick={onBack}>← Back</button>
+      <button className="np-ghost" style={{ marginBottom: 14 }} onClick={onBack}><Icon name="back" size={14} /> Back</button>
       <h2 className="np-h2">Save your progress</h2>
       <p className="np-lede" style={{ marginBottom: 22 }}>
         Sign in to keep your scores across devices. Identity is handled by your provider — noobtopro never

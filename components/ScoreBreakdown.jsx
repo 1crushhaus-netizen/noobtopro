@@ -56,7 +56,7 @@ function Seg({ value, color }) {
       {Array.from({ length: RUBRIC_MAX }, (_, i) => (
         <div
           key={i}
-          style={{ height: 6, flex: 1, minWidth: 8, borderRadius: 2, background: i < value ? color : "rgba(255,255,255,.09)" }}
+          style={{ height: 6, flex: 1, minWidth: 8, borderRadius: 2, background: i < value ? color : "var(--tint-2)" }}
         />
       ))}
     </div>

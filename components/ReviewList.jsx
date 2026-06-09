@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { SUBJECTS } from "@/lib/scoring";
 import ScoreBreakdown, { ErrorList } from "@/components/ScoreBreakdown";
+import { SubjectGlyph, deltaColor } from "@/components/ui";
 
 // "Review your answers" — lazily loads the learner's past graded answers (signed-in:
 // their own attempt_reviews via RLS; guest: from local history) and renders each as an
@@ -58,10 +59,10 @@ export default function ReviewList({ loadReviews, onPractice, onLearn }) {
           return (
             <details key={i} className="np-card" style={{ marginBottom: 10 }}>
               <summary style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                <span style={{ color, fontFamily: "var(--mono)" }}>{SUBJECTS[rv.subject]?.glyph || "·"}</span>
+                <SubjectGlyph subject={rv.subject} />
                 <span style={{ fontFamily: "var(--mono)", fontWeight: 700 }}>{rv.reasoningScore ?? 0}<span style={{ color: "var(--muted)" }}>/100</span></span>
                 {typeof rv.delta === "number" && rv.delta !== 0 && (
-                  <span style={{ color: rv.delta > 0 ? "var(--phys)" : "var(--chem)", fontFamily: "var(--mono)", fontWeight: 700 }}>
+                  <span style={{ color: deltaColor(rv.delta), fontFamily: "var(--mono)", fontWeight: 700 }}>
                     {rv.delta > 0 ? "+" : ""}{rv.delta}
                   </span>
                 )}

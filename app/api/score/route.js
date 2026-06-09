@@ -43,13 +43,14 @@ import {
   REPEAT_WINDOW_K,
 } from "@/lib/scoring";
 import { normalizeTopic } from "@/lib/taxonomy";
+import { diagnosticSurfaceFor } from "@/lib/diagnosticBank";
 import { preGradeDock } from "@/lib/preGrade";
 import { checkRateLimit, clientKey } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType, readJsonLimited, MAX_BODY_BYTES_IMAGE } from "@/lib/requestGuard";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireUser } from "@/lib/adminAuth";
 import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
-import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, normalizeFeedbackList, capSolution, normalizeErrors, normalizeSolve } from "@/lib/gradeInput";
+import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, normalizeFeedbackList, capSolution, normalizeErrors, normalizeSolve, reasoningSurfaceContext } from "@/lib/gradeInput";
 
 export const dynamic = "force-dynamic";
 
@@ -195,7 +196,7 @@ async function handlePractice(req, body) {
   const sb = getSupabaseAdmin();
   if (!sb) return NextResponse.json({ error: "Scoring is temporarily unavailable." }, { status: 503 });
 
-  const { subject, question, targetConcept, difficulty, reasoning, image } = body || {};
+  const { subject, question, targetConcept, difficulty, reasoning, image, reasoningSurface, trap } = body || {};
   if (typeof subject !== "string" || typeof question !== "string") {
     return NextResponse.json({ error: "subject and question are required." }, { status: 400 });
   }
@@ -207,13 +208,15 @@ async function handlePractice(req, body) {
   const safeQuestion = capText(question);
   const safeConcept = capText(targetConcept) || "(unspecified)";
   const safeDifficulty = normalizeDifficulty(difficulty);
+  // Reasoning-surface calibration context for the grader ("" when absent).
+  const surfaceCtx = reasoningSurfaceContext(reasoningSurface, trap);
 
   reportInjection({
     req,
     route: "/api/score",
     subject,
     concept: safeConcept !== "(unspecified)" ? safeConcept : null,
-    text: `${safeQuestion}\n${work}\n${safeConcept}`,
+    text: `${safeQuestion}\n${work}\n${safeConcept}\n${surfaceCtx}`,
   });
 
   const img = normalizeImage(image);
@@ -287,6 +290,7 @@ async function handlePractice(req, body) {
             `Question:\n"""${safeQuestion}"""\n` +
             `Concept being probed:\n"""${safeConcept}"""\n` +
             `Question difficulty band: ${safeDifficulty}\n` +
+            (surfaceCtx ? surfaceCtx + "\n" : "") +
             `Learner's current level: ${prevScore}/100\n\n` +
             `Learner's reasoning:\n"""${work}"""`,
           image: img.image,
@@ -474,10 +478,15 @@ async function handleDiagnostic(req, body) {
     const img = normalizeImage(a.image);
     if (!img.ok) return NextResponse.json({ error: img.error }, { status: 400 });
     seen.add(key);
+    // Reasoning-surface context DERIVED SERVER-SIDE from the curated bank by (subject,
+    // difficulty) — NOT trusted from the request body — so a crafted answer can't spoof the
+    // grader's calibration. "" when the slot has no surface.
+    const bankSurface = diagnosticSurfaceFor(subject, difficulty);
     items.push({
       subject,
       difficulty,
       question: capText(a.question),
+      surfaceCtx: reasoningSurfaceContext(bankSurface.reasoningSurface, bankSurface.trap),
       reasoning:
         typeof a.reasoning === "string" && a.reasoning.trim()
           ? capText(a.reasoning.trim())
@@ -527,6 +536,7 @@ async function handleDiagnostic(req, body) {
             user:
               `Subject: ${it.subject}\n` +
               `Question difficulty band: ${it.difficulty}\n` +
+              (it.surfaceCtx ? it.surfaceCtx + "\n" : "") +
               `Question:\n"""${it.question}"""\n\n` +
               `Learner's reasoning:\n"""${it.reasoning}"""`,
             image: it.image,

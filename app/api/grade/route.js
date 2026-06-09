@@ -6,7 +6,7 @@ import { checkRateLimit, clientKey } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType, readJsonLimited, MAX_BODY_BYTES_IMAGE } from "@/lib/requestGuard";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
-import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, normalizeFeedbackList, capSolution, normalizeErrors, normalizeSolve } from "@/lib/gradeInput";
+import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, normalizeFeedbackList, capSolution, normalizeErrors, normalizeSolve, reasoningSurfaceContext } from "@/lib/gradeInput";
 
 export const dynamic = "force-dynamic";
 
@@ -59,13 +59,16 @@ export async function POST(req) {
     return NextResponse.json({ error: "Request body must be valid JSON." }, { status: 400 });
   }
 
-  const { kind, subject, question, targetConcept, score, reasoning, image, difficulty } = body || {};
+  const { kind, subject, question, targetConcept, score, reasoning, image, difficulty, reasoningSurface, trap } = body || {};
   // typeof guard: a non-string `reasoning` (object/number) would throw on .trim()
   // before validation and 500 the route.
   const work = typeof reasoning === "string" && reasoning.trim() ? capText(reasoning.trim()) : "(no written reasoning provided)";
   const safeQuestion = capText(question);
   const safeConcept = capText(targetConcept) || "(unspecified)";
   const safeDifficulty = normalizeDifficulty(difficulty);
+  // Reasoning-surface context (multi-step | branch | trap + the naive wrong path) — what
+  // the question is designed to test; threaded to the grader as rubric calibration. "" when absent.
+  const surfaceCtx = reasoningSurfaceContext(reasoningSurface, trap);
 
   if (kind !== "diagnostic" && kind !== "practice") {
     return NextResponse.json(
@@ -91,7 +94,7 @@ export async function POST(req) {
     route: "/api/grade",
     subject,
     concept: safeConcept !== "(unspecified)" ? safeConcept : null,
-    text: `${safeQuestion}\n${work}\n${safeConcept}`,
+    text: `${safeQuestion}\n${work}\n${safeConcept}\n${surfaceCtx}`,
   });
 
   const img = normalizeImage(image);
@@ -137,6 +140,7 @@ export async function POST(req) {
         user:
           `Subject: ${subject}\n` +
           `Question difficulty band: ${safeDifficulty}\n` +
+          (surfaceCtx ? surfaceCtx + "\n" : "") +
           `Question:\n"""${safeQuestion}"""\n\n` +
           `Learner's reasoning:\n"""${work}"""`,
         image: img.image,
@@ -185,6 +189,7 @@ export async function POST(req) {
         `Question:\n"""${safeQuestion}"""\n` +
         `Concept being probed:\n"""${safeConcept}"""\n` +
         `Question difficulty band: ${safeDifficulty}\n` +
+        (surfaceCtx ? surfaceCtx + "\n" : "") +
         `Learner's current level: ${safeScore}/100\n\n` +
         `Learner's reasoning:\n"""${work}"""`,
       image: img.image,

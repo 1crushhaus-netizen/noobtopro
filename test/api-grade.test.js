@@ -379,6 +379,29 @@ describe("POST /api/grade — difficulty band threading (practice)", () => {
     await POST(req(practiceBody({ difficulty: 123 })));
     expect(sentUserMessage(fetchMock)).toMatch(/difficulty band: \(unspecified\)/i);
   });
+
+  it("threads a trap reasoning surface + the naive wrong path into the grader prompt", async () => {
+    const fetchMock = mockGroqReturning(gradePayload);
+    await POST(req(practiceBody({ reasoningSurface: "trap", trap: "reporting weight as the net force" })));
+    const msg = sentUserMessage(fetchMock);
+    expect(msg).toMatch(/Reasoning surface: trap/);
+    expect(msg).toContain("Common wrong path (trap): reporting weight as the net force");
+  });
+
+  it("threads a non-trap surface with NO trap line, and drops a stray trap", async () => {
+    const fetchMock = mockGroqReturning(gradePayload);
+    await POST(req(practiceBody({ reasoningSurface: "branch", trap: "should not appear" })));
+    const msg = sentUserMessage(fetchMock);
+    expect(msg).toMatch(/Reasoning surface: branch/);
+    expect(msg).not.toContain("Common wrong path");
+    expect(msg).not.toContain("should not appear");
+  });
+
+  it("omits the surface line entirely for an off-list/absent surface", async () => {
+    const fetchMock = mockGroqReturning(gradePayload);
+    await POST(req(practiceBody({ reasoningSurface: "atomic", trap: "x" })));
+    expect(sentUserMessage(fetchMock)).not.toMatch(/Reasoning surface:/);
+  });
 });
 
 describe("POST /api/grade — difficulty band threading (diagnostic)", () => {

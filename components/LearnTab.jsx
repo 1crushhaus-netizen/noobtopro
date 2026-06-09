@@ -4,6 +4,8 @@ import React, { useState, useEffect, useRef } from "react";
 import { SUBJECTS, ORDER } from "@/lib/scoring";
 import { TOPICS, topicLabel } from "@/lib/taxonomy";
 import { browsePublicConcepts, reportConcept } from "@/lib/catalog";
+import Icon from "@/components/Icon";
+import { SubjectGlyph } from "@/components/ui";
 
 function Bullets({ items, color, label }) {
   return (
@@ -61,14 +63,14 @@ function GuideView({ active, content, busy, question, regenerating, onPracticeQu
   return (
     <div className="fade-up">
       <div className="np-qmeta" style={{ marginBottom: 12 }}>
-        <span style={{ color: activeColor }}>{SUBJECTS[active.subject] && SUBJECTS[active.subject].glyph}</span>
-        <span style={{ fontFamily: "var(--mono)", letterSpacing: 1 }}>
+        <SubjectGlyph subject={active.subject} />
+        <span className="np-metaline">
           {SUBJECTS[active.subject] && SUBJECTS[active.subject].label.toUpperCase()} · CONCEPT
         </span>
         <span className="np-topic">{content.concept}</span>
         {canReport && (
           <button className="np-ghost" style={{ marginLeft: "auto" }} onClick={() => setReportOpen((v) => !v)}>
-            ⚑ Report
+            <Icon name="flag" size={14} /> Report
           </button>
         )}
       </div>
@@ -119,7 +121,7 @@ function GuideView({ active, content, busy, question, regenerating, onPracticeQu
       )}
 
       {content.pitfalls && content.pitfalls.length > 0 && (
-        <div className="np-card np-note" style={{ borderColor: "rgba(255,126,116,.35)" }}>
+        <div className="np-card np-card--accent np-lesson" style={{ "--accent": "var(--danger-border)" }}>
           <div className="np-cardicon" style={{ color: "var(--chem)" }}>Common pitfalls</div>
           <Bullets items={content.pitfalls} color="var(--chem)" label="Common pitfalls" />
         </div>
@@ -133,13 +135,13 @@ function GuideView({ active, content, busy, question, regenerating, onPracticeQu
       )}
 
       {question && question.question ? (
-        <div className="np-card np-question" style={{ borderColor: activeColor }}>
+        <div className="np-card np-card--accent np-question" style={{ "--accent": activeColor }}>
           <div className="np-cardicon" style={{ color: activeColor, marginBottom: 8 }}>
             Try this problem{question.difficulty ? ` · ${String(question.difficulty).toUpperCase()}` : ""}
           </div>
           <div style={{ fontSize: 16, lineHeight: 1.5 }}>{question.question}</div>
           <div className="np-feedactions" style={{ marginTop: 16 }}>
-            <button className="np-btn np-primary" style={{ borderColor: activeColor }} onClick={() => onPracticeQuestion && onPracticeQuestion(active.subject, question)}>
+            <button className="np-btn np-primary" onClick={() => onPracticeQuestion && onPracticeQuestion(active.subject, question)}>
               Practice this problem
             </button>
             <button className="np-ghost" onClick={() => onRegenerate && onRegenerate()} disabled={regenerating}>
@@ -149,7 +151,7 @@ function GuideView({ active, content, busy, question, regenerating, onPracticeQu
         </div>
       ) : (
         <div className="np-feedactions">
-          <button className="np-btn np-primary" style={{ borderColor: activeColor }} onClick={() => onPractice && onPractice(active.subject)}>
+          <button className="np-btn np-primary" onClick={() => onPractice && onPractice(active.subject)}>
             Practice {SUBJECTS[active.subject] && SUBJECTS[active.subject].label}
           </button>
         </div>
@@ -175,7 +177,7 @@ function WeakConceptPicker({ scores, active, content, busy, error, question, reg
 
       {groups.length === 0 ? (
         <div className="np-card" style={{ textAlign: "center", padding: "32px 24px" }}>
-          <div className="np-h2" style={{ fontSize: 22 }}>No concepts to learn yet</div>
+          <div className="np-emptytitle">No concepts to learn yet</div>
           <p className="np-lede" style={{ margin: "8px auto 0" }}>
             Prove what you know or practice a subject — the concepts you're weak on will show up here.
           </p>
@@ -185,7 +187,7 @@ function WeakConceptPicker({ scores, active, content, busy, error, question, reg
           {groups.map((g) => (
             <div key={g.subject} className="np-learngroup">
               <div className="np-learngrouphead">
-                <span style={{ color: SUBJECTS[g.subject].color, fontFamily: "var(--mono)" }}>{SUBJECTS[g.subject].glyph}</span>
+                <SubjectGlyph subject={g.subject} />
                 <span>{SUBJECTS[g.subject].label}</span>
               </div>
               <div className="np-weaktags">
@@ -305,7 +307,7 @@ function ConceptHub({ scores, user, isAdmin, adminApi, active, content, busy, er
             {weakGroups.flatMap((g) =>
               g.concepts.map((c) => (
                 <button key={g.subject + "::" + c} type="button" className="np-concepttag" onClick={() => onSelect(g.subject, c)}>
-                  <span style={{ color: SUBJECTS[g.subject].color, fontFamily: "var(--mono)" }}>{SUBJECTS[g.subject].glyph}</span> {c}
+                  <SubjectGlyph subject={g.subject} /> {c}
                 </button>
               ))
             )}
@@ -324,7 +326,7 @@ function ConceptHub({ scores, user, isAdmin, adminApi, active, content, busy, er
               style={subjectFilter === k ? { borderColor: SUBJECTS[k].color, color: SUBJECTS[k].color } : { borderColor: SUBJECTS[k].color }}
               onClick={() => setSubjectFilter(k)}
             >
-              <span style={{ fontFamily: "var(--mono)" }}>{SUBJECTS[k].glyph}</span> {SUBJECTS[k].label}
+              <SubjectGlyph subject={k} /> {SUBJECTS[k].label}
             </button>
           ))}
         </div>
@@ -349,7 +351,7 @@ function ConceptHub({ scores, user, isAdmin, adminApi, active, content, busy, er
         <div className="np-card np-pulse" role="status" aria-live="polite" style={{ textAlign: "center", padding: "32px 24px" }}>Loading concepts…</div>
       ) : merged.length === 0 ? (
         <div className="np-card" style={{ textAlign: "center", padding: "32px 24px" }}>
-          <div className="np-h2" style={{ fontSize: 20 }}>No concepts found</div>
+          <div className="np-emptytitle">No concepts found</div>
           <p className="np-lede" style={{ margin: "8px auto 0" }}>{query ? "Try a different search." : "The catalog is still being curated — check back soon."}</p>
         </div>
       ) : (
@@ -361,7 +363,7 @@ function ConceptHub({ scores, user, isAdmin, adminApi, active, content, busy, er
             return (
               <div key={subj} className="np-learngroup">
                 <div className="np-learngrouphead">
-                  <span style={{ color: SUBJECTS[subj].color, fontFamily: "var(--mono)" }}>{SUBJECTS[subj].glyph}</span>
+                  <SubjectGlyph subject={subj} />
                   <span>{SUBJECTS[subj].label}</span>
                 </div>
                 {topicsForSubject.map((t) => {
