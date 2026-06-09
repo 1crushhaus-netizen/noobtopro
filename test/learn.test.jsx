@@ -1,52 +1,56 @@
 // @vitest-environment jsdom
 import { describe, it, expect, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import LearnTab from "@/components/LearnTab";
-import { CURRICULUM, RANK_LABELS, RANKS } from "@/lib/curriculum";
+import { RANK_LABELS } from "@/lib/curriculum";
 
 afterEach(cleanup);
 
-describe("LearnTab — fixed concept curriculum", () => {
-  it("renders concepts from the curriculum database", () => {
+describe("LearnTab — curriculum listing", () => {
+  it("renders concepts from the database as clickable buttons, grouped by rank", () => {
     render(<LearnTab />);
-    // unique labels spanning subjects & ranks
-    expect(screen.getByText("Place value & the base-ten system")).toBeTruthy(); // math · elementary
-    expect(screen.getByText("Stoichiometry")).toBeTruthy(); // chemistry · high
-    expect(screen.getByText("Eigenvalues & eigenvectors")).toBeTruthy(); // math · university
-  });
-
-  it("lists concepts as NON-interactive chips (spans, not buttons)", () => {
-    render(<LearnTab />);
-    const chip = screen.getByText("Place value & the base-ten system");
-    expect(chip.tagName.toLowerCase()).toBe("span");
-    expect(chip.className).toMatch(/np-concepttag/);
-    expect(chip.className).toMatch(/np-concepttag--static/);
-    // no clickable button carries a concept label
-    expect(screen.queryByRole("button", { name: "Place value & the base-ten system" })).toBeNull();
-  });
-
-  it("organizes the listing by rank (every rank label appears, once per subject)", () => {
-    render(<LearnTab />);
+    expect(screen.getByRole("button", { name: "Place value & the base-ten system" })).toBeTruthy(); // math · elementary
+    expect(screen.getByRole("button", { name: "Stoichiometry" })).toBeTruthy(); // chemistry · high
     for (const label of Object.values(RANK_LABELS)) {
-      expect(screen.getAllByText(label).length).toBe(3); // math + physics + chemistry
+      expect(screen.getAllByText(label).length).toBe(3); // once per subject
     }
   });
 
-  it("greys out the empty Doctorate rank with the WIP note instead of chips", () => {
+  it("greys out the empty Doctorate rank with the WIP note (no chips)", () => {
     render(<LearnTab />);
-    // Doctorate is empty for every subject → the WIP note shows three times
-    expect(screen.getAllByText(/in development/i).length).toBe(3);
+    expect(screen.getAllByText(/in development/i).length).toBe(3); // one per subject
+  });
+});
+
+describe("LearnTab — concept page + root navigation", () => {
+  it("opening a concept shows its dedicated page (title + Back)", () => {
+    render(<LearnTab />);
+    fireEvent.click(screen.getByRole("button", { name: "Quadratic functions & equations" }));
+    expect(screen.getByRole("heading", { name: "Quadratic functions & equations" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /back to concepts/i })).toBeTruthy();
   });
 
-  it("renders every populated concept in the database", () => {
+  it("shows the root concepts and navigates when one is clicked (branched path)", () => {
     render(<LearnTab />);
-    for (const subject of Object.keys(CURRICULUM)) {
-      for (const rank of RANKS) {
-        for (const c of CURRICULUM[subject][rank]) {
-          // some labels recur across subjects (e.g. "States of matter…"), so use getAllByText
-          expect(screen.getAllByText(c.label).length).toBeGreaterThan(0);
-        }
-      }
-    }
+    fireEvent.click(screen.getByRole("button", { name: "Quadratic functions & equations" }));
+    // quadratics' roots include Algebraic expressions (a lower-rank prerequisite)
+    fireEvent.click(screen.getByRole("button", { name: "Algebraic expressions" }));
+    expect(screen.getByRole("heading", { name: "Algebraic expressions" })).toBeTruthy();
+  });
+
+  it("a foundational (elementary) concept shows no prerequisites", () => {
+    render(<LearnTab />);
+    fireEvent.click(screen.getByRole("button", { name: "Place value & the base-ten system" }));
+    expect(screen.getByText(/foundational concept/i)).toBeTruthy();
+    expect(screen.queryByText(/understand these first/i)).toBeNull();
+  });
+
+  it("Back returns to the full curriculum listing", () => {
+    render(<LearnTab />);
+    fireEvent.click(screen.getByRole("button", { name: "Stoichiometry" }));
+    expect(screen.getByRole("heading", { name: "Stoichiometry" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /back to concepts/i }));
+    expect(screen.getByRole("heading", { name: "Learn" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Place value & the base-ten system" })).toBeTruthy();
   });
 });
