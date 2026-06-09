@@ -186,7 +186,7 @@ curriculum**: a human defines "Elementary math = these concepts, at these diffic
 - **Cost:** Option A is the largest single authoring task in the project (the curriculum is
   the product's backbone). Decision needed: who authors it, and at what concept granularity.
 
-### 11.2 What "concept mastery" means
+### 11.2 What "concept mastery" means — ✅ RESOLVED: sustained-quality flag (see §12.1)
 How is a concept marked mastered for a learner?
 - **Option A — per-concept mini-Glicko:** each concept gets its own rating; "mastered" =
   rating ≥ the rank's threshold. Most precise + gaming-resistant, but heavy (many concepts ×
@@ -230,3 +230,67 @@ temp 0, anti-gaming rules, final-answer-as-diagnostic), optional hardening: dete
 symbolic checks where the domain allows (numeric answers + units), multi-sample grader
 consensus, and tight per-rank rubric anchors. Decision: how far to invest here, given the
 whole anti-gaming guarantee leans on grader robustness.
+
+---
+
+## 12. Learn tab — concept browser, mastery coloring & concept pages
+
+The Learn tab is the front-end of the curriculum (§7). It is built in phases:
+
+- **Phase A — SHIPPED:** the Learn tab is a static browse of the fixed curriculum
+  (`lib/curriculum.js`), organized Subject → Rank, with concepts as non-interactive chips;
+  Doctorate greyed (WIP). Generated/auto-grown concepts removed. *(Done.)*
+- **Phases B–D below** are specified here with the owner's decisions baked in.
+
+### 12.1 Mastery coloring (Phase B) — ✅ resolves §11.2
+Each concept chip is colored by the learner's per-concept state:
+
+| Color | Meaning |
+|---|---|
+| 🟢 green | clear understanding |
+| 🟡 yellow | practiced but struggling / mixed |
+| 🔴 red | attempted and failed, or skipped — "study the foundations first" |
+| ⚪ grey | never covered |
+
+- **Mastery model = sustained-quality flag** (the resolution of §11.2): a concept turns green
+  after ≥ X quality over ≥ N distinct attempts; yellow on mixed/struggling; red on failed or
+  skipped; grey until touched. Lightweight, explainable, gaming-resistant. *(Not a per-concept
+  Glicko.)*
+- **Coloring is direct-only — no propagation.** The initial diagnostic colors only the concepts
+  it actually tested; everything else stays grey until practiced. (Chosen over rank-based
+  inference and graph propagation.)
+- **Red is a warning, not a gate.** A red concept stays practiceable but shows a strong warning
+  + a "start with these root concepts first" nudge (the roots come from §12.2).
+- **Storage:** per-concept mastery is stored per user — `localStorage` for guests, a per-user
+  table for signed-in users. **Depends on:** attempts being *tagged to a curriculum concept key*
+  (today the diagnostic is 9 untagged questions and practice is per-subject — this tagging is
+  the foundational prerequisite for Phase B).
+
+### 12.2 Concept page + prerequisite graph (Phase C)
+- **Prerequisite graph = hand-authored** (the owner's choice over AI-proposed). Each concept
+  gains a `roots: [conceptKey, …]` field in `lib/curriculum.js`: its **direct (1–4), most-relevant,
+  LOWER-RANK, same-subject** prerequisites. Elementary concepts have `roots: []`. The graph is a
+  DAG by construction (edges only point down in rank → no cycles). *Defaults (adjustable):
+  lower-rank only and within-subject; cross-subject links (e.g. calculus-based physics → math)
+  are a noted future enhancement.*
+- **Concept page:** opening a concept shows a dedicated page — title = the concept, and beneath
+  it the **root concepts as clickable buttons** that navigate to their pages. This makes the
+  learning path explicit and branched. The same graph powers the red-concept "start with roots"
+  nudge in §12.1.
+
+### 12.3 Concept page content (Phase D — separate later project)
+The page body (explicitly deferred by the owner to its own project):
+- a section explaining the concept **with a solved example problem**;
+- a section of **self-questions** to promote thinking;
+- an on-request **AI-generated problem targeting this concept** — this is the per-concept
+  *calibrated drill* (difficulty tied to the learner's mastery of this concept, per §6).
+The explanation/example/self-questions are **curated, static** content (authored once); only the
+targeted problem is generated at runtime.
+
+### 12.4 Build order
+1. **Prerequisite graph** (`roots` in `lib/curriculum.js`) — self-contained authoring; unblocks
+   §12.2 navigation + the §12.1 red nudge. *(In progress.)*
+2. **Concept-tagged attempts + per-concept mastery storage** — the foundation for §12.1 coloring.
+3. **Coloring (Phase B).**
+4. **Concept-page shell + root navigation (Phase C).**
+5. **Page content + AI drill (Phase D)** — later project.
