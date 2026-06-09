@@ -360,6 +360,10 @@ body {
 }
 .np-concepttag:hover { border-color: var(--line-strong); background: var(--tint-2); }
 .np-concepttag.active { background: var(--tint-2); font-weight: 600; }
+/* Display-only curriculum chip (the Learn tab lists the fixed concept database; these
+   are NOT clickable/generated) — keep the chip look but drop the interactive cues. */
+.np-concepttag--static { cursor: default; }
+.np-concepttag--static:hover { border-color: var(--line); background: var(--tint-1); }
 
 .np-learnlist { list-style: none; padding: 0; margin: 4px 0 0; display: flex; flex-direction: column; gap: 9px; }
 .np-learnlist li {
