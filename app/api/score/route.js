@@ -38,7 +38,7 @@ import {
   scoreFromRubric,
   explainRankMove,
   updateAxisRatings,
-  diagnosticSeedGlicko,
+  diagnosticSeedFromReasoning,
   repeatFactorFromRecent,
   itemDifficultyDelta,
   REPEAT_WINDOW_K,
@@ -734,10 +734,11 @@ async function handleDiagnostic(req, body) {
     for (const s of ORDER) {
       const subjectQs = results.filter((r) => r.subject === s);
       if (subjectQs.length === 0) continue;
-      // Seed the per-axis Glicko state by running each tier's per-axis rubric through the
-      // engine at its band difficulty (3 difficulty bands place the profile); the subject
-      // score + radar are derived from it — one unified, difficulty-aware baseline.
-      const seed = diagnosticSeedGlicko(subjectQs);
+      // Seed the per-axis Glicko state by ANCHORING the aggregate on the difficulty-weighted
+      // reasoning score (full 0–100 placement range; a blank/idk test lands at the dock floor,
+      // a flawless one ≈ 100) with the radar shape from the per-tier rubrics, at full RD so
+      // practice then refines it — one unified, difficulty-aware baseline.
+      const seed = diagnosticSeedFromReasoning(subjectQs);
       const weakConcepts = Array.from(
         new Set(subjectQs.flatMap((r) => r.weakConcepts).filter((c) => typeof c === "string" && c.trim()))
       ).slice(0, 8);
