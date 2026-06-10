@@ -22,6 +22,7 @@ vi.mock("@/lib/supabaseAdmin", () => ({ getSupabaseAdmin: () => storage.getAdmin
 vi.mock("@/lib/abuseDetection", () => ({ reportInjection: vi.fn(), reportRateLimit: vi.fn() }));
 
 import { POST } from "@/app/api/score/route";
+import { signQuestion } from "@/lib/questionToken";
 import { _resetRateLimits } from "@/lib/rateLimit";
 import { updateAxisRatings, scoreFromRubric, defaultDifficultyForBand, normalizeRubric } from "@/lib/scoring";
 import { diagnosticSurfaceFor } from "@/lib/diagnosticBank";
@@ -35,6 +36,14 @@ const mkRubric = (v, over = {}) => ({
 // Substantive, multi-word reasoning that the deterministic pre-grade dock lets through
 // to the real grader (so the Groq mock IS exercised). Short/"idk" answers are docked.
 const REASONING = "I set up the derivative and applied the chain rule step by step to find the slope.";
+
+// Sign a server-issued question token the way /api/generate does — the REAL lib
+// (QUESTION_TOKEN_SECRET is set in beforeEach), so practice tests exercise the exact
+// verify path the route runs (audit P1-1: the route derives every rating-relevant
+// field from the token, never the request body).
+function tok(q = {}) {
+  return signQuestion({ subject: "math", question: "Q", difficulty: "intermediate", ...q });
+}
 
 // Build a POST Request the route handler can consume. `authHeader:true` attaches a
 // bearer token (the route only checks the header's presence; requireUser is mocked).
@@ -131,6 +140,8 @@ function expectedPracticeScore({ prevScore, grade, band = "intermediate", itemDi
 
 beforeEach(() => {
   process.env.GROQ_API_KEY = "test-key";
+  process.env.QUESTION_TOKEN_SECRET = "test-token-secret";
+  delete process.env.GLOBAL_GROQ_BUDGET_PER_MIN;
   _resetRateLimits();
   auth.requireUser.mockReset();
   storage.getAdmin.mockReset();
@@ -149,7 +160,7 @@ describe("POST /api/score — request guard", () => {
     const r = new Request("http://test.local/api/score", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Sec-Fetch-Site": "cross-site" },
-      body: JSON.stringify({ kind: "practice", subject: "math", question: "Q", reasoning: REASONING }),
+      body: JSON.stringify({ kind: "practice", token: tok(), reasoning: REASONING }),
     });
     const res = await POST(r);
     expect(res.status).toBe(403);
@@ -177,7 +188,7 @@ describe("POST /api/score practice — authentication", () => {
     auth.requireUser.mockResolvedValue({ error: "Authentication required.", status: 401 });
     const failFetch = vi.fn(() => { throw new Error("must not call Groq"); });
     vi.stubGlobal("fetch", failFetch);
-    const res = await POST(req({ kind: "practice", subject: "math", question: "Q", reasoning: REASONING }, { authHeader: true }));
+    const res = await POST(req({ kind: "practice", token: tok(), reasoning: REASONING }, { authHeader: true }));
     expect(res.status).toBe(401);
     expect(failFetch).not.toHaveBeenCalled();
   });
@@ -185,7 +196,7 @@ describe("POST /api/score practice — authentication", () => {
   it("returns 503 when the service-role client is unavailable (cannot persist)", async () => {
     auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
     storage.getAdmin.mockReturnValue(null);
-    const res = await POST(req({ kind: "practice", subject: "math", question: "Q", reasoning: REASONING }, { authHeader: true }));
+    const res = await POST(req({ kind: "practice", token: tok(), reasoning: REASONING }, { authHeader: true }));
     expect(res.status).toBe(503);
   });
 });
@@ -198,7 +209,7 @@ describe("POST /api/score practice — server-authoritative Glicko-2 score", () 
     mockGroq(PRACTICE_GRADE);
 
     const res = await POST(req(
-      { kind: "practice", subject: "math", question: "Q", targetConcept: "chain rule", difficulty: "intermediate", topicSlug: "calculus_analysis", reasoning: REASONING },
+      { kind: "practice", token: tok({ targetConcept: "chain rule", topicSlug: "calculus_analysis" }), reasoning: REASONING },
       { authHeader: true }
     ));
     expect(res.status).toBe(200);
@@ -245,7 +256,7 @@ describe("POST /api/score practice — server-authoritative Glicko-2 score", () 
     mockGroq(PRACTICE_GRADE);
 
     const res = await POST(req(
-      { kind: "practice", subject: "math", question: "Q", difficulty: "intermediate", reasoning: REASONING, score: 999, newScore: 999, reasoningScore: 999 },
+      { kind: "practice", token: tok(), reasoning: REASONING, score: 999, newScore: 999, reasoningScore: 999 },
       { authHeader: true }
     ));
     const j = await res.json();
@@ -267,7 +278,7 @@ describe("POST /api/score practice — server-authoritative Glicko-2 score", () 
     storage.getAdmin.mockReturnValue(sb);
     mockGroq(PRACTICE_GRADE);
     const res = await POST(req(
-      { kind: "practice", subject: "math", question: "Q", difficulty: "intermediate", topicSlug: "calculus_analysis", reasoning: REASONING },
+      { kind: "practice", token: tok({ topicSlug: "calculus_analysis" }), reasoning: REASONING },
       { authHeader: true }
     ));
     const j = await res.json();
@@ -282,7 +293,7 @@ describe("POST /api/score practice — server-authoritative Glicko-2 score", () 
     const failFetch = vi.fn(() => { throw new Error("must not call Groq on a docked answer"); });
     vi.stubGlobal("fetch", failFetch);
     const res = await POST(req(
-      { kind: "practice", subject: "math", question: "Q", difficulty: "intermediate", reasoning: "idk" },
+      { kind: "practice", token: tok(), reasoning: "idk" },
       { authHeader: true }
     ));
     expect(res.status).toBe(200);
@@ -309,7 +320,7 @@ describe("POST /api/score practice — server-authoritative Glicko-2 score", () 
       workedSolution: "Step 1 … Final answer: 7.",
     });
     const res = await POST(req(
-      { kind: "practice", subject: "math", question: "Q-pencils", targetConcept: "addition", difficulty: "beginner", reasoning: REASONING },
+      { kind: "practice", token: tok({ question: "Q-pencils", targetConcept: "addition", difficulty: "beginner" }), reasoning: REASONING },
       { authHeader: true }
     ));
     expect(res.status).toBe(200);
@@ -335,7 +346,7 @@ describe("POST /api/score practice — server-authoritative Glicko-2 score", () 
       correctnessNote: "", socraticHint: "h", microLesson: "m", weakConcepts: [], newScoreSuggestion: 85,
     });
     const res = await POST(req(
-      { kind: "practice", subject: "math", question: "Q", difficulty: "intermediate", reasoning: REASONING },
+      { kind: "practice", token: tok(), reasoning: REASONING },
       { authHeader: true }
     ));
     const j = await res.json();
@@ -347,7 +358,7 @@ describe("POST /api/score practice — server-authoritative Glicko-2 score", () 
   it("rejects an unknown subject with 400", async () => {
     auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
     storage.getAdmin.mockReturnValue(fakeAdmin().sb);
-    const res = await POST(req({ kind: "practice", subject: "__proto__", question: "Q", reasoning: REASONING }, { authHeader: true }));
+    const res = await POST(req({ kind: "practice", token: tok({ subject: "__proto__" }), reasoning: REASONING }, { authHeader: true }));
     expect(res.status).toBe(400);
   });
 
@@ -356,7 +367,7 @@ describe("POST /api/score practice — server-authoritative Glicko-2 score", () 
     const { sb } = fakeAdmin({ scoresRows: [{ subject: "math", score: 40 }], rpcError: { message: "db boom" } });
     storage.getAdmin.mockReturnValue(sb);
     mockGroq(PRACTICE_GRADE);
-    const res = await POST(req({ kind: "practice", subject: "math", question: "Q", difficulty: "intermediate", reasoning: REASONING }, { authHeader: true }));
+    const res = await POST(req({ kind: "practice", token: tok(), reasoning: REASONING }, { authHeader: true }));
     expect(res.status).toBe(500);
     const j = await res.json();
     expect(j.error).not.toMatch(/db boom/);
@@ -366,7 +377,7 @@ describe("POST /api/score practice — server-authoritative Glicko-2 score", () 
     auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
     storage.getAdmin.mockReturnValue(fakeAdmin({ scoresRows: [{ subject: "math", score: 40 }] }).sb);
     const fetchMock = mockGroq(PRACTICE_GRADE, { failFirstN: 1, failStatus: 429 });
-    const res = await POST(req({ kind: "practice", subject: "math", question: "Q", difficulty: "intermediate", reasoning: REASONING }, { authHeader: true }));
+    const res = await POST(req({ kind: "practice", token: tok(), reasoning: REASONING }, { authHeader: true }));
     expect(res.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(2); // first 429, retried once -> ok
   });
@@ -502,5 +513,168 @@ describe("POST /api/score diagnostic", () => {
     // Second diagnostic: only 4 :img tokens remain but it needs 6, so the fan-out is
     // rejected (before this fix the diagnostic never touched :img and this returned 200).
     expect((await POST(req({ kind: "diagnostic", answers: sixImages }))).status).toBe(429);
+  });
+});
+
+// ---- audit fix round 2: the server-issued question binding + concurrency ----
+describe("POST /api/score practice — server-issued question tokens (audit P1-1)", () => {
+  it("rejects a MISSING token with 400 and a generate-a-new-question message — no Groq call", async () => {
+    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
+    storage.getAdmin.mockReturnValue(fakeAdmin().sb);
+    const failFetch = vi.fn(() => { throw new Error("must not call Groq"); });
+    vi.stubGlobal("fetch", failFetch);
+    const res = await POST(req(
+      { kind: "practice", subject: "math", question: "Q", difficulty: "phd", reasoning: REASONING },
+      { authHeader: true }
+    ));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/generate a new question/i);
+    expect(failFetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects a TAMPERED token (forged phd band) with 400 — the audit's rating-inflation vector is closed", async () => {
+    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
+    storage.getAdmin.mockReturnValue(fakeAdmin().sb);
+    const t = tok();
+    const [body, mac] = t.split(".");
+    const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
+    payload.difficulty = "phd";
+    const forged = `${Buffer.from(JSON.stringify(payload)).toString("base64url")}.${mac}`;
+    const res = await POST(req({ kind: "practice", token: forged, reasoning: REASONING }, { authHeader: true }));
+    expect(res.status).toBe(400);
+  });
+
+  it("derives band/topic from the TOKEN — loose body fields claiming phd are ignored", async () => {
+    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
+    const { sb, calls } = fakeAdmin({ scoresRows: [{ subject: "math", score: 40 }] });
+    storage.getAdmin.mockReturnValue(sb);
+    mockGroq(PRACTICE_GRADE);
+    const res = await POST(req(
+      {
+        kind: "practice",
+        token: tok({ difficulty: "beginner", topicSlug: "algebra" }),
+        // The old attack surface, now inert:
+        subject: "math", difficulty: "phd", topicSlug: "calculus_analysis", question: "trivial",
+        reasoning: REASONING,
+      },
+      { authHeader: true }
+    ));
+    expect(res.status).toBe(200);
+    const save = calls.rpc.find((c) => c.fn === "save_progress_for");
+    expect(save.args.p_attempt.band).toBe("beginner"); // the SIGNED band, not the claimed phd
+    expect(save.args.p_attempt.topic).toBe("algebra"); // the SIGNED topic
+    expect(typeof save.args.p_attempt.jti).toBe("string"); // replay dedupe key persisted
+    expect(save.args.p_check_conflict).toBe(true); // optimistic concurrency armed
+  });
+
+  it("returns 409 on a DUPLICATE (replayed) token — no second rating step", async () => {
+    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
+    const { sb } = fakeAdmin({ scoresRows: [] });
+    const realRpc = sb.rpc;
+    sb.rpc = vi.fn(async (fn, args) => {
+      if (fn === "save_progress_for") return { data: { status: "duplicate" }, error: null };
+      return realRpc(fn, args);
+    });
+    storage.getAdmin.mockReturnValue(sb);
+    mockGroq(PRACTICE_GRADE);
+    const res = await POST(req({ kind: "practice", token: tok(), reasoning: REASONING }, { authHeader: true }));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/already been graded/i);
+  });
+
+  it("RECOMPUTES once on a concurrency conflict (status:'conflict' → fresh read → second save → 200)", async () => {
+    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
+    const { sb, calls } = fakeAdmin({ scoresRows: [{ subject: "math", score: 40 }] });
+    const realRpc = sb.rpc;
+    let saves = 0;
+    sb.rpc = vi.fn(async (fn, args) => {
+      if (fn === "save_progress_for") {
+        saves += 1;
+        if (saves === 1) { calls.rpc.push({ fn, args }); return { data: { status: "conflict" }, error: null }; }
+        calls.rpc.push({ fn, args });
+        return { data: { status: "ok" }, error: null };
+      }
+      return realRpc(fn, args);
+    });
+    storage.getAdmin.mockReturnValue(sb);
+    mockGroq(PRACTICE_GRADE);
+    const res = await POST(req({ kind: "practice", token: tok(), reasoning: REASONING }, { authHeader: true }));
+    expect(res.status).toBe(200);
+    expect(saves).toBe(2); // one conflicted, one committed — no lost update
+  });
+
+  it("gives up with 409 after TWO conflicts (no infinite loop; the learner just retries)", async () => {
+    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
+    const { sb } = fakeAdmin({ scoresRows: [] });
+    const realRpc = sb.rpc;
+    sb.rpc = vi.fn(async (fn, args) => {
+      if (fn === "save_progress_for") return { data: { status: "conflict" }, error: null };
+      return realRpc(fn, args);
+    });
+    storage.getAdmin.mockReturnValue(sb);
+    mockGroq(PRACTICE_GRADE);
+    const res = await POST(req({ kind: "practice", token: tok(), reasoning: REASONING }, { authHeader: true }));
+    expect(res.status).toBe(409);
+  });
+
+  it("an IMAGE-ONLY answer whose vision call fails gets a retryable 500 — never a zero-grade of the placeholder (audit P1-3)", async () => {
+    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
+    storage.getAdmin.mockReturnValue(fakeAdmin({ scoresRows: [] }).sb);
+    const fetchMock = mockGroq(PRACTICE_GRADE, { failFirstN: 99, failStatus: 500 });
+    const PNG = { mime: "image/png", data: "iVBORw0KGgo=" };
+    const res = await POST(req(
+      { kind: "practice", token: tok(), reasoning: "", image: PNG },
+      { authHeader: true }
+    ));
+    expect(res.status).toBe(500);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // vision tried once; NO text-only fallback on the placeholder
+  });
+});
+
+describe("POST /api/score diagnostic — bank-derived questions + global budget", () => {
+  it("grades the BANK's question text for the slot — a substituted easy question is ignored", async () => {
+    const fetchMock = mockGroq(DIAG_GRADE);
+    const res = await POST(req({
+      kind: "diagnostic",
+      answers: [{ subject: "math", question: "what is 1+1? (substituted)", difficulty: "beginner", reasoning: REASONING }],
+    }));
+    expect(res.status).toBe(200);
+    const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const userMsg = sent.messages.find((m) => m.role === "user").content;
+    expect(userMsg).toContain("recipe uses 3 cups of flour"); // the curated bank's math/beginner question
+    expect(userMsg).not.toContain("substituted");
+  });
+
+  it("answers without a question field still grade (the bank supplies the text)", async () => {
+    mockGroq(DIAG_GRADE);
+    const res = await POST(req({
+      kind: "diagnostic",
+      answers: [{ subject: "math", difficulty: "beginner", reasoning: REASONING }],
+    }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).scores.math).toBeTruthy();
+  });
+
+  it("the GLOBAL Groq budget bounds platform-wide spend: once exhausted, live grades 429 (audit P2-3)", async () => {
+    process.env.GLOBAL_GROQ_BUDGET_PER_MIN = "1";
+    try {
+      mockGroq(DIAG_GRADE);
+      // First request consumes the global window…
+      expect((await POST(req({
+        kind: "diagnostic",
+        answers: [{ subject: "math", difficulty: "beginner", reasoning: REASONING }],
+      }))).status).toBe(200);
+      // …second (different IP — per-IP caps don't save it) is globally rejected.
+      const r2 = new Request("http://test.local/api/score", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-real-ip": "203.0.113.99" },
+        body: JSON.stringify({ kind: "diagnostic", answers: [{ subject: "physics", difficulty: "beginner", reasoning: REASONING }] }),
+      });
+      const res2 = await POST(r2);
+      expect(res2.status).toBe(429);
+      expect(res2.headers.get("Retry-After")).toBeTruthy();
+    } finally {
+      delete process.env.GLOBAL_GROQ_BUDGET_PER_MIN;
+    }
   });
 });

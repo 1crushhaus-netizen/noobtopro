@@ -117,12 +117,12 @@ describe("db/schema.sql — server-authoritative scoring (the trust boundary)", 
     // PR 6: now a 4-arg signature (p_review default null). The old 3-arg is dropped so a
     // 3-arg call resolves unambiguously to this defaulted version. Grant hygiene: revoked
     // from every client role, granted ONLY to service_role.
-    expect(schema).toContain("drop function if exists public.save_progress_for(uuid, jsonb, jsonb)");
+    expect(schema).toContain("drop function if exists public.save_progress_for(uuid, jsonb, jsonb, jsonb)");
     expect(schema).toContain(
-      "revoke all on function public.save_progress_for(uuid, jsonb, jsonb, jsonb) from public, anon, authenticated"
+      "revoke all on function public.save_progress_for(uuid, jsonb, jsonb, jsonb, timestamptz, boolean) from public, anon, authenticated"
     );
     expect(schema).toContain(
-      "grant execute on function public.save_progress_for(uuid, jsonb, jsonb, jsonb) to service_role"
+      "grant execute on function public.save_progress_for(uuid, jsonb, jsonb, jsonb, timestamptz, boolean) to service_role"
     );
     expect(schema).not.toMatch(
       /grant execute on function public\.save_progress_for\(uuid, jsonb, jsonb, jsonb\) to authenticated/
@@ -174,11 +174,11 @@ describe("db/schema.sql — audit-hardening invariants", () => {
   it("revokes default client DML on the concept-hub / internal tables (keeps public SELECT + report INSERT)", () => {
     expect(schema).toMatch(/revoke insert, update, delete, truncate on public\.diagnostic_pool, public\.security_events from anon, authenticated/);
     expect(schema).toMatch(/revoke insert, update, delete, truncate on public\.concept_guides, public\.concept_topics from anon, authenticated/);
-    // concept_reports keeps authenticated INSERT (the report feature) — only anon's
-    // insert + everyone's update/delete/truncate are revoked.
+    // 0011 (audit P2-8): the direct INSERT is revoked from EVERYONE — reports go
+    // through the rate-bounded submit_concept_report RPC only.
     expect(schema).toMatch(/revoke update, delete, truncate on public\.concept_reports from anon, authenticated/);
-    expect(schema).toMatch(/revoke insert on public\.concept_reports from anon/);
-    expect(schema).not.toMatch(/revoke insert[^;]*on public\.concept_reports from anon, authenticated/);
+    expect(schema).toMatch(/revoke insert on public\.concept_reports from anon, authenticated/);
+    expect(schema).not.toMatch(/create policy "report own"/);
   });
 
   it("bounds report flooding with one-open-report-per-user partial unique index", () => {
@@ -232,5 +232,41 @@ describe("db/schema.sql — Elo ranking + leaderboard invariants (PR 3)", () => 
   it("attempts has a rationale column (the persisted 'why your rank moved' line)", () => {
     expect(schema).toMatch(/alter table public\.attempts add column if not exists rationale text/);
     expect(fnBody("save_progress_for")).toContain("rationale"); // persisted by the write RPC
+  });
+});
+
+describe("db/schema.sql — audit fix round 2 (0011)", () => {
+  it("attempts carries the token jti with a per-user unique partial index (replay dedupe)", () => {
+    expect(schema).toContain("alter table public.attempts add column if not exists jti text;");
+    expect(schema).toMatch(/create unique index if not exists attempts_user_jti_uidx\s*\n?\s*on public\.attempts \(user_id, jti\) where jti is not null;/);
+  });
+
+  it("save_progress_for dedupes on jti and supports the optimistic-concurrency check", () => {
+    const fn = fnBody("save_progress_for");
+    expect(fn).toContain("'duplicate'");
+    expect(fn).toContain("'conflict'");
+    expect(fn).toContain("p_expected_updated_at");
+    expect(fn).toContain("is distinct from");
+    expect(fn).toContain("p_check_conflict requires exactly one score row");
+  });
+
+  it("delete_user_data takes the same per-user advisory lock as save_progress_for", () => {
+    expect(fnBody("delete_user_data")).toContain("pg_advisory_xact_lock(hashtextextended(uid::text, 0))");
+  });
+
+  it("migrate_guest_data admits a guest glicko blob only through _valid_glicko (bounded, numerically sane)", () => {
+    expect(fnBody("migrate_guest_data")).toContain("public._valid_glicko(s->'glicko')");
+    const vg = fnBody("_valid_glicko");
+    expect(vg).toContain("between 0 and 4000"); // rating bounds
+    expect(vg).toContain("between 1 and 500"); // rd bounds
+    expect(vg).toContain("between 0 and 0.2"); // vol bounds
+  });
+
+  it("submit_concept_report is the only report path: authenticated EXECUTE, ≤20 open per reporter", () => {
+    const fn = fnBody("submit_concept_report");
+    expect(fn).toContain("security definer");
+    expect(fn).toContain(">= 20");
+    expect(schema).toContain("grant execute on function public.submit_concept_report(text, text, text) to authenticated;");
+    expect(schema).toContain("revoke all on function public.submit_concept_report(text, text, text) from public, anon;");
   });
 });

@@ -221,3 +221,46 @@ describe("POST /api/generate — practice (Groq-generated)", () => {
     expect(userMsg).not.toContain("y".repeat(241));
   });
 });
+
+// ---- audit fix round 2 (P1-1 / P2-9) -----------------------------------------
+import { verifyQuestionToken } from "@/lib/questionToken";
+
+describe("POST /api/generate — server-issued question tokens + stripped diagnostic metadata", () => {
+  it("practice responses carry a VERIFIABLE token binding the served question (audit P1-1)", async () => {
+    process.env.QUESTION_TOKEN_SECRET = "gen-test-secret";
+    try {
+      mockGroqReturning({
+        topic: "Algebra", topicSlug: "algebra", targetConcept: "linear equations",
+        difficulty: "intermediate", reasoningSurface: "multi-step",
+        question: "Solve 3x + 4 = 19 and explain each step.",
+      });
+      const res = await POST(req({ kind: "practice", subject: "math", score: 40, weakConcepts: [] }));
+      expect(res.status).toBe(200);
+      const j = await res.json();
+      expect(typeof j.token).toBe("string");
+      const v = verifyQuestionToken(j.token);
+      expect(v.ok).toBe(true);
+      // The token binds EXACTLY what was served — /api/score trusts these, not the client.
+      expect(v.q).toMatchObject({
+        subject: "math",
+        question: j.question,
+        difficulty: j.difficulty,
+        topicSlug: "algebra",
+      });
+    } finally {
+      delete process.env.QUESTION_TOKEN_SECRET;
+    }
+  });
+
+  it("diagnostic responses NO LONGER ship trap/reasoningSurface (audit P2-9 — placement gaming via devtools)", async () => {
+    const res = await POST(req({ kind: "diagnostic" }));
+    expect(res.status).toBe(200);
+    const j = await res.json();
+    expect(j.questions).toHaveLength(9);
+    for (const q of j.questions) {
+      expect(q.trap).toBeUndefined();
+      expect(q.reasoningSurface).toBeUndefined();
+      expect(typeof q.question).toBe("string"); // the visible fields still ship
+    }
+  });
+});

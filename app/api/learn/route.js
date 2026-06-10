@@ -1,14 +1,35 @@
 import { NextResponse } from "next/server";
 import { groqJSON, LEARN_SYS } from "@/lib/groq";
 import { ORDER } from "@/lib/scoring";
-import { checkRateLimit, clientKey } from "@/lib/rateLimit";
+import { checkRateLimit, clientKey, chargeGlobalGroq } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType, readJsonLimited, MAX_BODY_BYTES_TEXT } from "@/lib/requestGuard";
 import { getSupabaseAdmin, conceptKey } from "@/lib/supabaseAdmin";
 import { normalizeTopic, topicSlugsFor } from "@/lib/taxonomy";
 import { isConceptSafe } from "@/lib/contentSafety";
 import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
+import { signQuestion } from "@/lib/questionToken";
 
 export const dynamic = "force-dynamic";
+// Bound a hung upstream call (audit P2-10): the Groq fetch carries its own 30s
+// abort; one generation + slack fits well inside this.
+export const maxDuration = 60;
+
+// Sign the guide's "try this" question AT SERVE TIME so a signed-in learner can
+// score it via /api/score (which now requires a server-issued token — audit P1-1).
+// Serve-time, NOT cache-time: guides are shared across users and cached forever,
+// while tokens carry a per-response jti + expiry. The token never enters the cache.
+function signedTryThis(subject, q) {
+  if (!q) return null;
+  return {
+    ...q,
+    token: signQuestion({
+      subject,
+      question: q.question,
+      targetConcept: q.targetConcept,
+      difficulty: q.difficulty,
+    }),
+  };
+}
 
 const cap = (s, n) => (typeof s === "string" ? s.slice(0, n) : "");
 const capArr = (a, n, len) =>
@@ -128,7 +149,8 @@ export async function POST(req) {
         const hasProofField = c.whyItWorks !== undefined && c.whyItWorks !== null;
         if (row.source === "curated" || hasProofField) {
           // Re-normalize the stored row so the served shape is always safe to render.
-          return NextResponse.json({ ...normalizeGuide(subject, cap(c.concept, 200) || safeConcept, c), cached: true });
+          const g = normalizeGuide(subject, cap(c.concept, 200) || safeConcept, c);
+          return NextResponse.json({ ...g, tryThisQuestion: signedTryThis(subject, g.tryThisQuestion), cached: true });
         }
         staleRefresh = true; // non-curated + no whyItWorks key → regenerate + overwrite below
       }
@@ -138,6 +160,19 @@ export async function POST(req) {
   }
 
   // 2) Miss → generate with Groq, normalize for safe rendering.
+  // GLOBAL Groq budget (audit P2-3): a cache MISS is a full guide generation — the
+  // costliest single Groq call — and this route is unauthenticated; the platform-wide
+  // window bounds total spend under IP rotation. Cache hits above cost nothing.
+  {
+    const glob = await chargeGlobalGroq(1);
+    if (!glob.ok) {
+      reportRateLimit({ req, route: "/api/learn" });
+      return NextResponse.json(
+        { error: "Too many requests. Please slow down and try again shortly." },
+        { status: 429, headers: { "Retry-After": String(glob.retryAfter) } }
+      );
+    }
+  }
   let guide;
   try {
     const data = await groqJSON({
@@ -199,5 +234,7 @@ export async function POST(req) {
     }
   }
 
-  return NextResponse.json({ ...guide, cached: false });
+  // Token added at response time only — `guide` (written to the shared cache above)
+  // must never carry a per-response token.
+  return NextResponse.json({ ...guide, tryThisQuestion: signedTryThis(subject, guide.tryThisQuestion), cached: false });
 }

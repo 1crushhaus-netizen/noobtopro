@@ -438,7 +438,7 @@ describe("POST /api/grade — difficulty band threading (diagnostic)", () => {
   });
 
   it("normalizes a missing difficulty to (unspecified) in the diagnostic prompt", async () => {
-    const fetchMock = mockGroqReturning({ subject: "math", score: 50, weakConcepts: [], comment: "ok" });
+    const fetchMock = mockGroqReturning({ subject: "math", score: 50, rubric: { principle: 2 }, weakConcepts: [], comment: "ok" });
     const res = await POST(req(diagnosticBody())); // no difficulty key
     expect(res.status).toBe(200);
     expect(sentUserMessage(fetchMock)).toMatch(/difficulty band: \(unspecified\)/i);
@@ -450,7 +450,7 @@ describe("POST /api/grade — image validation + vision forwarding", () => {
   const PNG_B64 = "iVBORw0KGgo=";
 
   it("accepts a real image (magic bytes match) and sends it as a data: URL on the multimodal model", async () => {
-    const fetchMock = mockGroqReturning({ subject: "math", score: 70, weakConcepts: [], comment: "ok" });
+    const fetchMock = mockGroqReturning({ subject: "math", score: 70, rubric: { principle: 2 }, weakConcepts: [], comment: "ok" });
     const res = await POST(
       req({ kind: "diagnostic", subject: "math", question: "Q", reasoning: "see my photo", image: { mime: "image/png", data: PNG_B64 } })
     );

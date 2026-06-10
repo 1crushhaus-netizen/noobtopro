@@ -1,14 +1,17 @@
 import { NextResponse, after } from "next/server";
-import { groqJSON, DIAG_GRADE_SYS, PRACTICE_GRADE_SYS } from "@/lib/groq";
+import { groqJSON, fenceGuard, DIAG_GRADE_SYS, PRACTICE_GRADE_SYS } from "@/lib/groq";
 import { clampScore, ORDER, normalizeRubric, scoreFromRubric } from "@/lib/scoring";
 import { preGradeDock } from "@/lib/preGrade";
-import { checkRateLimit, clientKey } from "@/lib/rateLimit";
+import { checkRateLimit, clientKey, chargeGlobalGroq } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType, readJsonLimited, MAX_BODY_BYTES_IMAGE } from "@/lib/requestGuard";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
 import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, normalizeFeedbackList, capSolution, normalizeErrors, normalizeSolve, reasoningSurfaceContext } from "@/lib/gradeInput";
 
 export const dynamic = "force-dynamic";
+// Bound a hung request (audit P2-10): the Groq fetch has a 30s abort; at most two
+// sequential upstream calls per grade fit comfortably.
+export const maxDuration = 60;
 
 // Auto-grow the concept hub: register the grader's (server-normalized, capped)
 // weak concepts as PENDING catalog stubs, AFTER the response so grading latency
@@ -123,6 +126,24 @@ export async function POST(req) {
   // dock's verdict is unchanged — 12k chars is far more than any blank/idk/gibberish test needs).
   const dock = img.image ? null : preGradeDock(capText(reasoning));
 
+  // Image-only submission: the photo IS the answer — a vision failure must fail
+  // retryably rather than text-grade the placeholder string (audit P1-3).
+  const imageOnly = !!img.image && !(typeof reasoning === "string" && reasoning.trim());
+
+  // GLOBAL Groq budget (audit P2-3): the per-IP cap is rotation-defeatable on this
+  // unauthenticated route; the platform-wide window bounds total spend. Docked
+  // answers cost nothing and skip the charge.
+  if (!dock) {
+    const glob = await chargeGlobalGroq(1, { img: img.image ? 1 : 0 });
+    if (!glob.ok) {
+      reportRateLimit({ req, route: "/api/grade" });
+      return NextResponse.json(
+        { error: "Too many requests. Please slow down and try again shortly." },
+        { status: 429, headers: { "Retry-After": String(glob.retryAfter) } }
+      );
+    }
+  }
+
   try {
     if (kind === "diagnostic") {
       if (dock) {
@@ -141,24 +162,35 @@ export async function POST(req) {
           `Subject: ${subject}\n` +
           `Question difficulty band: ${safeDifficulty}\n` +
           (surfaceCtx ? surfaceCtx + "\n" : "") +
-          `Question:\n"""${safeQuestion}"""\n\n` +
-          `Learner's reasoning:\n"""${work}"""`,
+          `Question:\n"""${fenceGuard(safeQuestion)}"""\n\n` +
+          // fenceGuard (audit P2-12): learner text can't fake closing the untrusted block.
+          `Learner's reasoning:\n"""${fenceGuard(work)}"""`,
         image: img.image,
+        imageRequired: imageOnly, // audit P1-3: never text-grade the placeholder for an image-only answer
         grade: true, // route to the cheaper grading model
       });
-      const rubric = normalizeRubric(data?.rubric);
-      const weakConcepts = normalizeWeakConcepts(data?.weakConcepts);
+      // Grader-output gate (audit P2-1): a parseable response WITHOUT a usable rubric is
+      // an upstream failure — fail retryably instead of zero-filling a genuine attempt.
+      if (!data || typeof data !== "object" || !data.rubric || typeof data.rubric !== "object") {
+        throw new Error("grader returned no usable rubric");
+      }
+      const rubric = normalizeRubric(data.rubric);
+      const weakConcepts = normalizeWeakConcepts(data.weakConcepts);
       registerWeakConcepts(subject, weakConcepts); // auto-grow the hub (non-blocking)
+      // EXPLICIT response (audit P2-2): never spread raw model JSON to the client — a
+      // model-emitted `error` key made the client discard a successful grade, and an
+      // object-typed note field crashed the feedback panel as a React child.
       return NextResponse.json({
-        ...data,
+        subject,
         // The headline is the TRANSPARENT weighted mean of the rubric axes — the grader no
         // longer emits a score, so there's nothing to reconcile (path-independent).
         score: scoreFromRubric(rubric),
         rubric,
-        solve: normalizeSolve(data?.solve),
-        errors: normalizeErrors(data?.errors),
-        finalAnswerMatches: data?.finalAnswerMatches === true,
+        solve: normalizeSolve(data.solve),
+        errors: normalizeErrors(data.errors),
+        finalAnswerMatches: data.finalAnswerMatches === true,
         weakConcepts,
+        comment: typeof data.comment === "string" ? data.comment.slice(0, 2000) : "",
       });
     }
 
@@ -186,35 +218,45 @@ export async function POST(req) {
       system: PRACTICE_GRADE_SYS,
       user:
         `Subject: ${subject}\n` +
-        `Question:\n"""${safeQuestion}"""\n` +
-        `Concept being probed:\n"""${safeConcept}"""\n` +
+        `Question:\n"""${fenceGuard(safeQuestion)}"""\n` +
+        `Concept being probed:\n"""${fenceGuard(safeConcept)}"""\n` +
         `Question difficulty band: ${safeDifficulty}\n` +
         (surfaceCtx ? surfaceCtx + "\n" : "") +
         `Learner's current level: ${safeScore}/100\n\n` +
-        `Learner's reasoning:\n"""${work}"""`,
+        // fenceGuard (audit P2-12): learner text can't fake closing the untrusted block.
+        `Learner's reasoning:\n"""${fenceGuard(work)}"""`,
       image: img.image,
+      imageRequired: imageOnly, // audit P1-3: never text-grade the placeholder for an image-only answer
       grade: true, // route to the cheaper grading model
       maxTokens: 3000, // room for the grader's solve block + strengths/improvements + typed errors + worked solution
     });
-    // Normalize every field the UI renders so malformed model output can't show NaN or
-    // out-of-range values. reasoningScore is reconciled against the rubric; rubric -> 0–4
-    // bars; newScoreSuggestion -> the client's local Glicko update (null = no change). The
-    // worked solution is revealed post-grade (this path is a genuine attempt, not docked).
-    const rubric = normalizeRubric(data?.rubric);
-    const weakConcepts = normalizeWeakConcepts(data?.weakConcepts);
+    // Grader-output gate (audit P2-1): a parseable response WITHOUT a usable rubric is
+    // an upstream failure — fail retryably instead of zero-filling a genuine attempt
+    // (the all-zero "grade" silently corrupted the guest's local rating).
+    if (!data || typeof data !== "object" || !data.rubric || typeof data.rubric !== "object") {
+      throw new Error("grader returned no usable rubric");
+    }
+    // Normalize EVERY field the UI renders — and build an EXPLICIT response (audit
+    // P2-2): the old `...data` spread passed un-normalized model output to the client
+    // (an object-typed socraticHint crashed the app as a React child; a model-emitted
+    // `error` key made the client discard a successful, Groq-billed grade).
+    const rubric = normalizeRubric(data.rubric);
+    const weakConcepts = normalizeWeakConcepts(data.weakConcepts);
     registerWeakConcepts(subject, weakConcepts); // auto-grow the hub (non-blocking)
     const reasoningScore = scoreFromRubric(rubric); // transparent weighted mean of the axes
     return NextResponse.json({
-      ...data,
       reasoningScore,
       newScoreSuggestion: reasoningScore, // the guest's local Glicko target = the same axis-derived score
       rubric,
-      solve: normalizeSolve(data?.solve),
-      errors: normalizeErrors(data?.errors),
-      finalAnswerMatches: data?.finalAnswerMatches === true,
-      strengths: normalizeFeedbackList(data?.strengths),
-      improvements: normalizeFeedbackList(data?.improvements),
-      workedSolution: capSolution(data?.workedSolution),
+      solve: normalizeSolve(data.solve),
+      errors: normalizeErrors(data.errors),
+      finalAnswerMatches: data.finalAnswerMatches === true,
+      strengths: normalizeFeedbackList(data.strengths),
+      improvements: normalizeFeedbackList(data.improvements),
+      workedSolution: capSolution(data.workedSolution),
+      correctnessNote: typeof data.correctnessNote === "string" ? data.correctnessNote.slice(0, 2000) : "",
+      socraticHint: typeof data.socraticHint === "string" ? data.socraticHint.slice(0, 2000) : "",
+      microLesson: typeof data.microLesson === "string" ? data.microLesson.slice(0, 2000) : "",
       weakConcepts,
     });
   } catch (e) {

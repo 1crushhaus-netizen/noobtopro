@@ -87,7 +87,75 @@ function fileToBase64(file) {
   });
 }
 
+// Attach-time image preparation (audit P1-2). A typical phone photo is 3–10 MB;
+// the server caps an image at ~3 MB decoded and Vercel caps the WHOLE request at
+// ~4.5 MB — and the diagnostic ships all 9 answers in ONE request, so a single
+// oversized photo used to 413 the entire completed diagnostic with no way back.
+// Strategy: allow-list the type (mirrors the server's magic-byte set), then
+// DOWNSCALE through a canvas (≤1280px JPEG — plenty for handwriting, typically
+// a few hundred KB). If the canvas path is unavailable, accept the original only
+// when it's safely small; otherwise reject AT ATTACH TIME with a clear message
+// so the learner can retake/crop instead of discovering it at submit.
+const IMAGE_MIME_ALLOWED = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+const MAX_RAW_IMAGE_BYTES = 2_500_000;
+const MAX_IMAGE_DIM = 1280;
+async function prepareImage(file) {
+  if (file.type && !IMAGE_MIME_ALLOWED.has(file.type)) {
+    throw new Error("That file type isn't supported — attach a JPEG, PNG, WebP, or GIF photo.");
+  }
+  // Probe 2D-canvas availability BEFORE wiring an <img> load: environments without
+  // canvas (jsdom, some webviews) would otherwise leave the load promise pending
+  // forever. No canvas → go straight to the size-capped original below.
+  let canvasOk = false;
+  try {
+    canvasOk = typeof document !== "undefined" && !!document.createElement("canvas").getContext("2d");
+  } catch {
+    canvasOk = false;
+  }
+  if (canvasOk) {
+    try {
+      const url = URL.createObjectURL(file);
+      try {
+        const el = await new Promise((resolve, reject) => {
+          const im = new Image();
+          im.onload = () => resolve(im);
+          im.onerror = reject;
+          im.src = url;
+        });
+        const w = el.naturalWidth || el.width || 0;
+        const h = el.naturalHeight || el.height || 0;
+        if (w > 0 && h > 0) {
+          const scale = Math.min(1, MAX_IMAGE_DIM / Math.max(w, h));
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.round(w * scale));
+          canvas.height = Math.max(1, Math.round(h * scale));
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.drawImage(el, 0, 0, canvas.width, canvas.height);
+            const b64 = String(canvas.toDataURL("image/jpeg", 0.8)).split(",")[1];
+            if (b64) return { data: b64, mime: "image/jpeg" };
+          }
+        }
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    } catch {
+      /* canvas decode failed — fall through to the size-capped original */
+    }
+  }
+  if (file.size > MAX_RAW_IMAGE_BYTES) {
+    throw new Error("That photo is too large to grade — please retake it smaller, or crop to just your work.");
+  }
+  return { data: await fileToBase64(file), mime: file.type || "image/jpeg" };
+}
+
 const now = () => new Date().toISOString();
+
+// Stable identity (audit P2-14): authApi is module-level, so this never changes —
+// the Leaderboard's fetch effect depends on it, and an inline arrow re-created on
+// every Noobtopro render made each drawer toggle refetch (and visibly blank) the
+// leaderboard while burning the shared per-IP rate bucket.
+const loadLeaderboard = () => authApi("/api/leaderboard", {});
 
 // Stable per-question key for the 2-tier diagnostic (each subject has an
 // easy + a hard question), so the answers map can hold all 6 answers.
@@ -151,15 +219,22 @@ function AnswerComposer({ value, onText, img, onAttach, onRemoveImg, onSubmit, o
   // so a learner can't reflexively skip without giving it a moment's thought. The countdown
   // resets when lockKey (the question identity) changes.
   const [skipIn, setSkipIn] = useState(onSkip ? SKIP_LOCK_SECONDS : 0);
+  // The timer must restart ONLY when the QUESTION changes (lockKey), never on a
+  // parent re-render (audit P2-15): both call sites pass a freshly-created onSkip
+  // each render, and with onSkip in the deps every keystroke in this controlled
+  // textarea reset the 10s countdown — locking the skip for "10s since the last
+  // keystroke" instead of "10s per question". hasSkip (a stable boolean) keeps the
+  // mount/unmount behavior; the click handler reads the live prop.
+  const hasSkip = !!onSkip;
   useEffect(() => {
-    if (!onSkip) return undefined;
+    if (!hasSkip) return undefined;
     setSkipIn(SKIP_LOCK_SECONDS);
     const id = setInterval(() => setSkipIn((n) => {
       if (n <= 1) { clearInterval(id); return 0; }
       return n - 1;
     }), 1000);
     return () => clearInterval(id);
-  }, [lockKey, onSkip]);
+  }, [lockKey, hasSkip]);
   const skipLocked = skipIn > 0;
   return (
     <div className="np-card np-input-card">
@@ -592,11 +667,11 @@ export default function Noobtopro() {
     setAnswers((a) => ({ ...a, [curKey]: { ...a[curKey], text: t } }));
   }
   async function attachCur(file) {
-    let data;
+    let data, mime;
     try {
-      data = await fileToBase64(file);
-    } catch {
-      setError("Couldn't read that image. Please try a different file.");
+      ({ data, mime } = await prepareImage(file));
+    } catch (e) {
+      setError((e && e.message) || "Couldn't read that image. Please try a different file.");
       return;
     }
     // Create the object URL OUTSIDE the updater (Strict Mode runs updaters twice
@@ -608,7 +683,7 @@ export default function Noobtopro() {
     setAnswers((a) => {
       const prev = a[curKey] && a[curKey].img;
       if (prev && prev.preview !== preview) revokePreview(prev);
-      return { ...a, [curKey]: { ...a[curKey], img: { data, mime: file.type, name: file.name, preview } } };
+      return { ...a, [curKey]: { ...a[curKey], img: { data, mime, name: file.name, preview } } };
     });
   }
   function removeCurImg() {
@@ -779,7 +854,7 @@ export default function Noobtopro() {
       pushRecentQuestion(recentKey, data.question); // remember it so the next regenerate differs again
       // Preserve the reasoning-surface metadata (server-normalized) so a Learn-tab practice
       // attempt carries the grader calibration too; harmlessly absent for cached-guide questions.
-      setLearnQuestion({ question: data.question, targetConcept: data.targetConcept || concept, difficulty, reasoningSurface: data.reasoningSurface, trap: data.trap });
+      setLearnQuestion({ question: data.question, targetConcept: data.targetConcept || concept, difficulty, reasoningSurface: data.reasoningSurface, trap: data.trap, token: data.token });
     } catch (e) {
       if (myRun !== learnRun.current) return; // don't surface a stale error on a newer concept
       setLearnError(e.message || "Could not regenerate the question.");
@@ -859,11 +934,11 @@ export default function Noobtopro() {
   }
 
   async function attachP(file) {
-    let data;
+    let data, mime;
     try {
-      data = await fileToBase64(file);
-    } catch {
-      setError("Couldn't read that image. Please try a different file.");
+      ({ data, mime } = await prepareImage(file));
+    } catch (e) {
+      setError((e && e.message) || "Couldn't read that image. Please try a different file.");
       return;
     }
     // URL created outside the updater; previous preview revoked inside it from the
@@ -871,7 +946,7 @@ export default function Noobtopro() {
     const preview = URL.createObjectURL(file);
     setPImg((prev) => {
       if (prev && prev.preview !== preview) revokePreview(prev);
-      return { data, mime: file.type, name: file.name, preview };
+      return { data, mime, name: file.name, preview };
     });
   }
 
@@ -900,13 +975,11 @@ export default function Noobtopro() {
         // client renders the trusted result and cannot substitute a score.
         const data = await authApi("/api/score", {
           kind: "practice",
-          subject: pSubject,
-          question: pQuestion.question,
-          targetConcept: pQuestion.targetConcept,
-          difficulty: pQuestion.difficulty,
-          topicSlug: pQuestion.topicSlug, // taxonomy slug → the difficulty-bucket key (normalized server-side)
-          reasoningSurface: pQuestion.reasoningSurface, // grader calibration (server normalizes)
-          trap: pQuestion.trap,
+          // The server-issued question token (audit P1-1): subject/question/band/
+          // topic/surface all come from the VERIFIED token server-side, so the
+          // client no longer asserts any rating-relevant field. A missing/expired
+          // token gets a clear "generate a new question" error.
+          token: pQuestion.token,
           reasoning,
           image: imagePayload,
         });
@@ -1167,7 +1240,7 @@ export default function Noobtopro() {
             user={user}
             scores={scores}
             history={history}
-            loadLeaderboard={() => authApi("/api/leaderboard", {})}
+            loadLeaderboard={loadLeaderboard}
             loadReviews={loadReviews}
             onStartDiagnostic={() => { setView("practice"); beginDiagnostic(); }}
             onPractice={(s) => { setView("practice"); startPractice(s); }}

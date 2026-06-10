@@ -26,7 +26,8 @@
 // ---------------------------------------------------------------------------
 
 import { NextResponse, after } from "next/server";
-import { groqJSON, PRACTICE_GRADE_SYS, DIAG_GRADE_SYS } from "@/lib/groq";
+import { groqJSON, fenceGuard, PRACTICE_GRADE_SYS, DIAG_GRADE_SYS } from "@/lib/groq";
+import { verifyQuestionToken } from "@/lib/questionToken";
 import {
   ORDER,
   normalizeRubric,
@@ -43,16 +44,20 @@ import {
   REPEAT_WINDOW_K,
 } from "@/lib/scoring";
 import { normalizeTopic } from "@/lib/taxonomy";
-import { diagnosticSurfaceFor } from "@/lib/diagnosticBank";
+import { diagnosticSurfaceFor, diagnosticQuestionFor } from "@/lib/diagnosticBank";
 import { preGradeDock } from "@/lib/preGrade";
-import { checkRateLimit, clientKey } from "@/lib/rateLimit";
+import { checkRateLimit, clientKey, chargeGlobalGroq } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType, readJsonLimited, MAX_BODY_BYTES_IMAGE } from "@/lib/requestGuard";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireUser } from "@/lib/adminAuth";
 import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
-import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, normalizeFeedbackList, capSolution, normalizeErrors, normalizeSolve, reasoningSurfaceContext } from "@/lib/gradeInput";
+import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, normalizeFeedbackList, capSolution, normalizeErrors, normalizeSolve, normalizeReasoningSurface, reasoningSurfaceContext } from "@/lib/gradeInput";
 
 export const dynamic = "force-dynamic";
+// Bound a hung request explicitly (audit P2-10): the Groq fetch carries a 30s abort,
+// and the diagnostic fans out up to 9 grades at concurrency 3, so the worst case
+// needs real headroom. Vercel clamps to the plan limit if lower.
+export const maxDuration = 300;
 
 const GRADE_CONCURRENCY = 3; // simultaneous Groq grade calls per diagnostic
 const MAX_DIAGNOSTIC_ANSWERS = ORDER.length * DIAGNOSTIC_DIFFICULTIES.length; // 9 (3 subjects × 3 tiers)
@@ -196,20 +201,36 @@ async function handlePractice(req, body) {
   const sb = getSupabaseAdmin();
   if (!sb) return NextResponse.json({ error: "Scoring is temporarily unavailable." }, { status: 503 });
 
-  const { subject, question, targetConcept, difficulty, reasoning, image, reasoningSurface, trap } = body || {};
-  if (typeof subject !== "string" || typeof question !== "string") {
-    return NextResponse.json({ error: "subject and question are required." }, { status: 400 });
-  }
+  const { token, reasoning, image } = body || {};
+  // SERVER-ISSUED QUESTION BINDING (audit P1-1). The token is signed by
+  // /api/generate (or /api/learn's "try this") at serve time; EVERY rating-relevant
+  // field — subject, question text, difficulty band, topic bucket, reasoning
+  // surface/trap — comes from the VERIFIED payload, never the request body. Before
+  // this, a signed-in user could self-author an easy question labeled `phd` and
+  // inflate their rating, rotate the claimed (topic, band) to dodge the anti-farm
+  // damper, and poison the shared item_difficulty calibration. The token's `jti`
+  // also dedupes the attempt (replay protection — save_progress_for, audit P2-5).
+  const tok = verifyQuestionToken(token);
+  if (!tok.ok) return NextResponse.json({ error: tok.error }, { status: 400 });
+  const issued = tok.q;
+  const subject = issued.subject;
   if (!ORDER.includes(subject)) {
-    return NextResponse.json({ error: `Unknown subject "${subject}".` }, { status: 400 });
+    return NextResponse.json({ error: "Unknown subject." }, { status: 400 });
+  }
+  const safeQuestion = capText(issued.question || "");
+  if (!safeQuestion.trim()) {
+    return NextResponse.json(
+      { error: "This question could not be verified — please generate a new question." },
+      { status: 400 }
+    );
   }
   const work =
     typeof reasoning === "string" && reasoning.trim() ? capText(reasoning.trim()) : "(no written reasoning provided)";
-  const safeQuestion = capText(question);
-  const safeConcept = capText(targetConcept) || "(unspecified)";
-  const safeDifficulty = normalizeDifficulty(difficulty);
-  // Reasoning-surface calibration context for the grader ("" when absent).
-  const surfaceCtx = reasoningSurfaceContext(reasoningSurface, trap);
+  const safeConcept = capText(issued.targetConcept) || "(unspecified)";
+  const safeDifficulty = normalizeDifficulty(issued.difficulty);
+  // Reasoning-surface calibration context for the grader ("" when absent) — from the
+  // SERVER-issued payload (re-normalized defensively), not the client.
+  const surfaceCtx = reasoningSurfaceContext(normalizeReasoningSurface(issued.reasoningSurface), issued.trap);
 
   reportInjection({
     req,
@@ -237,43 +258,47 @@ async function handlePractice(req, body) {
   // always has a real band. normalizeTopic bounds the topic to a real slug or
   // general_<subject>, so the bucket key space is bounded + FK-valid.
   const bandKey = safeDifficulty !== "(unspecified)" ? safeDifficulty : "intermediate";
-  const topicSlug = normalizeTopic(subject, body && body.topicSlug != null ? body.topicSlug : body && body.topic);
+  const topicSlug = normalizeTopic(subject, issued.topicSlug);
   const seedDifficulty = defaultDifficultyForBand(bandKey);
+  // Image-only submission: the photo IS the answer, so a vision failure must fail
+  // retryably rather than text-grade the placeholder string (audit P1-3).
+  const imageOnly = !!img.image && !(typeof reasoning === "string" && reasoning.trim());
 
   try {
-    // ACCEPTED RESIDUAL: the rating is a read-modify-write (read prev → Glicko → write).
-    // Two concurrent same-user, same-subject grades could lose one update; single-user
-    // and low-stakes (the practiceRun guard + one-question-at-a-time UI make it rare),
-    // so it's accepted rather than serialized. (The item-difficulty bump is commutative,
-    // so it's safe under concurrency regardless.)
-    // 1) Server-authoritative PREV (incl. the per-axis Glicko state) + the learner's recent
-    //    attempts in this subject (the last K, for the anti-farm repeat factor) + the
-    //    calibrated item difficulty for this bucket — ALL read server-side; the client
-    //    supplies none of the values the new rating is computed from.
+    // 1) PRE-GRADE context reads: the learner's level (for the grader prompt), their
+    //    recent attempts in this subject (the last K, for the anti-farm repeat factor)
+    //    and the calibrated item difficulty for this bucket — ALL read server-side; the
+    //    client supplies none of the values the new rating is computed from. The
+    //    RATING-bearing scores read happens fresh inside the persist loop below
+    //    (audit P2-4: the old pre-grade read made the rating a multi-second
+    //    read-modify-write that lost one of two concurrent updates).
     const [scoresRes, recentRes, diffRes] = await Promise.all([
-      sb.from("scores").select("subject, score, weak_concepts, comment, rubric, glicko").eq("user_id", uid),
+      sb.from("scores").select("subject, score, weak_concepts, comment, rubric, glicko, updated_at").eq("user_id", uid),
       sb.from("attempts").select("topic, band").eq("user_id", uid).eq("subject", subject).eq("type", "attempt").order("created_at", { ascending: false }).limit(REPEAT_WINDOW_K),
       sb.from("item_difficulty").select("difficulty").eq("subject", subject).eq("topic", topicSlug).eq("band", bandKey).maybeSingle(),
     ]);
     if (scoresRes.error) throw scoresRes.error;
-    const rows = scoresRes.data;
     const itemDifficulty =
       diffRes && diffRes.data && Number.isFinite(Number(diffRes.data.difficulty))
         ? Number(diffRes.data.difficulty)
         : seedDifficulty;
 
-    const current = {};
-    for (const r of rows || []) {
-      current[r.subject] = {
-        score: r.score,
-        weakConcepts: r.weak_concepts || [],
-        comment: r.comment || "",
-        rubric: r.rubric || null,
-        glicko: r.glicko || null,
-      };
-    }
-    const prev = current[subject] || null;
-    const prevScore = prev ? prev.score : 0;
+    const rowsToMap = (rows) => {
+      const m = {};
+      for (const r of rows || []) {
+        m[r.subject] = {
+          score: r.score,
+          weakConcepts: r.weak_concepts || [],
+          comment: r.comment || "",
+          rubric: r.rubric || null,
+          glicko: r.glicko || null,
+          updatedAt: r.updated_at || null,
+        };
+      }
+      return m;
+    };
+    const promptMap = rowsToMap(scoresRes.data);
+    const promptPrevScore = promptMap[subject] ? promptMap[subject].score : 0;
 
     // 2) DETERMINISTIC pre-grade dock (no LLM call) on the ORIGINAL answer: empty /
     //    "idk" / off-topic / gibberish → forced low outcome + all-zero rubric. Else grade.
@@ -281,6 +306,18 @@ async function handlePractice(req, body) {
     //    image-only answer (worked notes in the photo, empty text box) is a substantive
     //    submission that must reach the vision grader, not be docked to a non-attempt.
     const dock = img.image ? null : preGradeDock(capText(reasoning)); // cap before the dock (bounded regex/Set work)
+    if (!dock) {
+      // GLOBAL Groq budget (audit P2-3): the per-IP/per-account caps are the fairness
+      // layer; this platform-wide window bounds total spend under IP rotation.
+      const glob = await chargeGlobalGroq(1, { img: img.image ? 1 : 0 });
+      if (!glob.ok) {
+        reportRateLimit({ req, route: "/api/score" });
+        return NextResponse.json(
+          { error: "Too many requests. Please slow down and try again shortly." },
+          { status: 429, headers: { "Retry-After": String(glob.retryAfter) } }
+        );
+      }
+    }
     const data = dock
       ? dock
       : await gradeOne({
@@ -291,11 +328,20 @@ async function handlePractice(req, body) {
             `Concept being probed:\n"""${safeConcept}"""\n` +
             `Question difficulty band: ${safeDifficulty}\n` +
             (surfaceCtx ? surfaceCtx + "\n" : "") +
-            `Learner's current level: ${prevScore}/100\n\n` +
-            `Learner's reasoning:\n"""${work}"""`,
+            `Learner's current level: ${promptPrevScore}/100\n\n` +
+            // fenceGuard (audit P2-12): learner text can't fake closing the untrusted block.
+            `Learner's reasoning:\n"""${fenceGuard(work)}"""`,
           image: img.image,
+          imageRequired: imageOnly, // audit P1-3: never text-grade the placeholder for an image-only answer
           maxTokens: 3000, // room for the grader's solve block + strengths/improvements + typed errors + worked solution
         });
+
+    // Grader-output gate (audit P2-1): a parseable response WITHOUT a usable rubric is
+    // an upstream failure — fail retryably instead of zero-filling a real attempt and
+    // persisting a bogus rating drop.
+    if (!dock && (!data || typeof data !== "object" || !data.rubric || typeof data.rubric !== "object")) {
+      throw new Error("grader returned no usable rubric");
+    }
 
     const attemptRubric = normalizeRubric(data?.rubric);
     // 3) The headline is the TRANSPARENT weighted mean of the rubric axes (process-first,
@@ -313,80 +359,105 @@ async function handlePractice(req, body) {
     const solve = dock ? null : normalizeSolve(data?.solve);
     const errors = dock ? [] : normalizeErrors(data?.errors);
     const finalAnswerMatches = dock ? false : data?.finalAnswerMatches === true;
-    const correctnessNote = typeof data?.correctnessNote === "string" ? data.correctnessNote : "";
-    const socraticHint = typeof data?.socraticHint === "string" ? data.socraticHint : "";
-    const microLesson = typeof data?.microLesson === "string" ? data.microLesson : "";
+    const correctnessNote = typeof data?.correctnessNote === "string" ? data.correctnessNote.slice(0, 2000) : "";
+    const socraticHint = typeof data?.socraticHint === "string" ? data.socraticHint.slice(0, 2000) : "";
+    const microLesson = typeof data?.microLesson === "string" ? data.microLesson.slice(0, 2000) : "";
 
-    // 4) UNIFIED GLICKO-2 update: each of the 9 reasoning axes is rated against the item's
-    //    calibrated difficulty (the opponent), with that axis's rubric value (/RUBRIC_MAX)
-    //    as the outcome. The subject score is the RUBRIC_WEIGHTS-weighted aggregate of the
-    //    9 axis ratings (subjectScoreFromGlicko), and the radar is derived from the same
-    //    ratings — ONE difficulty-adjusted source of truth. Anti-farm: repeated attempts on
-    //    this (subject, topic, band) bucket damp the rating GAIN (not losses). A dock carries
-    //    an all-zero rubric → a real low outcome that legitimately drops the axes/score (the
-    //    radar IS the rating now, so we no longer special-case the dock). Existing users
-    //    lazy-seed from their prior rubric/score (continuity — no rank jump).
+    // 4-6) UNIFIED GLICKO-2 update + persist, under OPTIMISTIC CONCURRENCY (audit
+    //    P2-4/P2-5/P2-7). Each pass reads the user's scores FRESH (post-grade), computes
+    //    the rating from that exact state, and asks save_progress_for to commit ONLY if
+    //    the row is still at the observed updated_at (p_check_conflict). A concurrent
+    //    same-subject grade or a "Reset my progress" between read and write surfaces as
+    //    status:"conflict" → recompute once from the new state (so neither update is
+    //    lost and a reset is never resurrected from pre-delete state). The token's jti
+    //    rides on the attempt: a replayed/duplicate-delivered request gets
+    //    status:"duplicate" and NO second rating step. The rating math itself is
+    //    unchanged: 9 axes vs the calibrated item difficulty, anti-farm damping on
+    //    repeats, dock = a real low outcome, lazy-seed continuity.
     const repeatFactor = repeatFactorFromRecent(recentRes && recentRes.data, topicSlug, bandKey);
-    const { glicko: newGlicko, rubric: newRubric, score: newScore, expected } = updateAxisRatings({
-      prevGlicko: prev ? prev.glicko : null,
-      prevRubric: prev ? prev.rubric : null,
-      prevScore,
-      attemptRubric,
-      difficulty: itemDifficulty,
-      repeatFactor,
-    });
-    const newWeak = weakConcepts.length ? weakConcepts : prev ? prev.weakConcepts : [];
-    const comment = prev ? prev.comment : "";
+    let saved = null;
+    for (let pass = 0; pass < 2 && !saved; pass++) {
+      const freshRes = await sb.from("scores").select("subject, score, weak_concepts, comment, rubric, glicko, updated_at").eq("user_id", uid);
+      if (freshRes.error) throw freshRes.error;
+      const current = rowsToMap(freshRes.data);
+      const prev = current[subject] || null;
+      const prevScore = prev ? prev.score : 0;
 
-    const delta = newScore - prevScore;
-    const rationale = explainRankMove({ delta, reasoningScore, expected, difficultyBand: bandKey, docked: !!dock });
+      const { glicko: newGlicko, rubric: newRubric, score: newScore, expected } = updateAxisRatings({
+        prevGlicko: prev ? prev.glicko : null,
+        prevRubric: prev ? prev.rubric : null,
+        prevScore,
+        attemptRubric,
+        difficulty: itemDifficulty,
+        repeatFactor,
+      });
+      const newWeak = weakConcepts.length ? weakConcepts : prev ? prev.weakConcepts : [];
+      const comment = prev ? prev.comment : "";
+      const delta = newScore - prevScore;
+      const rationale = explainRankMove({ delta, reasoningScore, expected, difficultyBand: bandKey, docked: !!dock });
+      const updatedMap = { ...current, [subject]: { score: newScore } };
+      const totalAfter = totalPoints(updatedMap);
+      const phdAfter = phdIndex(updatedMap);
+      const t = nowIso();
 
-    // 5) Snapshot totals over the full (updated) map for the attempt-history row.
-    const updatedMap = { ...current, [subject]: { score: newScore } };
-    const totalAfter = totalPoints(updatedMap);
-    const phdAfter = phdIndex(updatedMap);
-    const t = nowIso();
-
-    // 6) Persist ONLY the changed subject (+ its attempt, with the rationale) atomically
-    //    for the verified uid. Sending one subject avoids clobbering a concurrent
-    //    same-user session's progress on the other two.
-    const { error: saveErr } = await sb.rpc("save_progress_for", {
-      p_user: uid,
-      p_scores: [
-        { subject, score: newScore, weak_concepts: (newWeak || []).slice(0, 64), comment, rubric: newRubric, glicko: newGlicko },
-      ],
-      p_attempt: {
-        type: "attempt",
-        subject,
-        reasoning_score: reasoningScore,
-        delta,
-        new_score: newScore,
-        total_after: totalAfter,
-        phd_after: phdAfter,
-        created_at: t,
-        rationale,
-        topic: topicSlug,
-        band: bandKey,
-      },
-      // Answer-review detail (persisted atomically with the attempt) so the learner can
-      // review this answer later. `answer` is the learner's own reasoning (`work`).
-      p_review: {
-        question: safeQuestion,
-        answer: work,
-        target_concept: safeConcept,
-        difficulty: safeDifficulty,
-        rubric: attemptRubric,
-        feedback: { strengths, improvements, workedSolution, correctnessNote, socraticHint, microLesson, solve, errors, finalAnswerMatches },
-      },
-    });
-    if (saveErr) throw saveErr;
+      const { data: saveRes, error: saveErr } = await sb.rpc("save_progress_for", {
+        p_user: uid,
+        p_scores: [
+          { subject, score: newScore, weak_concepts: (newWeak || []).slice(0, 64), comment, rubric: newRubric, glicko: newGlicko },
+        ],
+        p_attempt: {
+          type: "attempt",
+          subject,
+          reasoning_score: reasoningScore,
+          delta,
+          new_score: newScore,
+          total_after: totalAfter,
+          phd_after: phdAfter,
+          created_at: t,
+          rationale,
+          topic: topicSlug,
+          band: bandKey,
+          jti: issued.jti, // replay/duplicate-delivery dedupe (audit P2-5)
+        },
+        // Answer-review detail (persisted atomically with the attempt) so the learner can
+        // review this answer later. `answer` is the learner's own reasoning (`work`).
+        p_review: {
+          question: safeQuestion,
+          answer: work,
+          target_concept: safeConcept,
+          difficulty: safeDifficulty,
+          rubric: attemptRubric,
+          feedback: { strengths, improvements, workedSolution, correctnessNote, socraticHint, microLesson, solve, errors, finalAnswerMatches },
+        },
+        p_expected_updated_at: prev ? prev.updatedAt : null,
+        p_check_conflict: true,
+      });
+      if (saveErr) throw saveErr;
+      const status = saveRes && saveRes.status;
+      if (status === "duplicate") {
+        // The same served question was already scored (network retry / replay): no
+        // second rating step, no duplicate attempt row.
+        return NextResponse.json(
+          { error: "This answer has already been graded — generate a new question to keep practicing." },
+          { status: 409 }
+        );
+      }
+      if (status === "conflict") continue; // state moved under us — recompute from fresh
+      saved = { prevScore, newGlicko, newRubric, newScore, newWeak, comment, delta, rationale, totalAfter, phdAfter, t };
+    }
+    if (!saved) {
+      return NextResponse.json(
+        { error: "Your progress changed while this was being graded — please try again." },
+        { status: 409 }
+      );
+    }
 
     // 7) Calibrate the item-difficulty bucket (non-blocking; only on a real grade — a
     //    docked non-answer carries no signal about the item's difficulty). The nudge is
     //    the aggregate-outcome surprise vs the learner's prior level — a commutative
     //    additive delta (concurrent bumps still commute), same shape as before.
     if (!dock) {
-      const diffDelta = itemDifficultyDelta({ prevSubjectScore: prevScore, itemDifficulty, aggregateOutcome: reasoningScore / 100 });
+      const diffDelta = itemDifficultyDelta({ prevSubjectScore: saved.prevScore, itemDifficulty, aggregateOutcome: reasoningScore / 100 });
       bumpItemDifficulty(sb, subject, topicSlug, bandKey, diffDelta, seedDifficulty);
     }
     registerWeakConcepts(subject, weakConcepts); // auto-grow the hub (non-blocking)
@@ -404,12 +475,12 @@ async function handlePractice(req, body) {
       socraticHint,
       microLesson,
       weakConcepts,
-      newScore,
-      delta,
-      rationale,
+      newScore: saved.newScore,
+      delta: saved.delta,
+      rationale: saved.rationale,
       docked: !!dock,
-      subjectScore: { score: newScore, weakConcepts: newWeak, comment, rubric: newRubric },
-      attempt: { type: "attempt", t, subject, reasoningScore, delta, newScore, totalAfter, phdAfter, rationale },
+      subjectScore: { score: saved.newScore, weakConcepts: saved.newWeak, comment: saved.comment, rubric: saved.newRubric },
+      attempt: { type: "attempt", t: saved.t, subject, reasoningScore, delta: saved.delta, newScore: saved.newScore, totalAfter: saved.totalAfter, phdAfter: saved.phdAfter, rationale: saved.rationale },
     });
   } catch (e) {
     console.error("[/api/score practice]", e);
@@ -470,14 +541,21 @@ async function handleDiagnostic(req, body) {
     if (!a || typeof a !== "object") continue;
     const subject = a.subject;
     if (!ORDER.includes(subject)) continue;
-    if (typeof a.question !== "string" || !a.question.trim()) continue;
     const difficulty = DIAGNOSTIC_DIFFICULTIES.includes(a.difficulty) ? a.difficulty : null;
     if (!difficulty) continue;
     const key = `${subject}:${difficulty}`;
     if (seen.has(key)) continue;
+    // The GRADED question text comes from the curated bank by slot — never from the
+    // request body (audit P1-1 family): the diagnostic is the standardized placement,
+    // so a client substituting its own easier question must not earn the slot's
+    // baseline credit. (The bank covers every (subject, difficulty) slot; a missing
+    // lookup means a forged slot → skip.)
+    const bankQuestion = diagnosticQuestionFor(subject, difficulty);
+    if (!bankQuestion) continue;
     const img = normalizeImage(a.image);
     if (!img.ok) return NextResponse.json({ error: img.error }, { status: 400 });
     seen.add(key);
+    const hasText = typeof a.reasoning === "string" && !!a.reasoning.trim();
     // Reasoning-surface context DERIVED SERVER-SIDE from the curated bank by (subject,
     // difficulty) — NOT trusted from the request body — so a crafted answer can't spoof the
     // grader's calibration. "" when the slot has no surface.
@@ -485,12 +563,13 @@ async function handleDiagnostic(req, body) {
     items.push({
       subject,
       difficulty,
-      question: capText(a.question),
+      question: capText(bankQuestion),
       surfaceCtx: reasoningSurfaceContext(bankSurface.reasoningSurface, bankSurface.trap),
-      reasoning:
-        typeof a.reasoning === "string" && a.reasoning.trim()
-          ? capText(a.reasoning.trim())
-          : "(no written reasoning provided)",
+      reasoning: hasText ? capText(a.reasoning.trim()) : "(no written reasoning provided)",
+      // Image-only answer: the photo IS the answer — a vision failure must fail this
+      // grade (allSettled drops the tier) rather than text-grade the placeholder
+      // (audit P1-3).
+      imageOnly: !!img.image && !hasText,
       // Deterministic dock on the RAW answer (before the placeholder substitution
       // above), so a blank / "idk" / off-topic diagnostic answer is graded low with no
       // LLM call, just like practice. Skip the dock when a photo is attached — an
@@ -525,6 +604,20 @@ async function handleDiagnostic(req, body) {
     }
   }
 
+  // GLOBAL Groq budget (audit P2-3): charge one token per LIVE grade (docked answers
+  // cost nothing) so platform-wide spend stays bounded under IP rotation.
+  const liveGrades = items.filter((i) => !i.dock).length;
+  if (liveGrades) {
+    const glob = await chargeGlobalGroq(liveGrades, { img: imgCount });
+    if (!glob.ok) {
+      reportRateLimit({ req, route: "/api/score" });
+      return NextResponse.json(
+        { error: "Too many requests. Please slow down and try again shortly." },
+        { status: 429, headers: { "Retry-After": String(glob.retryAfter) } }
+      );
+    }
+  }
+
   reportInjection({ req, route: "/api/score", text: items.map((i) => i.reasoning).join("\n") });
 
   try {
@@ -538,10 +631,17 @@ async function handleDiagnostic(req, body) {
               `Question difficulty band: ${it.difficulty}\n` +
               (it.surfaceCtx ? it.surfaceCtx + "\n" : "") +
               `Question:\n"""${it.question}"""\n\n` +
-              `Learner's reasoning:\n"""${it.reasoning}"""`,
+              // fenceGuard (audit P2-12): learner text can't fake closing the untrusted block.
+              `Learner's reasoning:\n"""${fenceGuard(it.reasoning)}"""`,
             image: it.image,
+            imageRequired: it.imageOnly, // audit P1-3: never text-grade the placeholder for an image-only answer
             maxTokens: 1800, // room for the grader's solve block + 9-axis rubric + typed errors
           });
+      // Grader-output gate (audit P2-1): no usable rubric → this grade is a settled
+      // FAILURE (the tier drops out; retry-once already happened), not a zero baseline.
+      if (!it.dock && (!data || typeof data !== "object" || !data.rubric || typeof data.rubric !== "object")) {
+        throw new Error("grader returned no usable rubric");
+      }
       const rubric = normalizeRubric(data?.rubric);
       // The dock carries its own forced low reasoningScore; the live grade's headline is
       // the TRANSPARENT weighted mean of the rubric axes (path-independent — the grader no
@@ -553,7 +653,7 @@ async function handleDiagnostic(req, body) {
         reasoningScore,
         rubric,
         weakConcepts: normalizeWeakConcepts(data?.weakConcepts),
-        comment: typeof data?.comment === "string" ? data.comment : "",
+        comment: typeof data?.comment === "string" ? data.comment.slice(0, 2000) : "",
       };
     });
 

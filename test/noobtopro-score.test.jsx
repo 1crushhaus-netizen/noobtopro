@@ -64,7 +64,7 @@ describe("Noobtopro — signed-in practice is server-authoritative", () => {
   it("submits to /api/score with the Bearer token, renders the server's trusted result, and never calls /api/grade or saveProgress", async () => {
     const fetchMock = vi.fn(async (path) => {
       if (path === "/api/admin/me") return jsonRes({ isAdmin: false });
-      if (path === "/api/generate") return jsonRes({ subject: "math", topic: "t", targetConcept: "x", difficulty: "intermediate", question: "PRACTICEQ" });
+      if (path === "/api/generate") return jsonRes({ subject: "math", topic: "t", targetConcept: "x", difficulty: "intermediate", question: "PRACTICEQ", token: "tok-q1" });
       if (path === "/api/score")
         return jsonRes({
           reasoningScore: 88,
@@ -103,7 +103,11 @@ describe("Noobtopro — signed-in practice is server-authoritative", () => {
     expect(scoreCall).toBeTruthy();
     expect(scoreCall[1].headers.Authorization).toBe("Bearer tok-123");
     const body = JSON.parse(scoreCall[1].body);
-    expect(body).toMatchObject({ kind: "practice", subject: "math" });
+    // The signed question token (audit P1-1) — the server derives subject/question/
+    // band/topic from it; the client asserts no rating-relevant field anymore.
+    expect(body).toMatchObject({ kind: "practice", token: "tok-q1" });
+    expect(body.subject).toBeUndefined();
+    expect(body.difficulty).toBeUndefined();
     // ...and NOT to the grade-only route, and NOT to the local (guest) save path.
     expect(fetchMock.mock.calls.some(([p]) => p === "/api/grade")).toBe(false);
     expect(store.saveProgress).not.toHaveBeenCalled();
