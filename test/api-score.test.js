@@ -504,3 +504,132 @@ describe("POST /api/score diagnostic", () => {
     expect((await POST(req({ kind: "diagnostic", answers: sixImages }))).status).toBe(429);
   });
 });
+
+// ---- per-concept mastery (Learn-tab coloring, RANKS_PLAN §12.1) -------------
+describe("POST /api/score — per-concept mastery counters", () => {
+  it("practice with an allow-listed conceptKey bumps mastery with the SERVER-computed quality", async () => {
+    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
+    const { sb, calls } = fakeAdmin({ scoresRows: [{ subject: "math", score: 40, weak_concepts: [], comment: "", rubric: null, glicko: null }] });
+    storage.getAdmin.mockReturnValue(sb);
+    mockGroq(PRACTICE_GRADE);
+
+    const res = await POST(req(
+      { kind: "practice", subject: "math", question: "Q", reasoning: REASONING, difficulty: "intermediate", conceptKey: "ratios_unit_rates" },
+      { authHeader: true }
+    ));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    const expectedQuality = scoreFromRubric(normalizeRubric(PRACTICE_GRADE.rubric));
+    const bump = calls.rpc.find((c) => c.fn === "bump_concept_mastery");
+    expect(bump).toBeTruthy();
+    expect(bump.args.p_user).toBe("u1");
+    expect(bump.args.p_entries).toEqual([{ subject: "math", concept_key: "ratios_unit_rates", quality: expectedQuality }]);
+    // The applied update is mirrored to the client (camelCase) for in-memory merges.
+    expect(body.masteryUpdates).toEqual([{ subject: "math", conceptKey: "ratios_unit_rates", quality: expectedQuality }]);
+  });
+
+  it("an unknown/forged conceptKey is DROPPED (no bump, empty masteryUpdates) — and so is a cross-subject key", async () => {
+    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
+    for (const conceptKey of ["totally_fake", "balanced_unbalanced_forces", "__proto__"]) {
+      const { sb, calls } = fakeAdmin({ scoresRows: [] });
+      storage.getAdmin.mockReturnValue(sb);
+      mockGroq(PRACTICE_GRADE);
+      const res = await POST(req(
+        { kind: "practice", subject: "math", question: "Q", reasoning: REASONING, conceptKey },
+        { authHeader: true }
+      ));
+      expect(res.status).toBe(200);
+      expect((await res.json()).masteryUpdates).toEqual([]);
+      expect(calls.rpc.find((c) => c.fn === "bump_concept_mastery")).toBeFalsy();
+    }
+  });
+
+  it("a DOCKED concept-tagged attempt still bumps (a skip marks the concept red by design)", async () => {
+    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
+    const { sb, calls } = fakeAdmin({ scoresRows: [] });
+    storage.getAdmin.mockReturnValue(sb);
+    const failFetch = vi.fn(() => { throw new Error("docked answers must not reach Groq"); });
+    vi.stubGlobal("fetch", failFetch);
+
+    const res = await POST(req(
+      { kind: "practice", subject: "math", question: "Q", reasoning: "", conceptKey: "ratios_unit_rates" },
+      { authHeader: true }
+    ));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.docked).toBe(true);
+    const bump = calls.rpc.find((c) => c.fn === "bump_concept_mastery");
+    expect(bump).toBeTruthy();
+    // The dock's forced-low score is the quality — single digits, i.e. a red signal.
+    expect(bump.args.p_entries[0].quality).toBe(body.reasoningScore);
+    expect(body.reasoningScore).toBeLessThan(10);
+    expect(failFetch).not.toHaveBeenCalled();
+  });
+
+  it("diagnostic masteryUpdates are derived SERVER-SIDE from the bank — a client conceptKey is ignored", async () => {
+    mockGroq(DIAG_GRADE);
+    const res = await POST(req({
+      kind: "diagnostic",
+      answers: [
+        // Forged conceptKey on the wire — must be ignored in favor of the bank's tag.
+        { subject: "math", question: "Q1", difficulty: "beginner", reasoning: REASONING, conceptKey: "stoichiometry_adv" },
+        { subject: "math", question: "Q2", difficulty: "intermediate", reasoning: REASONING },
+        { subject: "math", question: "Q3", difficulty: "advanced", reasoning: "" }, // skipped → docked
+      ],
+    }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.persisted).toBe(false);
+
+    const gradedQuality = scoreFromRubric(normalizeRubric(DIAG_GRADE.rubric));
+    const bySlot = Object.fromEntries(body.masteryUpdates.map((u) => [u.conceptKey, u]));
+    // The bank's tags (lib/diagnosticBank.js), never the request's.
+    expect(Object.keys(bySlot).sort()).toEqual(["rational_expressions", "ratios_unit_rates", "sequences_series_hs"]);
+    expect(bySlot.ratios_unit_rates).toEqual({ subject: "math", conceptKey: "ratios_unit_rates", quality: gradedQuality });
+    expect(bySlot.rational_expressions.quality).toBe(gradedQuality);
+    expect(bySlot.sequences_series_hs.quality).toBeLessThan(10); // the docked skip → red signal
+  });
+
+  it("a signed-in diagnostic persists the mastery counters via bump_concept_mastery (snake_case entries)", async () => {
+    auth.requireUser.mockResolvedValue({ user: { id: "u9" } });
+    const { sb, calls } = fakeAdmin();
+    storage.getAdmin.mockReturnValue(sb);
+    mockGroq(DIAG_GRADE);
+    const res = await POST(req({
+      kind: "diagnostic",
+      answers: [{ subject: "math", question: "Q1", difficulty: "beginner", reasoning: REASONING }],
+    }, { authHeader: true }));
+    expect(res.status).toBe(200);
+    const bump = calls.rpc.find((c) => c.fn === "bump_concept_mastery");
+    expect(bump).toBeTruthy();
+    expect(bump.args.p_user).toBe("u9");
+    expect(bump.args.p_entries).toEqual([
+      { subject: "math", concept_key: "ratios_unit_rates", quality: scoreFromRubric(normalizeRubric(DIAG_GRADE.rubric)) },
+    ]);
+    // And the save still happened first (mastery rides AFTER the authoritative write).
+    const saveIdx = calls.rpc.findIndex((c) => c.fn === "save_progress_for");
+    const bumpIdx = calls.rpc.findIndex((c) => c.fn === "bump_concept_mastery");
+    expect(saveIdx).toBeGreaterThanOrEqual(0);
+    expect(bumpIdx).toBeGreaterThan(saveIdx);
+  });
+
+  it("a mastery-bump failure NEVER fails the grade (best-effort, route stays 200)", async () => {
+    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
+    const { sb } = fakeAdmin({ scoresRows: [] });
+    // save_progress_for must succeed; only bump_concept_mastery rejects (e.g. a live DB
+    // that predates migration 0010).
+    const realRpc = sb.rpc;
+    sb.rpc = vi.fn(async (fn, args) => {
+      if (fn === "bump_concept_mastery") throw new Error("function does not exist");
+      return realRpc(fn, args);
+    });
+    storage.getAdmin.mockReturnValue(sb);
+    mockGroq(PRACTICE_GRADE);
+    const res = await POST(req(
+      { kind: "practice", subject: "math", question: "Q", reasoning: REASONING, conceptKey: "ratios_unit_rates" },
+      { authHeader: true }
+    ));
+    expect(res.status).toBe(200);
+  });
+});

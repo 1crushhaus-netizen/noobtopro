@@ -234,3 +234,39 @@ describe("db/schema.sql — Elo ranking + leaderboard invariants (PR 3)", () => 
     expect(fnBody("save_progress_for")).toContain("rationale"); // persisted by the write RPC
   });
 });
+
+describe("db/schema.sql — concept_mastery (per-concept mastery, migration 0010)", () => {
+  it("the table is RLS-enabled with a SELECT-own policy and all client writes revoked", () => {
+    expect(schema).toContain("alter table public.concept_mastery enable row level security;");
+    expect(schema).toMatch(/create policy concept_mastery_select_own on public\.concept_mastery\s*\n?\s*for select to authenticated using \(\(select auth\.uid\(\)\) = user_id\);/);
+    expect(schema).toContain("revoke all on public.concept_mastery from public, anon, authenticated;");
+    expect(schema).toContain("grant select on public.concept_mastery to authenticated;");
+  });
+
+  it("bump_concept_mastery is SECURITY DEFINER, search_path-pinned, and service-role ONLY", () => {
+    const fn = fnBody("bump_concept_mastery");
+    expect(fn).toContain("security definer");
+    expect(fn).toContain("set search_path = public");
+    expect(schema).toContain("revoke all on function public.bump_concept_mastery(uuid, jsonb) from public, anon, authenticated;");
+    expect(schema).toContain("grant execute on function public.bump_concept_mastery(uuid, jsonb) to service_role;");
+  });
+
+  it("the SQL green threshold mirrors lib/mastery.js#MASTERY_GREEN_QUALITY (70)", () => {
+    const fn = fnBody("bump_concept_mastery");
+    // Two sites: the INSERT seed and the UPDATE increment. A threshold drift between
+    // the SQL and lib/mastery.js would silently disagree on when a concept turns green.
+    expect(fn.match(/>= 70/g)?.length).toBe(2);
+  });
+
+  it("migrate_guest_data carries p_mastery (3-arg, defaulted) and the mastery insert is allow-listed", () => {
+    expect(schema).toContain("create or replace function public.migrate_guest_data(p_scores jsonb, p_attempts jsonb, p_mastery jsonb default null)");
+    const fn = fnBody("migrate_guest_data");
+    expect(fn).toContain("insert into public.concept_mastery");
+    expect(fn).toMatch(/s\.key in \('math', 'physics', 'chemistry'\)/);
+    expect(schema).toContain("grant execute on function public.migrate_guest_data(jsonb, jsonb, jsonb) to authenticated;");
+  });
+
+  it("delete_user_data clears concept_mastery too (a reset clears the chip coloring)", () => {
+    expect(fnBody("delete_user_data")).toContain("delete from public.concept_mastery where user_id = uid;");
+  });
+});

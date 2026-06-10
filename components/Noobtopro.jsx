@@ -673,7 +673,10 @@ export default function Noobtopro() {
         if (myRun !== diagRun.current) return;
         scoresObj = data.scores || {};
         const evt = { type: "baseline", t: now(), totalAfter: totalPoints(scoresObj), phdAfter: phdIndex(scoresObj) };
-        const st = await saveProgress(scoresObj, evt);
+        // data.masteryUpdates = the SERVER-derived per-concept mastery updates (one per
+        // graded bank question) — stored locally so the Learn tab colors the tested
+        // concepts for guests too (signed-in users get them persisted server-side).
+        const st = await saveProgress(scoresObj, evt, data.masteryUpdates);
         if (myRun !== diagRun.current) return; // abandoned during the save round-trip
         if (st && st.history) setHistory(st.history); // null = couldn't refresh; keep current
         setScores(scoresObj);
@@ -905,6 +908,7 @@ export default function Noobtopro() {
           targetConcept: pQuestion.targetConcept,
           difficulty: pQuestion.difficulty,
           topicSlug: pQuestion.topicSlug, // taxonomy slug → the difficulty-bucket key (normalized server-side)
+          conceptKey: pQuestion.conceptKey, // curriculum concept (mastery coloring; server allow-lists; absent on generic practice)
           reasoningSurface: pQuestion.reasoningSurface, // grader calibration (server normalizes)
           trap: pQuestion.trap,
           reasoning,
@@ -1003,7 +1007,12 @@ export default function Noobtopro() {
               finalAnswerMatches: !!r.finalAnswerMatches,
             },
           },
-        });
+        },
+        // Mastery counters for a concept-tagged attempt (a drill from a concept page);
+        // generic practice has no conceptKey → no update. The store allow-lists the key.
+        pQuestion.conceptKey
+          ? [{ subject: pSubject, conceptKey: pQuestion.conceptKey, quality: reasoningScore }]
+          : undefined);
         if (myRun !== practiceRun.current) return; // abandoned during the save round-trip
         if (st && st.history) setHistory(st.history); // null = couldn't refresh; keep current
         setScores(updatedScores);

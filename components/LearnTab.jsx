@@ -1,35 +1,102 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { SUBJECTS, ORDER } from "@/lib/scoring";
 import { RANKS, RANK_LABELS, conceptsFor, isRankWip, WIP_RANKS_NOTE, rootsFor } from "@/lib/curriculum";
+import { conceptState, MASTERY_LABELS } from "@/lib/mastery";
+import { loadMastery } from "@/lib/store";
 import { SubjectGlyph } from "@/components/ui";
 import Icon from "@/components/Icon";
 
 // The Learn tab is the fixed concept CURRICULUM (lib/curriculum.js), organized by
 // SUBJECT → RANK. Concepts are clickable: opening one shows a dedicated CONCEPT PAGE
 // whose "root concepts" (lower-rank prerequisites, from the curriculum graph) are
-// themselves clickable, so the learning path is explicit and branched. The per-concept
-// guide content + AI practice are added in later increments (see RANKS_PLAN §12).
+// themselves clickable, so the learning path is explicit and branched. Each chip is
+// COLORED by the learner's per-concept mastery (lib/mastery.js — green mastered /
+// yellow in progress / red struggling / grey untouched; direct-only, no propagation).
+// The per-concept guide content + AI practice are added in later increments
+// (see RANKS_PLAN §12).
 export default function LearnTab() {
   // selected = the full concept object { subject, key, label, strand, rank } | null
   const [selected, setSelected] = useState(null);
+  // mastery = { [subject]: { [conceptKey]: counters } } — guest localStorage or the
+  // signed-in learner's own concept_mastery rows. A load failure (e.g. the table
+  // predates migration 0010) just renders uncolored chips; states stay derivable.
+  const [mastery, setMastery] = useState({});
+
+  useEffect(() => {
+    let alive = true;
+    loadMastery().then((res) => {
+      if (alive && res && res.mastery) setMastery(res.mastery);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const stateFor = (subject, key) => conceptState(mastery, subject, key);
 
   if (selected) {
-    return <ConceptPage concept={selected} onOpen={setSelected} onBack={() => setSelected(null)} />;
+    return (
+      <ConceptPage
+        concept={selected}
+        state={stateFor(selected.subject, selected.key)}
+        stateFor={stateFor}
+        onOpen={setSelected}
+        onBack={() => setSelected(null)}
+      />
+    );
   }
-  return <CurriculumList onOpen={setSelected} />;
+  return <CurriculumList stateFor={stateFor} onOpen={setSelected} />;
+}
+
+// One concept chip, colored by mastery state. A non-grey state is also conveyed in
+// text (title + aria-label), never color alone (WCAG 1.4.1); an untouched (grey)
+// chip keeps its plain label as the accessible name.
+function ConceptChip({ subject, concept, state, onOpen, titleExtra }) {
+  const colored = state && state !== "grey";
+  return (
+    <button
+      type="button"
+      className={`np-concepttag${colored ? ` np-concepttag--${state}` : ""}`}
+      title={colored ? `${titleExtra || concept.strand || ""} — ${MASTERY_LABELS[state]}` : titleExtra || concept.strand}
+      aria-label={colored ? `${concept.label} — ${MASTERY_LABELS[state]}` : undefined}
+      onClick={onOpen}
+    >
+      {concept.label}
+    </button>
+  );
+}
+
+// The mastery color key, shown once above the curriculum listing.
+function MasteryLegend() {
+  const items = [
+    ["green", "Mastered"],
+    ["yellow", "In progress"],
+    ["red", "Struggling"],
+    ["grey", "Not attempted"],
+  ];
+  return (
+    <div className="np-masterylegend" aria-label="Concept color key">
+      {items.map(([state, label]) => (
+        <span key={state} className={`np-masterylegend-item np-masterylegend--${state}`}>
+          {label}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 // ---- the curriculum listing (subject → rank → concept chips) ----
-function CurriculumList({ onOpen }) {
+function CurriculumList({ stateFor, onOpen }) {
   return (
     <div className="fade-up">
       <h2 className="np-h2">Learn</h2>
-      <p className="np-lede" style={{ marginBottom: 20 }}>
+      <p className="np-lede" style={{ marginBottom: 12 }}>
         The full concept curriculum, organized by subject and rank — from Elementary up to Doctorate.
         Open any concept to see its foundations and (soon) a guide and practice.
       </p>
+      <MasteryLegend />
 
       {ORDER.map((subject) => {
         const color = SUBJECTS[subject].color;
@@ -48,15 +115,13 @@ function CurriculumList({ onOpen }) {
                 ) : (
                   <div className="np-weaktags">
                     {conceptsFor(subject, rank).map((c) => (
-                      <button
+                      <ConceptChip
                         key={c.key}
-                        type="button"
-                        className="np-concepttag"
-                        title={c.strand}
-                        onClick={() => onOpen({ subject, rank, ...c })}
-                      >
-                        {c.label}
-                      </button>
+                        subject={subject}
+                        concept={c}
+                        state={stateFor(subject, c.key)}
+                        onOpen={() => onOpen({ subject, rank, ...c })}
+                      />
                     ))}
                   </div>
                 )}
@@ -70,7 +135,7 @@ function CurriculumList({ onOpen }) {
 }
 
 // ---- a single concept's page: title + root-concept navigation (+ guide placeholder) ----
-function ConceptPage({ concept, onOpen, onBack }) {
+function ConceptPage({ concept, state, stateFor, onOpen, onBack }) {
   const { subject, key, label, rank } = concept;
   const color = SUBJECTS[subject] ? SUBJECTS[subject].color : "var(--text)";
   const roots = rootsFor(subject, key); // [{ key, label, strand, rank }]
@@ -90,21 +155,38 @@ function ConceptPage({ concept, onOpen, onBack }) {
 
       <h2 className="np-h1" style={{ fontSize: "clamp(26px, 4vw, 38px)", color }}>{label}</h2>
 
+      {/* The learner's standing on THIS concept (state also shown in text, not color alone). */}
+      {state && state !== "grey" && (
+        <p className={`np-masterystatus np-masterystatus--${state}`}>{MASTERY_LABELS[state]}</p>
+      )}
+
+      {/* Red = struggling: a warning, not a gate (§12.1) — point at the roots first. */}
+      {state === "red" && (
+        <div className="np-card np-masterywarn" role="note">
+          <div className="np-cardicon" style={{ color: "var(--danger)" }}>Build the foundations first</div>
+          <p className="np-lessontext">
+            Your recent attempts here struggled.{" "}
+            {roots.length > 0
+              ? "Before practicing this again, work through the root concepts below — they are what this concept is built on."
+              : "This is a foundational concept — try an easier practice round on it before moving up."}
+          </p>
+        </div>
+      )}
+
       {/* Root concepts — the lower-rank foundations, each a link to its own page. */}
       {roots.length > 0 ? (
         <div className="np-card" style={{ marginBottom: 16 }}>
           <div className="np-cardicon" style={{ color }}>Root concepts — understand these first</div>
           <div className="np-weaktags" style={{ marginTop: 8 }}>
             {roots.map((r) => (
-              <button
+              <ConceptChip
                 key={r.key}
-                type="button"
-                className="np-concepttag"
-                title={`${RANK_LABELS[r.rank] || ""} · ${r.strand || ""}`}
-                onClick={() => onOpen({ subject, ...r })}
-              >
-                {r.label}
-              </button>
+                subject={subject}
+                concept={r}
+                state={stateFor(subject, r.key)}
+                titleExtra={`${RANK_LABELS[r.rank] || ""} · ${r.strand || ""}`}
+                onOpen={() => onOpen({ subject, ...r })}
+              />
             ))}
           </div>
         </div>
