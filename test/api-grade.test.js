@@ -509,3 +509,28 @@ describe("POST /api/grade — hostile input handling", () => {
     expect(res.status).toBe(200); // previously `reasoning.trim()` threw before validation
   });
 });
+
+// ---- review round: the global Groq budget is wired on THIS unauthenticated route ----
+import { _resetRateLimits as _resetRL } from "@/lib/rateLimit";
+
+describe("POST /api/grade — global Groq budget (audit P2-3)", () => {
+  it("rejects with 429 once the platform-wide window is exhausted — IP rotation doesn't help", async () => {
+    process.env.GLOBAL_GROQ_BUDGET_PER_MIN = "1";
+    _resetRL();
+    try {
+      mockGroqReturning({ subject: "math", score: 50, rubric: { principle: 2 }, weakConcepts: [], comment: "ok" });
+      const mk = (ip) => new Request("http://test.local/api/grade", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-real-ip": ip },
+        body: JSON.stringify({ kind: "diagnostic", subject: "math", question: "Q", reasoning: "a substantive multi-step attempt at the problem" }),
+      });
+      expect((await POST(mk("198.51.100.1"))).status).toBe(200);
+      const res2 = await POST(mk("198.51.100.2")); // DIFFERENT IP — still globally bounded
+      expect(res2.status).toBe(429);
+      expect(res2.headers.get("Retry-After")).toBeTruthy();
+    } finally {
+      delete process.env.GLOBAL_GROQ_BUDGET_PER_MIN;
+      _resetRL();
+    }
+  });
+});

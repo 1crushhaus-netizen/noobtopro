@@ -374,3 +374,78 @@ describe("POST /api/learn — depth (whyItWorks) + stale auto-heal (PR 5)", () =
     expect(admin.calls.rpc).toBe(null); // never refreshed
   });
 });
+
+// ---- review round: serve-time question tokens (the Learn half of audit P1-1) ----
+describe("POST /api/learn — tryThisQuestion tokens", () => {
+  it("signs tryThisQuestion at SERVE time on the fresh-generation path, embedding the validated topic slug", async () => {
+    process.env.QUESTION_TOKEN_SECRET = "learn-test-secret";
+    try {
+      mockGroqReturning({
+        topic: "algebra", overview: "o", keyIdeas: ["k"], whyItWorks: "w",
+        socraticQuestions: ["s"], pitfalls: ["p"], tryThis: "t",
+        tryThisQuestion: { question: "Solve 2x = 10 and explain.", difficulty: "beginner" },
+      });
+      const res = await POST(req({ subject: "math", concept: "linear equations" }));
+      expect(res.status).toBe(200);
+      const j = await res.json();
+      expect(typeof j.tryThisQuestion.token).toBe("string");
+      const { verifyQuestionToken } = await import("@/lib/questionToken");
+      const v = verifyQuestionToken(j.tryThisQuestion.token);
+      expect(v.ok).toBe(true);
+      expect(v.q).toMatchObject({
+        subject: "math",
+        question: "Solve 2x = 10 and explain.",
+        difficulty: "beginner",
+        topicSlug: "algebra", // bucket key rides in the token (review P3)
+      });
+    } finally {
+      delete process.env.QUESTION_TOKEN_SECRET;
+    }
+  });
+
+  it("the token NEVER enters the shared cache write (per-response jti/expiry must not be frozen for all users)", async () => {
+    process.env.QUESTION_TOKEN_SECRET = "learn-test-secret";
+    try {
+      const client = fakeAdmin(); // miss → generate → promote_or_insert_guide write
+      mocks.getAdmin.mockReturnValue(client);
+      mockGroqReturning({
+        topic: "algebra", overview: "o", keyIdeas: ["k"], whyItWorks: "w",
+        socraticQuestions: ["s"], pitfalls: ["p"], tryThis: "t",
+        tryThisQuestion: { question: "Solve 2x = 10 and explain.", difficulty: "beginner" },
+      });
+      const res = await POST(req({ subject: "math", concept: "linear equations" }));
+      expect(res.status).toBe(200);
+      expect((await res.json()).tryThisQuestion.token).toBeTruthy(); // served WITH a token…
+      const stored = client.calls.rpc.args.p_content;
+      expect(stored.tryThisQuestion).toBeTruthy();
+      expect(JSON.stringify(stored)).not.toContain('"token"'); // …but cached WITHOUT one
+    } finally {
+      delete process.env.QUESTION_TOKEN_SECRET;
+    }
+  });
+
+  it("a CACHE HIT also returns a freshly-signed token (each opener gets their own jti)", async () => {
+    process.env.QUESTION_TOKEN_SECRET = "learn-test-secret";
+    try {
+      const content = {
+        concept: "linear equations", topic: "algebra", overview: "o", keyIdeas: ["k"], whyItWorks: "w",
+        socraticQuestions: ["s"], pitfalls: ["p"], tryThis: "t",
+        tryThisQuestion: { question: "Cached: solve 2x = 10.", difficulty: "beginner" },
+      };
+      mocks.getAdmin.mockReturnValue(fakeAdmin({ hitContent: content, hitSource: "curated" }));
+      const failFetch = vi.fn(() => { throw new Error("cache hit must not call Groq"); });
+      vi.stubGlobal("fetch", failFetch);
+      const r1 = await (await POST(req({ subject: "math", concept: "linear equations" }))).json();
+      const r2 = await (await POST(req({ subject: "math", concept: "linear equations" }))).json();
+      expect(r1.cached).toBe(true);
+      const { verifyQuestionToken } = await import("@/lib/questionToken");
+      const v1 = verifyQuestionToken(r1.tryThisQuestion.token);
+      const v2 = verifyQuestionToken(r2.tryThisQuestion.token);
+      expect(v1.ok && v2.ok).toBe(true);
+      expect(v1.q.jti).not.toBe(v2.q.jti); // per-serve identity, not a frozen cached token
+      expect(failFetch).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.QUESTION_TOKEN_SECRET;
+    }
+  });
+});

@@ -386,8 +386,10 @@ describe("POST /api/score practice — server-authoritative Glicko-2 score", () 
 // ---- diagnostic: auth-optional batch baseline ------------------------------
 describe("POST /api/score diagnostic", () => {
   const answers = [
-    { subject: "math", question: "Qm-easy", difficulty: "beginner", reasoning: "Adding the two fractions over a common denominator of twelve gives seven twelfths." },
-    { subject: "math", question: "Qm-hard", difficulty: "advanced", reasoning: "Differentiating with the chain rule and setting the result to zero locates the maximum." },
+    // No `question` field: the route grades the BANK's text by (subject, difficulty);
+    // a client-echoed question is only checked for serve/submit consistency.
+    { subject: "math", difficulty: "beginner", reasoning: "Adding the two fractions over a common denominator of twelve gives seven twelfths." },
+    { subject: "math", difficulty: "advanced", reasoning: "Differentiating with the chain rule and setting the result to zero locates the maximum." },
   ];
 
   it("GUEST (no token): grades + aggregates server-side, returns scores WITHOUT persisting", async () => {
@@ -410,7 +412,7 @@ describe("POST /api/score diagnostic", () => {
     const res = await POST(
       req({
         kind: "diagnostic",
-        answers: [{ subject: "math", question: "Qm-mid", difficulty: "intermediate", reasoning: REASONING, reasoningSurface: "trap", trap: spoof }],
+        answers: [{ subject: "math", difficulty: "intermediate", reasoning: REASONING, reasoningSurface: "trap", trap: spoof }],
       })
     );
     expect(res.status).toBe(200);
@@ -440,7 +442,7 @@ describe("POST /api/score diagnostic", () => {
 
   it("DOCKS a blank diagnostic answer with no Groq call but still grades the substantive one", async () => {
     const mixed = [
-      { subject: "math", question: "Qm-easy", difficulty: "beginner", reasoning: "   " }, // blank -> docked
+      { subject: "math", difficulty: "beginner", reasoning: "   " }, // blank -> docked
       answers[1], // substantive -> graded
     ];
     const fetchMock = mockGroq(DIAG_GRADE);
@@ -504,7 +506,7 @@ describe("POST /api/score diagnostic", () => {
     const sixImages = [];
     for (const s of ["math", "physics", "chemistry"]) {
       for (const d of ["beginner", "advanced"]) {
-        sixImages.push({ subject: s, question: `Q-${s}-${d}`, difficulty: d, reasoning: REASONING, image: PNG });
+        sixImages.push({ subject: s, difficulty: d, reasoning: REASONING, image: PNG });
       }
     }
     mockGroq(DIAG_GRADE);
@@ -518,17 +520,24 @@ describe("POST /api/score diagnostic", () => {
 
 // ---- audit fix round 2: the server-issued question binding + concurrency ----
 describe("POST /api/score practice — server-issued question tokens (audit P1-1)", () => {
-  it("rejects a MISSING token with 400 and a generate-a-new-question message — no Groq call", async () => {
+  it("rejects a MISSING token with 400 — a PRE-DEPLOY (old-shape) body gets refresh guidance, a bare one gets generate-a-new-question; no Groq call either way", async () => {
     auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
     storage.getAdmin.mockReturnValue(fakeAdmin().sb);
     const failFetch = vi.fn(() => { throw new Error("must not call Groq"); });
     vi.stubGlobal("fetch", failFetch);
-    const res = await POST(req(
+    // Old-shape stale client (loose subject/question, no token): "generate a new
+    // question" would dead-end it (its regenerate path can't mint tokens) — it gets
+    // the one instruction that works: refresh.
+    const resOld = await POST(req(
       { kind: "practice", subject: "math", question: "Q", difficulty: "phd", reasoning: REASONING },
       { authHeader: true }
     ));
-    expect(res.status).toBe(400);
-    expect((await res.json()).error).toMatch(/generate a new question/i);
+    expect(resOld.status).toBe(400);
+    expect((await resOld.json()).error).toMatch(/refresh the page/i);
+    // A current client that simply lost its token gets the regenerate guidance.
+    const resBare = await POST(req({ kind: "practice", reasoning: REASONING }, { authHeader: true }));
+    expect(resBare.status).toBe(400);
+    expect((await resBare.json()).error).toMatch(/generate a new question/i);
     expect(failFetch).not.toHaveBeenCalled();
   });
 
@@ -636,7 +645,7 @@ describe("POST /api/score diagnostic — bank-derived questions + global budget"
     const fetchMock = mockGroq(DIAG_GRADE);
     const res = await POST(req({
       kind: "diagnostic",
-      answers: [{ subject: "math", question: "what is 1+1? (substituted)", difficulty: "beginner", reasoning: REASONING }],
+      answers: [{ subject: "math", difficulty: "beginner", reasoning: REASONING }],
     }));
     expect(res.status).toBe(200);
     const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
@@ -676,5 +685,135 @@ describe("POST /api/score diagnostic — bank-derived questions + global budget"
     } finally {
       delete process.env.GLOBAL_GROQ_BUDGET_PER_MIN;
     }
+  });
+});
+
+// ---- review round: band clamp + serve/submit consistency --------------------
+describe("POST /api/score — review-round hardening", () => {
+  it("CLAMPS the token band to one above the server-stored level (an injection-minted phd label on a low account grades near-level)", async () => {
+    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
+    // Stored level 30 → foundational; a phd-labeled token must clamp to intermediate.
+    const { sb, calls } = fakeAdmin({ scoresRows: [{ subject: "math", score: 30, weak_concepts: [], comment: "", rubric: null, glicko: null }] });
+    storage.getAdmin.mockReturnValue(sb);
+    mockGroq(PRACTICE_GRADE);
+    const res = await POST(req(
+      { kind: "practice", token: tok({ difficulty: "phd", topicSlug: "algebra" }), reasoning: REASONING },
+      { authHeader: true }
+    ));
+    expect(res.status).toBe(200);
+    const save = calls.rpc.find((c) => c.fn === "save_progress_for");
+    expect(save.args.p_attempt.band).toBe("intermediate"); // clamped, NOT phd
+    // And the at/below-level direction is untouched (deflate-only):
+    const { newScore } = expectedPracticeScore({ prevScore: 30, grade: PRACTICE_GRADE, band: "intermediate" });
+    expect(save.args.p_scores[0].score).toBe(newScore);
+  });
+
+  it("a HIGH-level account is not clamped (phd at stored 85 stays phd)", async () => {
+    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
+    const { sb, calls } = fakeAdmin({ scoresRows: [{ subject: "math", score: 85, weak_concepts: [], comment: "", rubric: null, glicko: null }] });
+    storage.getAdmin.mockReturnValue(sb);
+    mockGroq(PRACTICE_GRADE);
+    const res = await POST(req(
+      { kind: "practice", token: tok({ difficulty: "phd" }), reasoning: REASONING },
+      { authHeader: true }
+    ));
+    expect(res.status).toBe(200);
+    expect(calls.rpc.find((c) => c.fn === "save_progress_for").args.p_attempt.band).toBe("phd");
+  });
+
+  it("diagnostic: a client-echoed question that MISMATCHES the bank's slot text is a retryable 409 (serve/submit consistency)", async () => {
+    const failFetch = vi.fn(() => { throw new Error("must not grade a mismatched diagnostic"); });
+    vi.stubGlobal("fetch", failFetch);
+    const res = await POST(req({
+      kind: "diagnostic",
+      answers: [{ subject: "math", question: "a DIFFERENT question than was served", difficulty: "beginner", reasoning: REASONING }],
+    }));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/restart the diagnostic/i);
+    expect(failFetch).not.toHaveBeenCalled();
+  });
+
+  it("diagnostic: an echoed question MATCHING the bank text passes the consistency check", async () => {
+    mockGroq(DIAG_GRADE);
+    const bankText = (await import("@/lib/diagnosticBank")).diagnosticQuestionFor("math", "beginner");
+    const res = await POST(req({
+      kind: "diagnostic",
+      answers: [{ subject: "math", question: bankText, difficulty: "beginner", reasoning: REASONING }],
+    }));
+    expect(res.status).toBe(200);
+  });
+
+  it("a REPLAYED jti is caught by the cheap pre-grade check — 409 with NO Groq call and NO budget burn", async () => {
+    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
+    const { sb } = fakeAdmin({ scoresRows: [] });
+    const realFrom = sb.from.bind(sb);
+    sb.from = (table) => {
+      if (table === "attempts") {
+        // The pre-grade jti lookup finds an existing row → replay.
+        const chain = {
+          select: () => chain, eq: () => chain, order: () => chain, limit: () => chain,
+          then: (resolve, reject) => Promise.resolve({ data: [{ id: 7 }], error: null }).then(resolve, reject),
+        };
+        return chain;
+      }
+      return realFrom(table);
+    };
+    storage.getAdmin.mockReturnValue(sb);
+    const failFetch = vi.fn(() => { throw new Error("replays must not reach Groq"); });
+    vi.stubGlobal("fetch", failFetch);
+    const res = await POST(req({ kind: "practice", token: tok(), reasoning: REASONING }, { authHeader: true }));
+    expect(res.status).toBe(409);
+    expect(failFetch).not.toHaveBeenCalled();
+  });
+
+  it("conflict recompute genuinely RE-READS: pass 2 computes from the moved row and threads its updated_at + the SAME jti", async () => {
+    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
+    // Mutable fixture: the first persist-loop read sees score 40/t1; after the
+    // conflict, the second read sees the concurrently-moved row (score 48/t2).
+    const states = [
+      [{ subject: "math", score: 40, weak_concepts: [], comment: "", rubric: null, glicko: null, updated_at: "2026-06-11T00:00:01.000000+00:00" }],
+      [{ subject: "math", score: 48, weak_concepts: [], comment: "", rubric: null, glicko: null, updated_at: "2026-06-11T00:00:02.000000+00:00" }],
+    ];
+    let scoreReads = 0;
+    const saves = [];
+    const sb = {
+      rpc: vi.fn(async (fn, args) => {
+        if (fn === "save_progress_for") {
+          saves.push(args);
+          return { data: { status: saves.length === 1 ? "conflict" : "ok" }, error: null };
+        }
+        return { data: null, error: null };
+      }),
+      from: (table) => {
+        const chain = {
+          select: () => chain, eq: () => chain, order: () => chain, limit: () => chain,
+          maybeSingle: async () => ({ data: null, error: null }),
+          then: (resolve, reject) => {
+            if (table === "scores") {
+              const i = scoreReads++;
+              // read 0 = pre-grade prompt read; reads 1,2 = the persist loop passes
+              const data = i === 0 ? states[0] : states[Math.min(i - 1, 1)];
+              return Promise.resolve({ data, error: null }).then(resolve, reject);
+            }
+            return Promise.resolve({ data: [], error: null }).then(resolve, reject);
+          },
+        };
+        return chain;
+      },
+    };
+    storage.getAdmin.mockReturnValue(sb);
+    mockGroq(PRACTICE_GRADE);
+    const res = await POST(req({ kind: "practice", token: tok(), reasoning: REASONING }, { authHeader: true }));
+    expect(res.status).toBe(200);
+    expect(saves).toHaveLength(2);
+    // Pass 1 was computed from the t1 row; pass 2 MUST reflect the fresh t2 read.
+    expect(saves[0].p_expected_updated_at).toBe("2026-06-11T00:00:01.000000+00:00");
+    expect(saves[1].p_expected_updated_at).toBe("2026-06-11T00:00:02.000000+00:00");
+    const s1 = expectedPracticeScore({ prevScore: 40, grade: PRACTICE_GRADE, band: "intermediate" });
+    const s2 = expectedPracticeScore({ prevScore: 48, grade: PRACTICE_GRADE, band: "intermediate" });
+    expect(saves[0].p_scores[0].score).toBe(s1.newScore);
+    expect(saves[1].p_scores[0].score).toBe(s2.newScore); // recomputed, not reused
+    expect(saves[1].p_attempt.jti).toBe(saves[0].p_attempt.jti); // same served question
+    expect((await res.json()).newScore).toBe(s2.newScore);
   });
 });

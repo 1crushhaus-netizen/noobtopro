@@ -782,7 +782,11 @@ export default function Noobtopro() {
 
     const key = `${subject}::${concept}`;
     const cached = learnCacheRef.current[key];
-    if (cached) {
+    // Serve the memo UNLESS its "try this" token was consumed (tokens are one-shot —
+    // the jti dedupe would 409 a second graded attempt) or rejected (expired). A
+    // token-less entry refetches below: a SERVER cache hit, freshly signed, no Groq.
+    // Guests never need the token (they grade via /api/grade), so the memo always holds.
+    if (cached && (!user || !cached.tryThisQuestion || cached.tryThisQuestion.token)) {
       setLearnContent(cached);
       setLearnQuestion(cached.tryThisQuestion || null);
       setLearnBusy(false);
@@ -950,6 +954,20 @@ export default function Noobtopro() {
     });
   }
 
+  // One-shot learn tokens: after ANY signed-in submit of a Learn-sourced question
+  // (success, duplicate 409, or an expired-token 400), drop the token from the session
+  // guide cache so the next open of that concept refetches a freshly-signed one.
+  // No-op for /api/generate questions (they aren't in the guide cache).
+  function consumeLearnToken(token) {
+    if (!token) return;
+    for (const k of Object.keys(learnCacheRef.current)) {
+      const g = learnCacheRef.current[k];
+      if (g && g.tryThisQuestion && g.tryThisQuestion.token === token) {
+        learnCacheRef.current[k] = { ...g, tryThisQuestion: { ...g.tryThisQuestion, token: null } };
+      }
+    }
+  }
+
   async function submitPractice(skip = false) {
     // Capture the practice run token: sign-out / Restart / "Reset my progress" /
     // starting another practice all bump practiceRun. If any happens while this grade
@@ -973,16 +991,21 @@ export default function Noobtopro() {
         // Signed-in: SERVER-AUTHORITATIVE. The server grades, computes the new score
         // from the user's STORED level, and persists it for the verified uid; the
         // client renders the trusted result and cannot substitute a score.
-        const data = await authApi("/api/score", {
-          kind: "practice",
-          // The server-issued question token (audit P1-1): subject/question/band/
-          // topic/surface all come from the VERIFIED token server-side, so the
-          // client no longer asserts any rating-relevant field. A missing/expired
-          // token gets a clear "generate a new question" error.
-          token: pQuestion.token,
-          reasoning,
-          image: imagePayload,
-        });
+        let data;
+        try {
+          data = await authApi("/api/score", {
+            kind: "practice",
+            // The server-issued question token (audit P1-1): subject/question/band/
+            // topic/surface all come from the VERIFIED token server-side, so the
+            // client no longer asserts any rating-relevant field. A missing/expired
+            // token gets a clear "generate a new question" error.
+            token: pQuestion.token,
+            reasoning,
+            image: imagePayload,
+          });
+        } finally {
+          consumeLearnToken(pQuestion.token); // one-shot: never resubmit a used/rejected token
+        }
         if (myRun !== practiceRun.current) return; // abandoned mid-grade
         // Defensive: a malformed response must not put an undefined subjectScore into
         // state (which would crash the dashboard/livescore reads) — surface an error.

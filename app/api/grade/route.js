@@ -9,9 +9,10 @@ import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
 import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, normalizeFeedbackList, capSolution, normalizeErrors, normalizeSolve, reasoningSurfaceContext } from "@/lib/gradeInput";
 
 export const dynamic = "force-dynamic";
-// Bound a hung request (audit P2-10): the Groq fetch has a 30s abort; at most two
-// sequential upstream calls per grade fit comfortably.
-export const maxDuration = 60;
+// Bound a hung request (audit P2-10): the Groq fetch has a 30s abort, and at most
+// TWO sequential upstream calls can run (primary + retry/fallback) — 90s leaves real
+// headroom over that 60s worst case plus handler overhead.
+export const maxDuration = 90;
 
 // Auto-grow the concept hub: register the grader's (server-normalized, capped)
 // weak concepts as PENDING catalog stubs, AFTER the response so grading latency

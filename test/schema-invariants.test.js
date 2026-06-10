@@ -257,7 +257,8 @@ describe("db/schema.sql — audit fix round 2 (0011)", () => {
   it("migrate_guest_data admits a guest glicko blob only through _valid_glicko (bounded, numerically sane)", () => {
     expect(fnBody("migrate_guest_data")).toContain("public._valid_glicko(s->'glicko')");
     const vg = fnBody("_valid_glicko");
-    expect(vg).toContain("between 0 and 4000"); // rating bounds
+    expect(vg).toContain("between -2500 and 5500"); // rating bounds (the engine's legal band)
+    expect(vg).toContain("is not true"); // three-valued-logic guard: a NULL axis check must flag, not slip
     expect(vg).toContain("between 1 and 500"); // rd bounds
     expect(vg).toContain("between 0 and 0.2"); // vol bounds
   });

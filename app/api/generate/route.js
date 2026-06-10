@@ -11,9 +11,10 @@ import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
 import { buildDiagnostic } from "@/lib/diagnosticBank";
 
 export const dynamic = "force-dynamic";
-// Bound a hung request (audit P2-10): the Groq fetch has a 30s abort; one
-// generation + retry fits comfortably.
-export const maxDuration = 60;
+// Bound a hung request (audit P2-10): the Groq fetch has a 30s abort, and at most
+// TWO sequential upstream calls can run (primary + retry/fallback) — 90s leaves real
+// headroom over that 60s worst case plus handler overhead.
+export const maxDuration = 90;
 
 export async function POST(req) {
   // Block forced cross-site requests (CSRF-style cost/quota DoS) and non-JSON bodies.

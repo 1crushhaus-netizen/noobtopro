@@ -245,3 +245,69 @@ describe("Noobtopro — time-locked 'I don't know' skip", () => {
     vi.useRealTimers();
   });
 });
+
+// ---- review round: skip-lock keystroke immunity + prepareImage guards ----------
+describe("Noobtopro — skip-lock is immune to keystrokes (audit P2-15)", () => {
+  it("typing mid-countdown does NOT restart the 10s lock — it is 10s per QUESTION, not per keystroke", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async (path) => {
+      if (path === "/api/generate") return jsonRes(DIAGNOSTIC);
+      return jsonRes({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await act(async () => { render(<Noobtopro />); await vi.advanceTimersByTimeAsync(0); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /prove it/i })); await vi.advanceTimersByTimeAsync(0); });
+    const skip = () => screen.getByRole("button", { name: /i don't know/i });
+    expect(skip().disabled).toBe(true);
+
+    // 9 seconds in, the learner types (parent state changes → AnswerComposer re-renders
+    // with a FRESH onSkip identity — the pre-fix effect dep that reset the timer).
+    await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
+    fireEvent.change(screen.getByLabelText("Your reasoning"), { target: { value: "hmm, maybe I" } });
+    // One more second completes the ORIGINAL 10s window; pre-fix this was a fresh 10s.
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(skip().disabled).toBe(false);
+
+    vi.useRealTimers();
+  });
+});
+
+describe("Noobtopro — attach-time image preparation (audit P1-2)", () => {
+  async function startDiagnostic() {
+    const fetchMock = vi.fn(async (path) => {
+      if (path === "/api/generate") return jsonRes(DIAGNOSTIC);
+      return jsonRes({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const utils = render(<Noobtopro />);
+    fireEvent.click(await screen.findByRole("button", { name: /prove it/i }));
+    await screen.findByText(DIAGNOSTIC_ORDER[0]);
+    return utils;
+  }
+
+  it("rejects a non-image file type AT ATTACH TIME with a clear message (no preview, no crash later)", async () => {
+    const { container } = await startDiagnostic();
+    const input = container.querySelector('input[type="file"]');
+    const file = new File(["not an image"], "notes.pdf", { type: "application/pdf" });
+    fireEvent.change(input, { target: { files: [file] } });
+    await screen.findByText(/isn't supported/i);
+    expect(screen.queryByAltText("your work")).toBeNull();
+  });
+
+  it("rejects an oversized original when the canvas path is unavailable (jsdom) — the diagnostic can never 413", async () => {
+    const { container } = await startDiagnostic();
+    const input = container.querySelector('input[type="file"]');
+    // jsdom has no 2D canvas, so prepareImage takes the size-capped fallback; a >2.5MB
+    // original must be refused at attach (pre-fix it shipped and 413'd the whole submit).
+    const big = new File([new Uint8Array(2_600_000)], "photo.png", { type: "image/png" });
+    fireEvent.change(input, { target: { files: [big] } });
+    await screen.findByText(/too large to grade/i);
+    expect(screen.queryByAltText("your work")).toBeNull();
+  });
+
+  it("accepts a small image via the fallback path (preview appears)", async () => {
+    const { container } = await startDiagnostic();
+    await attachImageToCurrentComposer(container);
+    expect(screen.getByAltText("your work")).toBeTruthy();
+  });
+});

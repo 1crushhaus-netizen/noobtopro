@@ -56,7 +56,8 @@ import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, no
 export const dynamic = "force-dynamic";
 // Bound a hung request explicitly (audit P2-10): the Groq fetch carries a 30s abort,
 // and the diagnostic fans out up to 9 grades at concurrency 3, so the worst case
-// needs real headroom. Vercel clamps to the plan limit if lower.
+// needs real headroom. 300s = the Fluid-compute maximum on the current (Hobby) plan —
+// revisit if the plan changes (Vercel rejects over-plan values at deploy time).
 export const maxDuration = 300;
 
 const GRADE_CONCURRENCY = 3; // simultaneous Groq grade calls per diagnostic
@@ -210,6 +211,15 @@ async function handlePractice(req, body) {
   // inflate their rating, rotate the claimed (topic, band) to dodge the anti-farm
   // damper, and poison the shared item_difficulty calibration. The token's `jti`
   // also dedupes the attempt (replay protection — save_progress_for, audit P2-5).
+  // A pre-deploy client submits the OLD body shape (loose subject/question fields, no
+  // token) — and its in-memory regenerate path can never mint one, so "generate a new
+  // question" would dead-end it. Tell that client the one thing that actually works.
+  if (!token && body && typeof body.subject === "string" && typeof body.question === "string") {
+    return NextResponse.json(
+      { error: "A new version of the app is available — refresh the page, then try again." },
+      { status: 400 }
+    );
+  }
   const tok = verifyQuestionToken(token);
   if (!tok.ok) return NextResponse.json({ error: tok.error }, { status: 400 });
   const issued = tok.q;
@@ -257,31 +267,38 @@ async function handlePractice(req, body) {
   // safeDifficulty is allow-listed; "(unspecified)" → intermediate so the rating math
   // always has a real band. normalizeTopic bounds the topic to a real slug or
   // general_<subject>, so the bucket key space is bounded + FK-valid.
-  const bandKey = safeDifficulty !== "(unspecified)" ? safeDifficulty : "intermediate";
+  const tokenBand = safeDifficulty !== "(unspecified)" ? safeDifficulty : "intermediate";
   const topicSlug = normalizeTopic(subject, issued.topicSlug);
-  const seedDifficulty = defaultDifficultyForBand(bandKey);
   // Image-only submission: the photo IS the answer, so a vision failure must fail
   // retryably rather than text-grade the placeholder string (audit P1-3).
   const imageOnly = !!img.image && !(typeof reasoning === "string" && reasoning.trim());
 
   try {
-    // 1) PRE-GRADE context reads: the learner's level (for the grader prompt), their
-    //    recent attempts in this subject (the last K, for the anti-farm repeat factor)
-    //    and the calibrated item difficulty for this bucket — ALL read server-side; the
-    //    client supplies none of the values the new rating is computed from. The
-    //    RATING-bearing scores read happens fresh inside the persist loop below
-    //    (audit P2-4: the old pre-grade read made the rating a multi-second
-    //    read-modify-write that lost one of two concurrent updates).
-    const [scoresRes, recentRes, diffRes] = await Promise.all([
+    // Cheap PRE-GRADE replay check (review P3): the authoritative jti dedupe lives in
+    // save_progress_for (under the advisory lock), but catching the common replay here
+    // skips the paid Groq grade and the global-budget charge entirely.
+    if (issued.jti) {
+      const { data: dupRows } = await sb.from("attempts").select("id").eq("user_id", uid).eq("jti", issued.jti).limit(1);
+      if (Array.isArray(dupRows) && dupRows.length) {
+        return NextResponse.json(
+          { error: "This answer has already been graded — generate a new question to keep practicing." },
+          { status: 409 }
+        );
+      }
+    }
+
+    // 1) PRE-GRADE context reads: the learner's level (for the grader prompt + the
+    //    band clamp below), and their recent attempts in this subject (the last K, for
+    //    the anti-farm repeat factor) — ALL read server-side; the client supplies none
+    //    of the values the new rating is computed from. The RATING-bearing scores read
+    //    happens fresh inside the persist loop below (audit P2-4: the old pre-grade
+    //    read made the rating a multi-second read-modify-write that lost one of two
+    //    concurrent updates).
+    const [scoresRes, recentRes] = await Promise.all([
       sb.from("scores").select("subject, score, weak_concepts, comment, rubric, glicko, updated_at").eq("user_id", uid),
       sb.from("attempts").select("topic, band").eq("user_id", uid).eq("subject", subject).eq("type", "attempt").order("created_at", { ascending: false }).limit(REPEAT_WINDOW_K),
-      sb.from("item_difficulty").select("difficulty").eq("subject", subject).eq("topic", topicSlug).eq("band", bandKey).maybeSingle(),
     ]);
     if (scoresRes.error) throw scoresRes.error;
-    const itemDifficulty =
-      diffRes && diffRes.data && Number.isFinite(Number(diffRes.data.difficulty))
-        ? Number(diffRes.data.difficulty)
-        : seedDifficulty;
 
     const rowsToMap = (rows) => {
       const m = {};
@@ -299,6 +316,27 @@ async function handlePractice(req, body) {
     };
     const promptMap = rowsToMap(scoresRes.data);
     const promptPrevScore = promptMap[subject] ? promptMap[subject].score : 0;
+
+    // BAND CLAMP (review of audit P1-1 — the injection-mint residual): the token's
+    // band is signed but originates from MODEL output whose prompt embeds client text
+    // on an unauthenticated route, so a successful generator injection could mint a
+    // "phd"-band trivial question. The opponent band a learner faces is therefore
+    // capped at ONE band above their server-stored level ("at-rating by selection" —
+    // the generator already targets their level, so honest flows are unaffected; a
+    // minted phd label on a 30-score account grades as intermediate). Deflate-only:
+    // bands at or below the learner's level are untouched.
+    const BAND_LADDER = ["beginner", "foundational", "intermediate", "advanced", "phd"];
+    const storedBandIdx = Math.min(BAND_LADDER.length - 1, Math.floor(Math.max(0, Number(promptPrevScore) || 0) / 20));
+    const tokenBandIdx = Math.max(0, BAND_LADDER.indexOf(tokenBand));
+    const bandKey = BAND_LADDER[Math.min(tokenBandIdx, storedBandIdx + 1)];
+    const seedDifficulty = defaultDifficultyForBand(bandKey);
+
+    // The calibrated item difficulty for the (clamped) bucket.
+    const diffRes = await sb.from("item_difficulty").select("difficulty").eq("subject", subject).eq("topic", topicSlug).eq("band", bandKey).maybeSingle();
+    const itemDifficulty =
+      diffRes && diffRes.data && Number.isFinite(Number(diffRes.data.difficulty))
+        ? Number(diffRes.data.difficulty)
+        : seedDifficulty;
 
     // 2) DETERMINISTIC pre-grade dock (no LLM call) on the ORIGINAL answer: empty /
     //    "idk" / off-topic / gibberish → forced low outcome + all-zero rubric. Else grade.
@@ -374,9 +412,16 @@ async function handlePractice(req, body) {
     //    status:"duplicate" and NO second rating step. The rating math itself is
     //    unchanged: 9 axes vs the calibrated item difficulty, anti-farm damping on
     //    repeats, dock = a real low outcome, lazy-seed continuity.
-    const repeatFactor = repeatFactorFromRecent(recentRes && recentRes.data, topicSlug, bandKey);
+    let recentRows = recentRes && recentRes.data;
     let saved = null;
     for (let pass = 0; pass < 2 && !saved; pass++) {
+      if (pass > 0) {
+        // The conflicting concurrent attempt also appended an attempts row — refresh
+        // the anti-farm window so the recompute damps it correctly (review P3).
+        const freshRecent = await sb.from("attempts").select("topic, band").eq("user_id", uid).eq("subject", subject).eq("type", "attempt").order("created_at", { ascending: false }).limit(REPEAT_WINDOW_K);
+        if (!freshRecent.error) recentRows = freshRecent.data;
+      }
+      const repeatFactor = repeatFactorFromRecent(recentRows, topicSlug, bandKey);
       const freshRes = await sb.from("scores").select("subject, score, weak_concepts, comment, rubric, glicko, updated_at").eq("user_id", uid);
       if (freshRes.error) throw freshRes.error;
       const current = rowsToMap(freshRes.data);
@@ -552,6 +597,17 @@ async function handleDiagnostic(req, body) {
     // lookup means a forged slot → skip.)
     const bankQuestion = diagnosticQuestionFor(subject, difficulty);
     if (!bankQuestion) continue;
+    // Serve/submit consistency (review P2): the client echoes the question it actually
+    // DISPLAYED; if the bank was edited between serve and submit (a deploy mid-
+    // diagnostic), grading the new text against an answer to the old text would
+    // silently persist a wrong baseline. Reject retryably instead — restarting the
+    // (free, zero-Groq) diagnostic is cheap; a corrupted Glicko seed is not.
+    if (typeof a.question === "string" && a.question.trim() && capText(a.question.trim()) !== capText(bankQuestion)) {
+      return NextResponse.json(
+        { error: "The placement questions were updated while you were answering — please restart the diagnostic." },
+        { status: 409 }
+      );
+    }
     const img = normalizeImage(a.image);
     if (!img.ok) return NextResponse.json({ error: img.error }, { status: 400 });
     seen.add(key);
@@ -703,7 +759,8 @@ async function handleDiagnostic(req, body) {
       // Snapshot total/phd over the user's FULL post-write score map: a subject whose
       // grades all failed keeps its EXISTING score (the upsert only writes submitted
       // subjects), so computing over `scores` alone would understate the totals.
-      const { data: existingRows } = await sb.from("scores").select("subject, score").eq("user_id", uid);
+      const { data: existingRows, error: existingErr } = await sb.from("scores").select("subject, score").eq("user_id", uid);
+      if (existingErr) throw existingErr; // a silent miss would understate total_after/phd_after on the baseline row
       const merged = {};
       for (const r of existingRows || []) merged[r.subject] = { score: r.score };
       for (const s of ORDER) if (scores[s]) merged[s] = { score: scores[s].score };

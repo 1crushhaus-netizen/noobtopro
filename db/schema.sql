@@ -153,14 +153,19 @@ as $$
      and not exists (
        select 1 from jsonb_each(j) ax
        where jsonb_typeof(ax.value) <> 'object'
-          or not (
+          -- IS NOT TRUE (not `not (...)`): a missing/null rating/rd/vol makes the
+          -- conjunction NULL, which `not` would also leave NULL — silently admitting
+          -- the axis. IS NOT TRUE flags NULL and false alike.
+          or (
                 pg_input_is_valid(ax.value->>'rating', 'numeric')
-            and (ax.value->>'rating')::numeric between 0 and 4000
+            -- The engine's legal band is ~[-2300, +5300] (lib/scoring.js RATING_LO/HI);
+            -- a fully-docked guest can legitimately sit below 0 internally.
+            and (ax.value->>'rating')::numeric between -2500 and 5500
             and pg_input_is_valid(ax.value->>'rd', 'numeric')
             and (ax.value->>'rd')::numeric between 1 and 500
             and pg_input_is_valid(ax.value->>'vol', 'numeric')
             and (ax.value->>'vol')::numeric between 0 and 0.2
-          )
+          ) is not true
      );
 $$;
 
@@ -795,8 +800,9 @@ alter table public.security_events enable row level security;
 create index if not exists security_events_status_created_idx
   on public.security_events (status, created_at desc);
 
--- concept_reports: a signed-in user's report about a public guide. RLS lets a user
--- INSERT only their OWN report; reads are admin-only (service-role; NO select policy).
+-- concept_reports: a signed-in user's report about a public guide. Since 0011 the
+-- ONLY write path is the submit_concept_report RPC (self-scoped, ≤20 open per
+-- reporter); the direct RLS INSERT policy is dropped and the grant revoked; reads are admin-only (service-role; NO select policy).
 -- The user-facing "report" button ships with the Concept Hub browse UI; the table is
 -- created now so the admin dashboard can render reports.
 create table if not exists public.concept_reports (
@@ -846,6 +852,11 @@ begin
     raise exception 'concept key required';
   end if;
 
+  -- Serialize per reporter (review P3): without this the 20-open cap is a TOCTOU
+  -- count check that a concurrent burst could overshoot. Same lock pattern as the
+  -- sibling per-user RPCs.
+  perform pg_advisory_xact_lock(hashtextextended(uid::text, 1));
+
   select count(*) into v_open from public.concept_reports where reporter_id = uid and status = 'open';
   if v_open >= 20 then
     return jsonb_build_object('status', 'limited');
@@ -881,7 +892,8 @@ grant execute on function public.submit_concept_report(text, text, text) to auth
 revoke insert, update, delete, truncate on public.diagnostic_pool, public.security_events from anon, authenticated;
 --   - public-read content (writes service-role only): keep SELECT, drop writes.
 revoke insert, update, delete, truncate on public.concept_guides, public.concept_topics from anon, authenticated;
---   - concept_reports: authenticated INSERTs its OWN report (RLS policy), so keep that
+--   - concept_reports: writes go ONLY through submit_concept_report (0011) — the
+--     direct INSERT grant is revoked below alongside update/delete/truncate.
 --     one grant; revoke everything else (anon can't report; nobody updates/deletes).
 revoke update, delete, truncate on public.concept_reports from anon, authenticated;
 revoke insert on public.concept_reports from anon;

@@ -11,14 +11,15 @@ import { signQuestion } from "@/lib/questionToken";
 
 export const dynamic = "force-dynamic";
 // Bound a hung upstream call (audit P2-10): the Groq fetch carries its own 30s
-// abort; one generation + slack fits well inside this.
-export const maxDuration = 60;
+// abort; groqJSON may make TWO sequential calls (json-mode + no-format retry), so
+// give headroom over the 60s worst case.
+export const maxDuration = 90;
 
 // Sign the guide's "try this" question AT SERVE TIME so a signed-in learner can
 // score it via /api/score (which now requires a server-issued token — audit P1-1).
 // Serve-time, NOT cache-time: guides are shared across users and cached forever,
 // while tokens carry a per-response jti + expiry. The token never enters the cache.
-function signedTryThis(subject, q) {
+function signedTryThis(subject, q, topicSlug) {
   if (!q) return null;
   return {
     ...q,
@@ -27,6 +28,9 @@ function signedTryThis(subject, q) {
       question: q.question,
       targetConcept: q.targetConcept,
       difficulty: q.difficulty,
+      // The guide's validated taxonomy slug — without it every Learn-sourced attempt
+      // would bucket into general_<subject> for item-difficulty + anti-farm.
+      topicSlug,
     }),
   };
 }
@@ -150,7 +154,7 @@ export async function POST(req) {
         if (row.source === "curated" || hasProofField) {
           // Re-normalize the stored row so the served shape is always safe to render.
           const g = normalizeGuide(subject, cap(c.concept, 200) || safeConcept, c);
-          return NextResponse.json({ ...g, tryThisQuestion: signedTryThis(subject, g.tryThisQuestion), cached: true });
+          return NextResponse.json({ ...g, tryThisQuestion: signedTryThis(subject, g.tryThisQuestion, g.topic), cached: true });
         }
         staleRefresh = true; // non-curated + no whyItWorks key → regenerate + overwrite below
       }
@@ -236,5 +240,5 @@ export async function POST(req) {
 
   // Token added at response time only — `guide` (written to the shared cache above)
   // must never carry a per-response token.
-  return NextResponse.json({ ...guide, tryThisQuestion: signedTryThis(subject, guide.tryThisQuestion), cached: false });
+  return NextResponse.json({ ...guide, tryThisQuestion: signedTryThis(subject, guide.tryThisQuestion, guide.topic), cached: false });
 }

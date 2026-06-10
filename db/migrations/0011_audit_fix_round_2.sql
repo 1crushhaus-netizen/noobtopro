@@ -22,9 +22,11 @@
 -- before it. If 0011 lands first, the stack's 0010 must be rebased to fold the
 -- _valid_glicko check into its 3-arg migrate_guest_data body.
 --
--- Idempotent; safe to re-run. APPLY TOGETHER WITH the audit-fix deploy: the
--- new /api/score calls save_progress_for with the new named params, which the
--- old 4-arg signature would reject (PGRST202).
+-- Idempotent; safe to re-run. APPLY BEFORE (or together with) the audit-fix
+-- deploy — migration-first is fully forward-compatible (the old code's named-
+-- param subset calls resolve against the new defaulted signature, and the old
+-- route ignores the new jsonb return), while code-first breaks practice scoring
+-- with PGRST202 until the migration lands.
 -- ---------------------------------------------------------------------------
 
 -- ---- P2-5: attempt dedupe key ------------------------------------------------
@@ -217,14 +219,19 @@ as $$
      and not exists (
        select 1 from jsonb_each(j) ax
        where jsonb_typeof(ax.value) <> 'object'
-          or not (
+          -- IS NOT TRUE (not `not (...)`): a missing/null rating/rd/vol makes the
+          -- conjunction NULL, which `not` would also leave NULL — silently admitting
+          -- the axis. IS NOT TRUE flags NULL and false alike.
+          or (
                 pg_input_is_valid(ax.value->>'rating', 'numeric')
-            and (ax.value->>'rating')::numeric between 0 and 4000
+            -- The engine's legal band is ~[-2300, +5300] (lib/scoring.js RATING_LO/HI);
+            -- a fully-docked guest can legitimately sit below 0 internally.
+            and (ax.value->>'rating')::numeric between -2500 and 5500
             and pg_input_is_valid(ax.value->>'rd', 'numeric')
             and (ax.value->>'rd')::numeric between 1 and 500
             and pg_input_is_valid(ax.value->>'vol', 'numeric')
             and (ax.value->>'vol')::numeric between 0 and 0.2
-          )
+          ) is not true
      );
 $$;
 
@@ -351,6 +358,11 @@ begin
   if p_concept_key is null or btrim(p_concept_key) = '' then
     raise exception 'concept key required';
   end if;
+
+  -- Serialize per reporter (review P3): without this the 20-open cap is a TOCTOU
+  -- count check that a concurrent burst could overshoot. Same lock pattern as the
+  -- sibling per-user RPCs.
+  perform pg_advisory_xact_lock(hashtextextended(uid::text, 1));
 
   select count(*) into v_open from public.concept_reports where reporter_id = uid and status = 'open';
   if v_open >= 20 then
