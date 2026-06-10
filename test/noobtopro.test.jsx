@@ -79,6 +79,12 @@ async function attachImageToCurrentComposer(container) {
 
 describe("Noobtopro — diagnostic image previews are revoked on completion (leak fix)", () => {
   it("grades the 9 answers in ONE batched /api/score request and revokes every preview", async () => {
+    // The server-derived mastery updates the guest path must hand to saveProgress —
+    // this seam (Noobtopro -> store) is the feature's ONLY guest activation path.
+    const MASTERY_UPDATES = [
+      { subject: "math", conceptKey: "ratios_unit_rates", quality: 55 },
+      { subject: "physics", conceptKey: "balanced_unbalanced_forces", quality: 40 },
+    ];
     const scoresPayload = {
       math: { score: 55, weakConcepts: [], comment: "", rubric: { conceptual_understanding: 3, logical_structure: 3, strategy: 3, execution_accuracy: 3, communication: 3 } },
       physics: { score: 40, weakConcepts: [], comment: "", rubric: { conceptual_understanding: 2, logical_structure: 2, strategy: 2, execution_accuracy: 2, communication: 2 } },
@@ -86,8 +92,10 @@ describe("Noobtopro — diagnostic image previews are revoked on completion (lea
     };
     const fetchMock = vi.fn(async (path) => {
       if (path === "/api/generate") return jsonRes(DIAGNOSTIC);
-      // Guest diagnostic: server grades + aggregates server-side, returns scores (no persist).
-      if (path === "/api/score") return jsonRes({ scores: scoresPayload, persisted: false, attempt: null });
+      // Guest diagnostic: server grades + aggregates server-side, returns scores (no
+      // persist) + the server-derived per-concept mastery updates.
+      if (path === "/api/score")
+        return jsonRes({ scores: scoresPayload, persisted: false, attempt: null, masteryUpdates: MASTERY_UPDATES });
       return jsonRes({});
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -116,6 +124,11 @@ describe("Noobtopro — diagnostic image previews are revoked on completion (lea
     const body = JSON.parse(scoreCalls[0][1].body);
     expect(body.kind).toBe("diagnostic");
     expect(body.answers).toHaveLength(9);
+
+    // The server's masteryUpdates rode through to the guest store write (third arg) —
+    // the chip-coloring seam between /api/score and lib/store.
+    expect(store.saveProgress).toHaveBeenCalledTimes(1);
+    expect(store.saveProgress.mock.calls[0][2]).toEqual(MASTERY_UPDATES);
 
     // Each subject ring is self-describing for screen readers (subject in the label).
     expect(screen.getByRole("img", { name: /Mathematics: Score \d+ of 100/ })).toBeTruthy();

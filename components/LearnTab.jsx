@@ -26,9 +26,11 @@ export default function LearnTab() {
 
   useEffect(() => {
     let alive = true;
-    loadMastery().then((res) => {
-      if (alive && res && res.mastery) setMastery(res.mastery);
-    });
+    loadMastery()
+      .then((res) => {
+        if (alive && res && res.mastery) setMastery(res.mastery);
+      })
+      .catch(() => {}); // chips just stay uncolored
     return () => {
       alive = false;
     };
@@ -77,7 +79,8 @@ function MasteryLegend() {
     ["grey", "Not attempted"],
   ];
   return (
-    <div className="np-masterylegend" aria-label="Concept color key">
+    // role="group" so the aria-label is actually exposed (a bare div's label is ignored by AT).
+    <div className="np-masterylegend" role="group" aria-label="Concept color key">
       {items.map(([state, label]) => (
         <span key={state} className={`np-masterylegend-item np-masterylegend--${state}`}>
           {label}
@@ -168,7 +171,7 @@ function ConceptPage({ concept, state, stateFor, onOpen, onBack }) {
             Your recent attempts here struggled.{" "}
             {roots.length > 0
               ? "Before practicing this again, work through the root concepts below — they are what this concept is built on."
-              : "This is a foundational concept — try an easier practice round on it before moving up."}
+              : "There's nothing lower to fall back on here — try a gentler practice round on this concept before moving up."}
           </p>
         </div>
       )}

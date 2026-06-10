@@ -114,9 +114,12 @@ function bumpConceptMastery(sb, uid, entries) {
   if (!sb || !uid || !Array.isArray(entries) || entries.length === 0) return;
   const run = async () => {
     try {
-      await sb.rpc("bump_concept_mastery", { p_user: uid, p_entries: entries });
+      // supabase-js RESOLVES failures as { error } (it doesn't throw) — check it,
+      // or a pre-0010 DB / RPC failure would be fully silent instead of logged.
+      const { error } = await sb.rpc("bump_concept_mastery", { p_user: uid, p_entries: entries });
+      if (error) console.error("[/api/score] bump_concept_mastery", error);
     } catch (e) {
-      console.error("[/api/score] bump_concept_mastery", e); // best-effort; mastery self-heals on later attempts
+      console.error("[/api/score] bump_concept_mastery", e); // network-level throw; mastery self-heals on later attempts
     }
   };
   try {
@@ -443,7 +446,7 @@ async function handlePractice(req, body) {
       subjectScore: { score: newScore, weakConcepts: newWeak, comment, rubric: newRubric },
       attempt: { type: "attempt", t, subject, reasoningScore, delta, newScore, totalAfter, phdAfter, rationale },
       // The applied (allow-listed) mastery update, so the client can mirror it in
-      // memory without refetching; null when the attempt wasn't concept-tagged.
+      // memory without refetching; an empty array when the attempt wasn't concept-tagged.
       masteryUpdates: masteryKey ? [{ subject, conceptKey: masteryKey, quality: reasoningScore }] : [],
     });
   } catch (e) {

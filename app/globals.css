@@ -366,9 +366,11 @@ body {
 .np-concepttag--static:hover { border-color: var(--line); background: var(--tint-1); }
 
 /* Per-concept MASTERY coloring (RANKS_PLAN §12.1): green mastered / yellow in
-   progress / red struggling; grey (untouched) is the base chip. A leading dot in
-   currentColor marks the state visually; the state is ALSO in the chip's
-   title/aria-label, so color is never the only carrier (WCAG 1.4.1). Valence
+   progress / red struggling; grey (untouched) is the base chip. Each state gets a
+   DISTINCT leading glyph (✓ / … / !), not just a recolored dot — hue alone fails
+   WCAG 1.4.1 for sighted colorblind users on touch (title is hover-only and
+   aria-label is SR-only; gold vs coral is the classic deutan confusion pair).
+   The glyph is decorative (the accessible name carries the state). Valence
    colors follow the eyebrow convention: good = teal, improve = gold, danger. */
 .np-concepttag--green,
 .np-concepttag--yellow,
@@ -376,26 +378,30 @@ body {
 .np-concepttag--green::before,
 .np-concepttag--yellow::before,
 .np-concepttag--red::before {
-  content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%;
-  background: currentColor; flex: none;
+  font-weight: 700; font-size: 11px; line-height: 1; flex: none;
 }
+.np-concepttag--green::before  { content: "✓"; }
+.np-concepttag--yellow::before { content: "…"; }
+.np-concepttag--red::before    { content: "!"; }
 .np-concepttag--green  { border-color: var(--phys);   color: var(--phys);   background: var(--phys-soft); }
 .np-concepttag--yellow { border-color: var(--math);   color: var(--math);   background: var(--math-soft); }
 .np-concepttag--red    { border-color: var(--danger-border); color: var(--danger); background: var(--danger-soft); }
+/* Keep the state tint on hover — the base .np-concepttag:hover would otherwise
+   swap colored chips back to the neutral line/tint. */
+.np-concepttag--green:hover  { border-color: var(--phys);   background: var(--phys-soft); }
+.np-concepttag--yellow:hover { border-color: var(--math);   background: var(--math-soft); }
+.np-concepttag--red:hover    { border-color: var(--danger); background: var(--danger-soft); }
 
-/* The mastery color key above the curriculum listing. */
+/* The mastery state key above the curriculum listing (glyphs mirror the chips). */
 .np-masterylegend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0 0 16px; }
 .np-masterylegend-item {
   display: inline-flex; align-items: center; gap: 7px;
   font-size: 12.5px; color: var(--muted); font-family: var(--ui);
 }
-.np-masterylegend-item::before {
-  content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%;
-  background: var(--line-strong); flex: none;
-}
-.np-masterylegend--green::before  { background: var(--phys); }
-.np-masterylegend--yellow::before { background: var(--math); }
-.np-masterylegend--red::before    { background: var(--danger); }
+.np-masterylegend-item::before { font-weight: 700; font-size: 11px; line-height: 1; flex: none; content: "·"; }
+.np-masterylegend--green::before  { content: "✓"; color: var(--phys); }
+.np-masterylegend--yellow::before { content: "…"; color: var(--math); }
+.np-masterylegend--red::before    { content: "!"; color: var(--danger); }
 
 /* Concept-page mastery status line + the red "build the foundations first" card. */
 .np-masterystatus { font-size: 13.5px; margin: -4px 0 14px; color: var(--muted); }

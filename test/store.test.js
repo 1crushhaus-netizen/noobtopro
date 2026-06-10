@@ -456,6 +456,11 @@ describe("per-concept mastery (guest storage + signed-in reads + migration)", ()
     expect(res.migrated).toBe(true);
     expect(mocks.rpc.mock.calls).toHaveLength(2);
     expect(mocks.rpc.mock.calls[1][1].p_mastery).toBeUndefined();
+    // The un-migrated mastery map is PRESERVED in the cleared blob (not destroyed) —
+    // scores/history are gone (they migrated), mastery stays recoverable.
+    const blob = JSON.parse(window.localStorage.getItem(KEY));
+    expect(blob.scores).toBeNull();
+    expect(blob.mastery).toEqual(guestBlob.mastery);
   });
 
   it("migration omits p_mastery entirely when the guest has none (no needless 3-arg call)", async () => {

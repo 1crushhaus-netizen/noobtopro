@@ -23,8 +23,11 @@
 create table if not exists public.concept_mastery (
   user_id     uuid not null references auth.users(id) on delete cascade,
   subject     text not null check (subject in ('math', 'physics', 'chemistry')),
-  -- lib/curriculum.js concept key; the server allowlists against the curriculum
-  -- before writing, the CHECK only bounds the key space defensively.
+  -- lib/curriculum.js concept key. The /api/score write path allowlists against
+  -- the curriculum (lib/mastery.js#isCurriculumConcept); the migrate_guest_data
+  -- path only bounds size/shape — a junk key it stores is INERT (reads go through
+  -- normalizeMasteryMap/masteryMapFromRows, which drop unknown keys). The CHECK
+  -- bounds the key space defensively.
   concept_key text not null check (char_length(concept_key) between 1 and 80),
   attempts     int not null default 0 check (attempts >= 0),
   green_hits   int not null default 0 check (green_hits >= 0),
@@ -126,8 +129,10 @@ begin
   end if;
   if jsonb_typeof(p_mastery) = 'object'
      and (select count(*)
-            from jsonb_each(p_mastery) s, jsonb_each(s.value) c
-           where jsonb_typeof(s.value) = 'object') > 768 then
+            -- CASE-wrap the inner jsonb_each: a non-object subject value must yield
+            -- zero rows, not depend on planner qual-pushdown to dodge a 22023 error.
+            from jsonb_each(p_mastery) s
+           cross join lateral jsonb_each(case when jsonb_typeof(s.value) = 'object' then s.value else '{}'::jsonb end) c) > 768 then
     raise exception 'migration payload too large';
   end if;
 
@@ -222,7 +227,8 @@ begin
            case when pg_input_is_valid(c.value->>'bestQuality', 'numeric') then greatest(0, least(100, round((c.value->>'bestQuality')::numeric)))::int end,
            now()
     from jsonb_each(p_mastery) s
-    cross join lateral jsonb_each(s.value) c
+    -- CASE-wrapped for the same planner-independence reason as the size guard above.
+    cross join lateral jsonb_each(case when jsonb_typeof(s.value) = 'object' then s.value else '{}'::jsonb end) c
     cross join lateral (
       select greatest(0, least(100000, coalesce(case when pg_input_is_valid(c.value->>'attempts', 'numeric') then round((c.value->>'attempts')::numeric) end, 0)))::int as attempts
     ) a

@@ -614,22 +614,46 @@ describe("POST /api/score — per-concept mastery counters", () => {
     expect(bumpIdx).toBeGreaterThan(saveIdx);
   });
 
-  it("a mastery-bump failure NEVER fails the grade (best-effort, route stays 200)", async () => {
+  it("a mastery-bump failure NEVER fails the grade — both failure shapes (resolved {error} like real supabase-js, and a network throw)", async () => {
     auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
-    const { sb } = fakeAdmin({ scoresRows: [] });
-    // save_progress_for must succeed; only bump_concept_mastery rejects (e.g. a live DB
-    // that predates migration 0010).
-    const realRpc = sb.rpc;
-    sb.rpc = vi.fn(async (fn, args) => {
-      if (fn === "bump_concept_mastery") throw new Error("function does not exist");
-      return realRpc(fn, args);
-    });
-    storage.getAdmin.mockReturnValue(sb);
-    mockGroq(PRACTICE_GRADE);
-    const res = await POST(req(
-      { kind: "practice", subject: "math", question: "Q", reasoning: REASONING, conceptKey: "ratios_unit_rates" },
-      { authHeader: true }
-    ));
-    expect(res.status).toBe(200);
+    // Shape 1 — the REAL supabase-js behavior: rpc() resolves { error }, never throws
+    // (e.g. a live DB that predates migration 0010 → PGRST202). The route must log it
+    // (checked via the resolved error, not a dead catch) and still return 200.
+    {
+      const { sb } = fakeAdmin({ scoresRows: [] });
+      const realRpc = sb.rpc;
+      sb.rpc = vi.fn(async (fn, args) => {
+        if (fn === "bump_concept_mastery") return { data: null, error: { code: "PGRST202", message: "function not found" } };
+        return realRpc(fn, args);
+      });
+      storage.getAdmin.mockReturnValue(sb);
+      mockGroq(PRACTICE_GRADE);
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const res = await POST(req(
+        { kind: "practice", subject: "math", question: "Q", reasoning: REASONING, conceptKey: "ratios_unit_rates" },
+        { authHeader: true }
+      ));
+      expect(res.status).toBe(200);
+      expect(errSpy.mock.calls.some(([msg]) => String(msg).includes("bump_concept_mastery"))).toBe(true);
+      errSpy.mockRestore();
+    }
+    // Shape 2 — a network-level rejection also must not fail the grade.
+    {
+      const { sb } = fakeAdmin({ scoresRows: [] });
+      const realRpc = sb.rpc;
+      sb.rpc = vi.fn(async (fn, args) => {
+        if (fn === "bump_concept_mastery") throw new Error("socket hang up");
+        return realRpc(fn, args);
+      });
+      storage.getAdmin.mockReturnValue(sb);
+      mockGroq(PRACTICE_GRADE);
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const res = await POST(req(
+        { kind: "practice", subject: "math", question: "Q", reasoning: REASONING, conceptKey: "ratios_unit_rates" },
+        { authHeader: true }
+      ));
+      expect(res.status).toBe(200);
+      errSpy.mockRestore();
+    }
   });
 });

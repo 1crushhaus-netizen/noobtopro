@@ -251,11 +251,12 @@ describe("db/schema.sql — concept_mastery (per-concept mastery, migration 0010
     expect(schema).toContain("grant execute on function public.bump_concept_mastery(uuid, jsonb) to service_role;");
   });
 
-  it("the SQL green threshold mirrors lib/mastery.js#MASTERY_GREEN_QUALITY (70)", () => {
+  it("the SQL green threshold mirrors lib/mastery.js#MASTERY_GREEN_QUALITY", async () => {
+    const { MASTERY_GREEN_QUALITY } = await import("@/lib/mastery");
     const fn = fnBody("bump_concept_mastery");
-    // Two sites: the INSERT seed and the UPDATE increment. A threshold drift between
-    // the SQL and lib/mastery.js would silently disagree on when a concept turns green.
-    expect(fn.match(/>= 70/g)?.length).toBe(2);
+    // Two sites: the INSERT seed and the UPDATE increment. Pinned to the LIVE JS
+    // constant (not a literal), so changing either side alone fails this test.
+    expect(fn.match(new RegExp(`>= ${MASTERY_GREEN_QUALITY}`, "g"))?.length).toBe(2);
   });
 
   it("migrate_guest_data carries p_mastery (3-arg, defaulted) and the mastery insert is allow-listed", () => {
