@@ -52,9 +52,20 @@ function useIsWide() {
 function Drawer({ open, title, titleId, onClose, children }) {
   const panelRef = useRef(null);
   const prevFocus = useRef(null);
+  // Keep the live onClose in a ref so the effect below depends ONLY on `open`
+  // (audit P2-13): both drawers receive an inline onClose arrow whose identity
+  // changes every parent render, so with onClose in the deps the effect re-ran
+  // after the drawer opened — re-capturing prevFocus as the drawer's own close
+  // button — and close restored focus to <body> instead of the trigger.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
   useEffect(() => {
     if (!open) return;
+    // Captured exactly once per closed→open transition (the effect's only dep is
+    // `open`), so this is always the TRIGGER, never a drawer-internal element.
     prevFocus.current = typeof document !== "undefined" ? document.activeElement : null;
     const panel = panelRef.current;
     const focusables = () =>
@@ -71,7 +82,7 @@ function Drawer({ open, title, titleId, onClose, children }) {
     document.body.style.overflow = "hidden";
     const onKey = (e) => {
       if (e.key === "Escape") {
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key === "Tab") {
@@ -102,7 +113,7 @@ function Drawer({ open, title, titleId, onClose, children }) {
         else prev.focus();
       }
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open || typeof document === "undefined") return null;
   return createPortal(

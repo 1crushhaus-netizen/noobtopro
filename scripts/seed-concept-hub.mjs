@@ -120,11 +120,19 @@ async function main() {
   // Which (subject, concept_key) are already public+ready (skip unless --force).
   const existing = new Set();
   if (!force) {
-    const { data } = await sb
+    const { data, error } = await sb
       .from("concept_guides")
       .select("subject, concept_key")
       .eq("visibility", "public")
       .eq("status", "ready");
+    // ABORT on a failed skip-check (audit P2-16): supabase-js resolves errors instead
+    // of throwing, so ignoring this left `existing` empty and a transient network blip
+    // turned a "no-op refresh" rerun into a FULL regeneration overwriting all 36
+    // vetted curated guides (seed_curated_guide upserts).
+    if (error) {
+      console.error(`Could not read the existing-guides skip set (${error.message}). Aborting — rerun when the project is reachable, or pass --force to regenerate deliberately.`);
+      process.exit(1);
+    }
     for (const r of data || []) existing.add(`${r.subject}:${r.concept_key}`);
   }
   let seeded = 0, skipped = 0, failed = 0;

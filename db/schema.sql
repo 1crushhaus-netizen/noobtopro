@@ -54,12 +54,19 @@ create table if not exists public.attempts (
   -- "diminishing returns on repeats" rule to detect grinding the same bucket. NULL for
   -- baselines / pre-0009 rows.
   topic text,
-  band text
+  band text,
+  -- The server-issued question token's jti (0011): one served question is scoreable
+  -- at most once (replay/duplicate-delivery dedupe in save_progress_for). NULL for
+  -- baselines / pre-0011 rows.
+  jti text
 );
--- Add the rationale/topic/band columns to an already-provisioned attempts table (idempotent).
+-- Add the rationale/topic/band/jti columns to an already-provisioned attempts table (idempotent).
 alter table public.attempts add column if not exists rationale text;
 alter table public.attempts add column if not exists topic text;
 alter table public.attempts add column if not exists band text;
+alter table public.attempts add column if not exists jti text;
+create unique index if not exists attempts_user_jti_uidx
+  on public.attempts (user_id, jti) where jti is not null;
 
 create index if not exists attempts_user_created_idx
   on public.attempts (user_id, created_at, id);
@@ -131,6 +138,38 @@ create policy "read own attempts"
 revoke insert, update, delete, truncate on public.scores   from anon, authenticated;
 revoke insert, update, delete, truncate on public.attempts from anon, authenticated;
 
+-- ---- P2-6: bounded, numerically sane guest glicko ------------------------------
+-- A guest-migrated glicko blob must be a small per-axis map of finite, in-range
+-- {rating, rd, vol} triples — else it is dropped (the engine lazy-seeds from the
+-- score instead). Blocks NaN/Infinity (NaN fails BETWEEN in PG), absurd ratings,
+-- and oversized maps from entering the rating engine via a hand-edited blob.
+create or replace function public._valid_glicko(j jsonb)
+returns boolean
+language sql
+immutable
+set search_path = public
+as $$
+  select jsonb_typeof(j) = 'object'
+     and (select count(*) from jsonb_each(j)) between 1 and 16
+     and not exists (
+       select 1 from jsonb_each(j) ax
+       where jsonb_typeof(ax.value) <> 'object'
+          -- IS NOT TRUE (not `not (...)`): a missing/null rating/rd/vol makes the
+          -- conjunction NULL, which `not` would also leave NULL — silently admitting
+          -- the axis. IS NOT TRUE flags NULL and false alike.
+          or (
+                pg_input_is_valid(ax.value->>'rating', 'numeric')
+            -- The engine's legal band is ~[-2300, +5300] (lib/scoring.js RATING_LO/HI);
+            -- a fully-docked guest can legitimately sit below 0 internally.
+            and (ax.value->>'rating')::numeric between -2500 and 5500
+            and pg_input_is_valid(ax.value->>'rd', 'numeric')
+            and (ax.value->>'rd')::numeric between 1 and 500
+            and pg_input_is_valid(ax.value->>'vol', 'numeric')
+            and (ax.value->>'vol')::numeric between 0 and 0.2
+          ) is not true
+     );
+$$;
+
 -- ---- RPC: atomic guest -> account migration (called on first sign-in) ------
 -- SECURITY DEFINER: the scores/attempts tables are now SELECT-only under RLS
 -- (server-authoritative scoring), so this function must run with definer rights to
@@ -181,7 +220,9 @@ begin
          ),
          left(coalesce(s->>'comment', ''), 2000),
          case when jsonb_typeof(s->'rubric') = 'object' then s->'rubric' else null end,
-         case when jsonb_typeof(s->'glicko') = 'object' then s->'glicko' else null end,
+         -- Audit P2-6: the glicko blob is guest-asserted — admit only a bounded,
+         -- numerically sane per-axis map (else null → lazy-seed from the score).
+         case when public._valid_glicko(s->'glicko') then s->'glicko' else null end,
          now()
   from jsonb_array_elements(coalesce(p_scores, '[]'::jsonb)) as s
   where s->>'subject' in ('math', 'physics', 'chemistry')
@@ -263,6 +304,10 @@ begin
   if uid is null then
     raise exception 'not authenticated';
   end if;
+  -- Same per-user advisory lock as save_progress_for (audit P2-7): a reset can no
+  -- longer interleave with an in-flight save's transaction. (The route-level
+  -- read→grade→write window is covered by save_progress_for's conflict check.)
+  perform pg_advisory_xact_lock(hashtextextended(uid::text, 0));
   delete from public.attempts where user_id = uid;
   delete from public.scores   where user_id = uid;
 end;
@@ -291,24 +336,63 @@ drop function if exists public.save_progress(jsonb, jsonb);
 -- attempt; when present it is written to attempt_reviews IN THE SAME TRANSACTION as the
 -- attempt (the diagnostic path omits it, so p_review defaults null). The old 3-arg
 -- signature is dropped so a 3-arg call resolves unambiguously to this defaulted 4-arg.
-drop function if exists public.save_progress_for(uuid, jsonb, jsonb);
-create or replace function public.save_progress_for(p_user uuid, p_scores jsonb, p_attempt jsonb, p_review jsonb default null)
-returns void
+drop function if exists public.save_progress_for(uuid, jsonb, jsonb, jsonb);
+create or replace function public.save_progress_for(
+  p_user uuid,
+  p_scores jsonb,
+  p_attempt jsonb,
+  p_review jsonb default null,
+  p_expected_updated_at timestamptz default null,
+  p_check_conflict boolean default false
+)
+returns jsonb
 language plpgsql
 security definer
 set search_path = public
 as $$
 declare
   v_attempt_id bigint;
+  v_jti text;
+  v_subject text;
+  v_current timestamptz;
 begin
   if p_user is null then
     raise exception 'user required';
   end if;
 
-  -- Serialize concurrent writes for the SAME user (practice vs practice, or practice
-  -- vs diagnostic re-baseline) so a read-modify-write blend can't lose an update or
-  -- interleave into a mixed state. Transaction-scoped: released at commit/rollback.
+  -- Serialize concurrent writes for the SAME user (practice vs practice, practice
+  -- vs diagnostic re-baseline, or vs delete_user_data — which now takes the same
+  -- lock). Transaction-scoped: released at commit/rollback.
   perform pg_advisory_xact_lock(hashtextextended(p_user::text, 0));
+
+  -- Replay dedupe (audit P2-5): one server-issued question token = at most one
+  -- scored attempt. Checked under the advisory lock, so two concurrent duplicate
+  -- deliveries serialize and the second sees the first's row; the partial unique
+  -- index backs this even against a future caller that skips the check.
+  v_jti := case when p_attempt is not null and jsonb_typeof(p_attempt) = 'object'
+                then nullif(left(p_attempt->>'jti', 64), '') end;
+  if v_jti is not null and exists (
+    select 1 from public.attempts where user_id = p_user and jti = v_jti
+  ) then
+    return jsonb_build_object('status', 'duplicate');
+  end if;
+
+  -- Optimistic concurrency (audit P2-4/P2-7): the practice route computes the new
+  -- rating from a row it just read; commit ONLY if that row is still in the
+  -- observed state. IS DISTINCT FROM covers every drift: a row that appeared
+  -- (expected null, row exists), vanished (reset raced the grade), or moved
+  -- (stamp mismatch) all return "conflict" so the route recomputes from fresh
+  -- state — no lost update, no resurrected pre-reset state.
+  if p_check_conflict then
+    if coalesce(jsonb_array_length(coalesce(p_scores, '[]'::jsonb)), 0) <> 1 then
+      raise exception 'p_check_conflict requires exactly one score row';
+    end if;
+    v_subject := p_scores->0->>'subject';
+    select updated_at into v_current from public.scores where user_id = p_user and subject = v_subject;
+    if v_current is distinct from p_expected_updated_at then
+      return jsonb_build_object('status', 'conflict');
+    end if;
+  end if;
 
   if coalesce(jsonb_array_length(coalesce(p_scores, '[]'::jsonb)), 0) > 3 then
     raise exception 'too many score rows';
@@ -351,7 +435,7 @@ begin
     if p_attempt->>'subject' is not null and p_attempt->>'subject' not in ('math', 'physics', 'chemistry') then
       raise exception 'invalid attempt subject: %', p_attempt->>'subject';
     end if;
-    insert into public.attempts (user_id, type, subject, reasoning_score, delta, new_score, total_after, phd_after, created_at, rationale, topic, band)
+    insert into public.attempts (user_id, type, subject, reasoning_score, delta, new_score, total_after, phd_after, created_at, rationale, topic, band, jti)
     values (p_user,
             coalesce(p_attempt->>'type', 'attempt'),
             p_attempt->>'subject',
@@ -363,7 +447,8 @@ begin
             least(coalesce(case when pg_input_is_valid(p_attempt->>'created_at', 'timestamptz') then (p_attempt->>'created_at')::timestamptz end, now()), now()),
             left(p_attempt->>'rationale', 500),
             case when p_attempt->>'topic' is not null then left(p_attempt->>'topic', 64) else null end,
-            case when p_attempt->>'band' in ('beginner','foundational','intermediate','advanced','phd') then p_attempt->>'band' else null end)
+            case when p_attempt->>'band' in ('beginner','foundational','intermediate','advanced','phd') then p_attempt->>'band' else null end,
+            v_jti)
     returning id into v_attempt_id;
 
     -- Answer-review detail (PR 6) for a graded practice attempt — same transaction.
@@ -385,11 +470,13 @@ begin
       );
     end if;
   end if;
+
+  return jsonb_build_object('status', 'ok');
 end;
 $$;
 
-revoke all on function public.save_progress_for(uuid, jsonb, jsonb, jsonb) from public, anon, authenticated;
-grant execute on function public.save_progress_for(uuid, jsonb, jsonb, jsonb) to service_role;
+revoke all on function public.save_progress_for(uuid, jsonb, jsonb, jsonb, timestamptz, boolean) from public, anon, authenticated;
+grant execute on function public.save_progress_for(uuid, jsonb, jsonb, jsonb, timestamptz, boolean) to service_role;
 
 -- ---- concept hub: taxonomy reference + guide catalog ------------------------
 -- The Learn tab is a UNIVERSAL, browsable concept hub. concept_guides is the
@@ -714,8 +801,9 @@ alter table public.security_events enable row level security;
 create index if not exists security_events_status_created_idx
   on public.security_events (status, created_at desc);
 
--- concept_reports: a signed-in user's report about a public guide. RLS lets a user
--- INSERT only their OWN report; reads are admin-only (service-role; NO select policy).
+-- concept_reports: a signed-in user's report about a public guide. Since 0011 the
+-- ONLY write path is the submit_concept_report RPC (self-scoped, ≤20 open per
+-- reporter); the direct RLS INSERT policy is dropped and the grant revoked; reads are admin-only (service-role; NO select policy).
 -- The user-facing "report" button ships with the Concept Hub browse UI; the table is
 -- created now so the admin dashboard can render reports.
 create table if not exists public.concept_reports (
@@ -730,10 +818,11 @@ create table if not exists public.concept_reports (
   status text not null default 'open' check (status in ('open','reviewed','dismissed'))
 );
 alter table public.concept_reports enable row level security;
+-- 0011 (audit P2-8): the direct PostgREST INSERT policy is GONE — reports go
+-- through submit_concept_report below (self-scoped, ≤20 open per reporter), so
+-- an authenticated attacker can no longer flood the admin queue unmetered.
 drop policy if exists "report own" on public.concept_reports;
-create policy "report own"
-  on public.concept_reports for insert to authenticated
-  with check ((select auth.uid()) = reporter_id);
+revoke insert on public.concept_reports from anon, authenticated;
 create index if not exists concept_reports_status_created_idx
   on public.concept_reports (status, created_at desc);
 -- One OPEN report per user per guide: collapses report-flooding by an authenticated
@@ -742,6 +831,58 @@ create index if not exists concept_reports_status_created_idx
 create unique index if not exists concept_reports_one_open_per_user
   on public.concept_reports (reporter_id, subject, concept_key)
   where status = 'open';
+
+-- Rate-bounded report path (0011, audit P2-8): the ONLY way a user files a report.
+create or replace function public.submit_concept_report(p_subject text, p_concept_key text, p_reason text default null)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  uid uuid := auth.uid();
+  v_open int;
+begin
+  if uid is null then
+    raise exception 'not authenticated';
+  end if;
+  if p_subject is null or p_subject not in ('math', 'physics', 'chemistry') then
+    raise exception 'invalid subject';
+  end if;
+  if p_concept_key is null or btrim(p_concept_key) = '' then
+    raise exception 'concept key required';
+  end if;
+
+  -- Serialize per reporter (review P3): without this the 20-open cap is a TOCTOU
+  -- count check that a concurrent burst could overshoot. Same lock pattern as the
+  -- sibling per-user RPCs.
+  perform pg_advisory_xact_lock(hashtextextended(uid::text, 1));
+
+  select count(*) into v_open from public.concept_reports where reporter_id = uid and status = 'open';
+  if v_open >= 20 then
+    return jsonb_build_object('status', 'limited');
+  end if;
+
+  begin
+    insert into public.concept_reports (subject, concept_key, reporter_id, reason, status)
+    values (
+      p_subject,
+      left(btrim(p_concept_key), 200),
+      uid,
+      case when p_reason is null or btrim(p_reason) = '' then null else left(btrim(p_reason), 1000) end,
+      'open'
+    );
+  exception when unique_violation then
+    -- An already-open report for this guide by this user — the client treats it
+    -- as success (same UX as the old 23505 handling).
+    return jsonb_build_object('status', 'duplicate');
+  end;
+  return jsonb_build_object('status', 'ok');
+end;
+$$;
+
+revoke all on function public.submit_concept_report(text, text, text) from public, anon;
+grant execute on function public.submit_concept_report(text, text, text) to authenticated;
 
 -- ---- GRANT-layer hardening (defense-in-depth) ------------------------------
 -- Supabase grants anon/authenticated full table DML by default; like scores/attempts
@@ -752,7 +893,8 @@ create unique index if not exists concept_reports_one_open_per_user
 revoke insert, update, delete, truncate on public.diagnostic_pool, public.security_events from anon, authenticated;
 --   - public-read content (writes service-role only): keep SELECT, drop writes.
 revoke insert, update, delete, truncate on public.concept_guides, public.concept_topics from anon, authenticated;
---   - concept_reports: authenticated INSERTs its OWN report (RLS policy), so keep that
+--   - concept_reports: writes go ONLY through submit_concept_report (0011) — the
+--     direct INSERT grant is revoked below alongside update/delete/truncate.
 --     one grant; revoke everything else (anon can't report; nobody updates/deletes).
 revoke update, delete, truncate on public.concept_reports from anon, authenticated;
 revoke insert on public.concept_reports from anon;

@@ -3,13 +3,18 @@ import { groqJSON, PRACTICE_GEN_SYS } from "@/lib/groq";
 import { ORDER, clampScore } from "@/lib/scoring";
 import { topicSlugsFor, normalizeTopic } from "@/lib/taxonomy";
 import { pickVariety, varietyDirectiveText, sanitizeRecentQuestions, avoidListText } from "@/lib/questionVariety";
-import { normalizeReasoningSurface, capTrap } from "@/lib/gradeInput";
-import { checkRateLimit, clientKey } from "@/lib/rateLimit";
+import { normalizeReasoningSurface, capTrap, capText, normalizeDifficulty } from "@/lib/gradeInput";
+import { signQuestion } from "@/lib/questionToken";
+import { checkRateLimit, clientKey, chargeGlobalGroq } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType, readJsonLimited, MAX_BODY_BYTES_TEXT } from "@/lib/requestGuard";
 import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
 import { buildDiagnostic } from "@/lib/diagnosticBank";
 
 export const dynamic = "force-dynamic";
+// Bound a hung request (audit P2-10): the Groq fetch has a 30s abort, and at most
+// TWO sequential upstream calls can run (primary + retry/fallback) — 90s leaves real
+// headroom over that 60s worst case plus handler overhead.
+export const maxDuration = 90;
 
 export async function POST(req) {
   // Block forced cross-site requests (CSRF-style cost/quota DoS) and non-JSON bodies.
@@ -46,7 +51,14 @@ export async function POST(req) {
       // The diagnostic is the CURATED, standardized placement bank (lib/diagnosticBank.js):
       // 9 reasoning-rich questions (3 subjects × beginner/intermediate/hard), served with
       // ZERO Groq calls and no pool — everyone gets the same calibrated set.
-      return NextResponse.json(buildDiagnostic());
+      // STRIP the grader-internal trap/reasoningSurface metadata (audit P2-9): the trap
+      // text states the naive wrong path for the standardized placement, so shipping it
+      // let a devtools reader dodge every trap and inflate their baseline. The grader
+      // derives both server-side from the bank (diagnosticSurfaceFor) — the client never
+      // needed them.
+      const diag = buildDiagnostic();
+      diag.questions = diag.questions.map(({ trap, reasoningSurface, ...q }) => q);
+      return NextResponse.json(diag);
     }
 
     if (kind !== "practice") {
@@ -80,6 +92,17 @@ export async function POST(req) {
 
     // Roll a fresh variation spec per call so the conditioning changes every time —
     // the core defense against the model collapsing onto the canonical exemplar.
+    // GLOBAL Groq budget (audit P2-3): the per-IP cap is rotation-defeatable on this
+    // unauthenticated route; the platform-wide window bounds total spend.
+    const glob = await chargeGlobalGroq(1);
+    if (!glob.ok) {
+      reportRateLimit({ req, route: "/api/generate" });
+      return NextResponse.json(
+        { error: "Too many requests. Please slow down and try again shortly." },
+        { status: 429, headers: { "Retry-After": String(glob.retryAfter) } }
+      );
+    }
+
     const variety = pickVariety();
     const directive = varietyDirectiveText(variety);
     const avoid = avoidListText(recent);
@@ -99,19 +122,34 @@ export async function POST(req) {
       temperature: 0.85,
       seed: Math.floor(Math.random() * 1e9),
     });
-    // Normalize the LLM's topicSlug to a real taxonomy slug (or general_<subject>) so
-    // the per-(subject,topic,band) difficulty bucket on /api/score is always bounded
-    // and FK-valid. The human-readable `topic` is left as-is for display.
-    if (data && typeof data === "object") {
-      data.topicSlug = normalizeTopic(subject, data.topicSlug);
-      // Normalize the reasoning-surface metadata: allow-list the surface, and keep the
-      // trap description only for a trap (so an off-list value or a stray trap on a
-      // non-trap question can't reach the grader). These ride to the grader (§ grade/score)
-      // as calibration context for the difficulty-adjusted rubric.
-      data.reasoningSurface = normalizeReasoningSurface(data.reasoningSurface);
-      data.trap = data.reasoningSurface === "trap" ? capTrap(data.trap) : "";
+    // A generation without a usable question is an upstream failure, not a 200.
+    if (!data || typeof data !== "object" || typeof data.question !== "string" || !data.question.trim()) {
+      throw new Error("generator returned no question");
     }
-    return NextResponse.json(data);
+    // Build an EXPLICIT response (audit P2-2 class: never spread raw model JSON to the
+    // client — a stray `error` key or object-typed field would break the UI). topicSlug
+    // is normalized to a real taxonomy slug (bounded, FK-valid bucket key); the
+    // reasoning surface is allow-listed and the trap kept only on a trap (deflate-only
+    // grader calibration; the guest /api/grade path still receives them as plaintext
+    // by design — they can only ever LOCATE errors, never award credit).
+    const reasoningSurface = normalizeReasoningSurface(data.reasoningSurface);
+    const normalizedDifficulty = normalizeDifficulty(data.difficulty);
+    const question = {
+      subject,
+      topic: typeof data.topic === "string" ? data.topic.slice(0, 200) : "",
+      topicSlug: normalizeTopic(subject, data.topicSlug),
+      targetConcept: typeof data.targetConcept === "string" ? data.targetConcept.slice(0, 200) : "",
+      reasoningSurface,
+      trap: reasoningSurface === "trap" ? capTrap(data.trap) : "",
+      difficulty: normalizedDifficulty !== "(unspecified)" ? normalizedDifficulty : "intermediate",
+      question: capText(data.question.trim()),
+    };
+    // SIGN the served question (audit P1-1): /api/score practice only accepts a valid
+    // token and derives every rating-relevant field from it, so a client can no longer
+    // forge the difficulty band / topic bucket (rating inflation, anti-farm rotation,
+    // item_difficulty poisoning). token is null without a signing key — guest-only
+    // deployments never reach /api/score practice anyway (503 there).
+    return NextResponse.json({ ...question, token: signQuestion(question) });
   } catch (e) {
     // Log the real cause server-side; return a generic message so upstream Groq
     // status/body detail never leaks to the client.
