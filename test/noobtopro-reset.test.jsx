@@ -79,7 +79,7 @@ describe("Restart logo (reset)", () => {
     // Mount hydrate loads the account's scores → dashboard.
     await screen.findByText("Where you stand");
     fireEvent.click(screen.getByRole("button", { name: /^dashboard$/i }));
-    expect(await screen.findByText(/PhD-level intelligence/i)).toBeTruthy(); // stats view
+    expect(await screen.findByText(/Doctorate index/i)).toBeTruthy(); // stats view
 
     // Click the Restart logo, then let the re-hydrate settle.
     fireEvent.click(screen.getByTitle("Restart"));
@@ -96,7 +96,7 @@ describe("Restart logo (reset)", () => {
     // Re-open Dashboard: the persisted stats must still be there (pre-fix this showed
     // the "not ranked"/"no diagnostic" empty state because scores were blanked).
     fireEvent.click(screen.getByRole("button", { name: /^dashboard$/i }));
-    expect(await screen.findByText(/PhD-level intelligence/i)).toBeTruthy();
+    expect(await screen.findByText(/Doctorate index/i)).toBeTruthy();
     expect(screen.getByText(/Total points/i)).toBeTruthy();
   });
 

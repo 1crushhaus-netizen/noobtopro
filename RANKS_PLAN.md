@@ -1,12 +1,12 @@
 # noobtopro — Ranking System Redesign
 
 > **Status: PARTIALLY SHIPPED; every §11 open item is now RESOLVED (owner decisions,
-> 2026-06-11).** Shipped against the live 0–100 scale: per-concept mastery (§12.1), the
+> 2026-06-11).** Shipped: per-concept mastery (§12.1), the
 > hand-authored prerequisite graphs + concept pages + written guides (§12.2–12.3), the
 > curriculum breadth gate (§7, Option-B label gating), the unified Glicko engine, and
 > reasoning-anchored full-range diagnostic seeding. The remaining BUILD items are the
-> §8 adaptive diagnostic (fully decided + specced — see §8/§11.4) and, still optional/
-> unscheduled, the 0–350 rescale (§2–§3 cosmetics; the engine is scale-free).
+> §8 adaptive diagnostic, AND the §2–§3 **0–350 rescale (SHIPPED 2026-06-11,
+> migration 0015 applied live)** — every section of this plan is now built.
 
 ---
 

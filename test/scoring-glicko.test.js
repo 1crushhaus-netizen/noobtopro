@@ -30,40 +30,40 @@ const attempt = (glicko, axisVal, difficulty, repeatFactor = 1) =>
   updateAxisRatings({ prevGlicko: glicko, attemptRubric: fullRubric(axisVal), difficulty, repeatFactor });
 
 describe("Glicko display conversions", () => {
-  it("scoreFromRating(1500) === 50 and is monotonic & bounded", () => {
-    expect(scoreFromRating(1500)).toBe(50);
+  it("scoreFromRating(1500) === 175 (the 0–350 midpoint) and is monotonic & bounded", () => {
+    expect(scoreFromRating(1500)).toBe(175);
     expect(scoreFromRating(3000)).toBeGreaterThan(scoreFromRating(2000));
-    expect(scoreFromRating(1e9)).toBeLessThanOrEqual(100);
+    expect(scoreFromRating(1e9)).toBeLessThanOrEqual(350);
     expect(scoreFromRating(-1e9)).toBeGreaterThanOrEqual(0);
-    expect(scoreFromRating("nope")).toBe(50);
+    expect(scoreFromRating("nope")).toBe(175);
   });
   it("ratingFromScore is the inverse of scoreFromRating (round-trips)", () => {
-    for (const s of [5, 27, 50, 73, 95]) expect(scoreFromRating(ratingFromScore(s))).toBe(s);
+    for (const s of [18, 95, 175, 256, 333]) expect(scoreFromRating(ratingFromScore(s))).toBe(s);
   });
   it("toGlickoRating(d) === ratingFromScore(d) (item rated by the same inverse → at-level symmetry)", () => {
-    expect(toGlickoRating(50)).toBeCloseTo(1500, 6);
-    expect(toGlickoRating(70)).toBeCloseTo(ratingFromScore(70), 6);
+    expect(toGlickoRating(175)).toBeCloseTo(1500, 6);
+    expect(toGlickoRating(245)).toBeCloseTo(ratingFromScore(245), 6);
   });
 });
 
 describe("the core property: difficulty-proportional (ace easy ≠ maxed)", () => {
   it("a NEW user acing an EASY question barely moves — subject score stays mid, not 100", () => {
-    const r = attempt(emptyGlickoState(), 4, 10); // ace a beginner (d=10)
-    expect(r.score).toBeGreaterThan(50);
-    expect(r.score).toBeLessThan(60); // nowhere near 100
+    const r = attempt(emptyGlickoState(), 4, 35); // ace a beginner (d=35)
+    expect(r.score).toBeGreaterThan(175);
+    expect(r.score).toBeLessThan(210); // nowhere near 350
   });
   it("a NEW user acing a HARD question climbs far more than acing an easy one", () => {
-    const easy = attempt(emptyGlickoState(), 4, 10).score;
-    const hard = attempt(emptyGlickoState(), 4, 90).score;
-    expect(hard).toBeGreaterThan(easy + 15);
+    const easy = attempt(emptyGlickoState(), 4, 35).score;
+    const hard = attempt(emptyGlickoState(), 4, 315).score;
+    expect(hard).toBeGreaterThan(easy + 52);
   });
   it("repeated easy aces asymptote well below the max", () => {
     let g = emptyGlickoState();
-    for (let i = 0; i < 40; i++) g = attempt(g, 4, 10).glicko;
-    expect(subjectScoreFromGlicko(g)).toBeLessThan(80);
+    for (let i = 0; i < 40; i++) g = attempt(g, 4, 35).glicko;
+    expect(subjectScoreFromGlicko(g)).toBeLessThan(280);
   });
   it("the property holds at the AXIS level too (radar value mid after acing easy)", () => {
-    const r = attempt(emptyGlickoState(), 4, 10);
+    const r = attempt(emptyGlickoState(), 4, 35);
     expect(r.rubric.principle).toBeGreaterThan(RUBRIC_MAX * 0.5);
     expect(r.rubric.principle).toBeLessThan(RUBRIC_MAX); // not pinned to 4
   });
@@ -78,15 +78,15 @@ describe("anti-farm: diminishing returns on repeats (gains damped, losses not)",
   });
   it("a heavily-repeated bucket gains far less than the first time", () => {
     const g0 = emptyGlickoState();
-    const firstGain = attempt(g0, 4, 60, 1).score - subjectScoreFromGlicko(g0);
-    const repeatedGain = attempt(g0, 4, 60, repeatFactorForCount(10)).score - subjectScoreFromGlicko(g0);
+    const firstGain = attempt(g0, 4, 210, 1).score - subjectScoreFromGlicko(g0);
+    const repeatedGain = attempt(g0, 4, 210, repeatFactorForCount(10)).score - subjectScoreFromGlicko(g0);
     expect(repeatedGain).toBeLessThan(firstGain * 0.5);
     expect(repeatedGain).toBeGreaterThan(0); // still positive, not frozen
   });
   it("losses are NOT damped by the repeat factor (can't farm UP, but can still drop)", () => {
     // a poor outcome on an at-level item should drop the rating regardless of repeatFactor
     const g = seedGlickoFromRubric(fullRubric(3)); // start mid-high
-    const a = updateAxisGlicko(g.principle, 0.0, 60, 0.2); // bomb it, heavy repeat damping
+    const a = updateAxisGlicko(g.principle, 0.0, 210, 0.2); // bomb it, heavy repeat damping
     expect(a.rating).toBeLessThan(g.principle.rating);
   });
   it("repeatFactorFromHistory counts same-bucket attempts in the recent window", () => {
@@ -100,7 +100,7 @@ describe("anti-farm: diminishing returns on repeats (gains damped, losses not)",
 
 describe("rollout continuity: seeding preserves the subject score (no leaderboard jump)", () => {
   it("deriveSubjectScore(seedGlickoFromRubric(rubric, oldScore)) ≈ oldScore", () => {
-    for (const oldScore of [12, 38, 64, 88]) {
+    for (const oldScore of [42, 133, 224, 308]) {
       const rubric = { ...fullRubric(2), principle: 4, computation: 1 }; // a non-uniform profile
       const seeded = seedGlickoFromRubric(rubric, oldScore);
       expect(Math.abs(subjectScoreFromGlicko(seeded) - oldScore)).toBeLessThanOrEqual(1);
@@ -117,7 +117,7 @@ describe("rollout continuity: seeding preserves the subject score (no leaderboar
       { ...fullRubric(4), comprehension: 0, communication: 0, evidence: 0, alternatives: 0 }, // half max / half zero
     ];
     for (const rubric of spiky) {
-      for (const oldScore of [5, 22, 50, 78, 98]) {
+      for (const oldScore of [18, 77, 175, 273, 343]) {
         const seeded = seedGlickoFromRubric(rubric, oldScore);
         expect(Math.abs(subjectScoreFromGlicko(seeded) - oldScore)).toBeLessThanOrEqual(1);
       }
@@ -125,7 +125,7 @@ describe("rollout continuity: seeding preserves the subject score (no leaderboar
   });
   it("the radar SHAPE is preserved (the high axis stays the highest)", () => {
     const rubric = { ...fullRubric(2), principle: 4, computation: 1 };
-    const radar = radarFromGlicko(seedGlickoFromRubric(rubric, 50));
+    const radar = radarFromGlicko(seedGlickoFromRubric(rubric, 175));
     expect(radar.principle).toBeGreaterThan(radar.comprehension);
     expect(radar.comprehension).toBeGreaterThan(radar.computation);
   });
@@ -135,19 +135,19 @@ describe("rollout continuity: seeding preserves the subject score (no leaderboar
     expect(seedGlickoFromRubric(g).principle.rating).toBe(2000);
   });
   it("no rubric → seeds every axis from the fallback score (continuous)", () => {
-    expect(subjectScoreFromGlicko(seedGlickoFromRubric(null, 73))).toBe(73);
+    expect(subjectScoreFromGlicko(seedGlickoFromRubric(null, 256))).toBe(256);
   });
-  it("a fresh seed with no rubric and no score derives to 50", () => {
-    expect(subjectScoreFromGlicko(emptyGlickoState())).toBe(50);
+  it("a fresh seed with no rubric and no score derives to 175 (the midpoint)", () => {
+    expect(subjectScoreFromGlicko(emptyGlickoState())).toBe(175);
   });
   it("a score-0 / no-rubric placeholder is NOT stuck — a hard ace moves it in ONE attempt", () => {
     // An un-baselined subject (partial diagnostic / un-practiced) defaults to {score:0, rubric:null}.
     // Seeding every axis at the dead rating floor would freeze a strong learner at 0 for several
     // perfect hard answers; the neutral-prior seed lets the first genuine result move freely.
-    const r = updateAxisRatings({ prevGlicko: null, prevRubric: null, prevScore: 0, attemptRubric: fullRubric(4), difficulty: 90 });
-    expect(r.score).toBeGreaterThan(50);
+    const r = updateAxisRatings({ prevGlicko: null, prevRubric: null, prevScore: 0, attemptRubric: fullRubric(4), difficulty: 315 });
+    expect(r.score).toBeGreaterThan(175);
     // and it behaves like a fresh user, not a floored one
-    const fresh = updateAxisRatings({ prevGlicko: emptyGlickoState(), attemptRubric: fullRubric(4), difficulty: 90 });
+    const fresh = updateAxisRatings({ prevGlicko: emptyGlickoState(), attemptRubric: fullRubric(4), difficulty: 315 });
     expect(Math.abs(r.score - fresh.score)).toBeLessThanOrEqual(2);
   });
 });
@@ -160,7 +160,7 @@ describe("aggregation: weighted by reasoning importance", () => {
     const liftComputation = { ...emptyGlickoState() };
     liftComputation.computation = { rating: 2200, rd: 100, vol: 0.06 };
     expect(subjectScoreFromGlicko(liftPrinciple)).toBeGreaterThan(subjectScoreFromGlicko(liftComputation));
-    expect(subjectScoreFromGlicko(base)).toBe(50);
+    expect(subjectScoreFromGlicko(base)).toBe(175);
   });
 });
 
@@ -174,15 +174,15 @@ describe("dock: a low outcome nudges the rating down", () => {
 });
 
 describe("diagnostic seeding", () => {
-  it("produces a finite difficulty-aware profile; acing all 3 tiers does NOT pin to 100", () => {
+  it("produces a finite difficulty-aware profile; acing all 3 tiers does NOT pin to the max", () => {
     const perQ = [
       { difficulty: "beginner", rubric: fullRubric(4) },
       { difficulty: "intermediate", rubric: fullRubric(4) },
       { difficulty: "advanced", rubric: fullRubric(4) },
     ];
     const seed = diagnosticSeedGlicko(perQ);
-    expect(seed.score).toBeGreaterThan(50);
-    expect(seed.score).toBeLessThan(100);
+    expect(seed.score).toBeGreaterThan(175);
+    expect(seed.score).toBeLessThan(350);
     for (const k of RUBRIC_KEYS) expect(Number.isFinite(seed.glicko[k].rating)).toBe(true);
   });
   it("a weaker hard-tier answer lowers the seed vs acing all tiers", () => {
@@ -207,17 +207,17 @@ describe("diagnosticSeedFromReasoning (reasoning-anchored placement)", () => {
   it("places a blank/idk (docked) diagnostic at the dock floor, NOT the old ~18", () => {
     // a docked answer carries reasoningScore = DOCK_SCORE (3) + an all-zero rubric
     const seed = diagnosticSeedFromReasoning(tiers(0, 3));
-    expect(seed.score).toBeLessThanOrEqual(5); // was 18 under the Glicko-games seed
+    expect(seed.score).toBeLessThanOrEqual(Math.round((5 * 350) / 100)); // dock floor ×3.5; was ~18 (×3.5) under the Glicko-games seed
   });
 
-  it("places a flawless diagnostic near 100 (full range restored; was capped ~77)", () => {
-    expect(diagnosticSeedFromReasoning(tiers(4, 100)).score).toBeGreaterThanOrEqual(95);
+  it("places a flawless diagnostic near 350 (full range restored; was capped ~270)", () => {
+    expect(diagnosticSeedFromReasoning(tiers(4, 100)).score).toBeGreaterThanOrEqual(Math.round((95 * 350) / 100));
   });
 
-  it("the subject score equals the difficulty-weighted reasoning score (the anchor)", () => {
+  it("the subject score equals the difficulty-weighted QUALITY aggregate mapped onto the 0–350 scale", () => {
     for (const [rub, rs] of [[0, 3], [1, 30], [2, 50], [4, 100]]) {
       const qs = tiers(rub, rs);
-      expect(diagnosticSeedFromReasoning(qs).score).toBe(diagnosticSubjectScore(qs));
+      expect(diagnosticSeedFromReasoning(qs).score).toBe(Math.round((diagnosticSubjectScore(qs) * 350) / 100));
     }
   });
 

@@ -155,8 +155,8 @@ describe("Noobtopro — adaptive diagnostic flow (steps + finalize) & preview le
     expect(store.saveProgress.mock.calls[0][2]).toEqual(MASTERY_UPDATES);
 
     // Each subject ring is self-describing for screen readers (subject in the label).
-    expect(screen.getByRole("img", { name: /Mathematics: Score \d+ of 100/ })).toBeTruthy();
-    expect(screen.getByRole("img", { name: /Chemistry: Score \d+ of 100/ })).toBeTruthy();
+    expect(screen.getByRole("img", { name: /Mathematics: Score \d+ of 350/ })).toBeTruthy();
+    expect(screen.getByRole("img", { name: /Chemistry: Score \d+ of 350/ })).toBeTruthy();
 
     // Twelve previews were created; all twelve must be revoked on completion (no leak).
     expect(URL.createObjectURL).toHaveBeenCalledTimes(DIAGNOSTIC_ORDER.length);

@@ -59,7 +59,7 @@ describe("rankCoverage — green-only coverage of one curriculum cell", () => {
 
 describe("gatedRankFor — coverage-gated display rank (§7, v1 label gating)", () => {
   it("with no mastery data, a high score is gated all the way down to the first band", () => {
-    const g = gatedRankFor(85, {}, "math"); // score alone says PhD-level (index 4)
+    const g = gatedRankFor(298, {}, "math"); // score alone says Doctorate (index 4)
     expect(g.ungated).toMatchObject({ index: 4 });
     expect(g.rank).toMatchObject({ name: DISPLAY_RANKS[0], index: 0 });
     expect(g.gated).toBe(true);
@@ -71,7 +71,7 @@ describe("gatedRankFor — coverage-gated display rank (§7, v1 label gating)", 
   it("opens exactly as far as the covered curricula reach (blocked at the first gap)", () => {
     // Elementary + middle fully green, high untouched → may hold index 2, not 3+.
     const mastery = fullCoverage("math", ["elementary", "middle"]);
-    const g = gatedRankFor(85, mastery, "math");
+    const g = gatedRankFor(298, mastery, "math");
     expect(g.rank.index).toBe(2);
     expect(g.gated).toBe(true);
     expect(g.next.rank).toBe("high"); // the blocking cell
@@ -80,7 +80,7 @@ describe("gatedRankFor — coverage-gated display rank (§7, v1 label gating)", 
 
   it("is ungated when every rank below the score rank is covered", () => {
     const mastery = fullCoverage("physics", ["elementary", "middle"]);
-    const g = gatedRankFor(50, mastery, "physics"); // score rank = Intermediate (index 2)
+    const g = gatedRankFor(175, mastery, "physics"); // score rank = High (index 2)
     expect(g.gated).toBe(false);
     expect(g.rank.index).toBe(2);
     // The next gate is the CURRENT rank's own cell (what unlocks index 3).
@@ -96,7 +96,7 @@ describe("gatedRankFor — coverage-gated display rank (§7, v1 label gating)", 
 
   it("at the top with all populated ranks covered: ungated, next = null (doctorate is WIP)", () => {
     const mastery = fullCoverage("math", ["elementary", "middle", "high", "university"]);
-    const g = gatedRankFor(95, mastery, "math");
+    const g = gatedRankFor(333, mastery, "math");
     expect(g.gated).toBe(false);
     expect(g.rank.index).toBe(4);
     expect(g.next).toBe(null); // nothing above PhD-level to gate
@@ -108,7 +108,7 @@ describe("gatedRankFor — coverage-gated display rank (§7, v1 label gating)", 
 
   it("tolerates junk score/subject inputs (clamped score, empty coverage)", () => {
     expect(gatedRankFor(null, {}, "math").rank.index).toBe(0);
-    const g = gatedRankFor(85, {}, "biology"); // unknown subject → no concepts → never blocks
+    const g = gatedRankFor(298, {}, "biology"); // unknown subject → no concepts → never blocks
     expect(g.gated).toBe(false);
     expect(g.rank.index).toBe(4);
   });

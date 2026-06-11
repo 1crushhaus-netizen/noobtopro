@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { groqJSON, PRACTICE_GEN_SYS } from "@/lib/groq";
-import { ORDER, clampScore } from "@/lib/scoring";
+import { ORDER, clampSubjectScore } from "@/lib/scoring";
 import { topicSlugsFor, normalizeTopic } from "@/lib/taxonomy";
 import { conceptByKey, calibratedDrillBand } from "@/lib/curriculum";
 import { masteryStateFor } from "@/lib/mastery";
@@ -96,7 +96,7 @@ export async function POST(req) {
         { status: 400 }
       );
     }
-    const safeScore = clampScore(score) ?? 0;
+    const safeScore = clampSubjectScore(score) ?? 0;
     // CONCEPT DRILL (increment 3, RANKS_PLAN §12.3): when the request names a
     // curriculum `conceptKey`, generate a question TARGETING that concept, framed at
     // its rank's level. The key is allow-listed SERVER-SIDE via conceptByKey (so a
@@ -191,7 +191,7 @@ export async function POST(req) {
       system: PRACTICE_GEN_SYS,
       user:
         `Subject: ${subject}\n` +
-        `Learner score: ${safeScore}/100\n` +
+        `Learner score: ${safeScore}/350\n` +
         (drillDirective ? drillDirective + "\n" : `Weak concepts: ${concepts.join(", ") || "none recorded"}\n`) +
         `Allowed topics (pick exactly one slug for topicSlug): ${topicSlugsFor(subject)}\n` +
         (directive ? directive + "\n" : "") +

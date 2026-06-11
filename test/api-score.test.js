@@ -204,7 +204,7 @@ describe("POST /api/score practice — authentication", () => {
 describe("POST /api/score practice — server-authoritative Glicko-2 score", () => {
   it("computes the new score from the STORED per-axis Glicko state (derived aggregate) and persists glicko + topic/band for the verified uid", async () => {
     auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
-    const { sb, calls } = fakeAdmin({ scoresRows: [{ subject: "math", score: 40, weak_concepts: ["old"], comment: "c", rubric: null, glicko: null }] });
+    const { sb, calls } = fakeAdmin({ scoresRows: [{ subject: "math", score: 140, weak_concepts: ["old"], comment: "c", rubric: null, glicko: null }] });
     storage.getAdmin.mockReturnValue(sb);
     mockGroq(PRACTICE_GRADE);
 
@@ -215,9 +215,9 @@ describe("POST /api/score practice — server-authoritative Glicko-2 score", () 
     expect(res.status).toBe(200);
     const j = await res.json();
 
-    const { newScore, reasoningScore } = expectedPracticeScore({ prevScore: 40, grade: PRACTICE_GRADE, band: "intermediate" });
+    const { newScore, reasoningScore } = expectedPracticeScore({ prevScore: 140, grade: PRACTICE_GRADE, band: "intermediate" });
     expect(j.newScore).toBe(newScore);
-    expect(j.delta).toBe(newScore - 40);
+    expect(j.delta).toBe(newScore - 140);
     expect(j.subjectScore.score).toBe(newScore);
     expect(j.reasoningScore).toBe(reasoningScore); // the transparent weighted mean of the rubric axes
     expect(j.errors).toEqual(PRACTICE_GRADE.errors); // typed errors plumbed through
@@ -251,7 +251,7 @@ describe("POST /api/score practice — server-authoritative Glicko-2 score", () 
 
   it("IGNORES a client-supplied score / newScore — the trust gap is closed", async () => {
     auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
-    const { sb, calls } = fakeAdmin({ scoresRows: [{ subject: "math", score: 40, weak_concepts: [], comment: "", rubric: null }] });
+    const { sb, calls } = fakeAdmin({ scoresRows: [{ subject: "math", score: 140, weak_concepts: [], comment: "", rubric: null }] });
     storage.getAdmin.mockReturnValue(sb);
     mockGroq(PRACTICE_GRADE);
 
@@ -260,7 +260,7 @@ describe("POST /api/score practice — server-authoritative Glicko-2 score", () 
       { authHeader: true }
     ));
     const j = await res.json();
-    const { newScore } = expectedPracticeScore({ prevScore: 40, grade: PRACTICE_GRADE, band: "intermediate" });
+    const { newScore } = expectedPracticeScore({ prevScore: 140, grade: PRACTICE_GRADE, band: "intermediate" });
     expect(j.newScore).toBe(newScore);
     expect(j.newScore).not.toBe(999);
     const save = calls.rpc.find((c) => c.fn === "save_progress_for");
@@ -271,8 +271,8 @@ describe("POST /api/score practice — server-authoritative Glicko-2 score", () 
   it("uses the persisted item difficulty (not the band default) when the bucket is calibrated", async () => {
     auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
     const { sb } = fakeAdmin({
-      scoresRows: [{ subject: "math", score: 40, weak_concepts: [], comment: "", rubric: null }],
-      itemDifficulty: { difficulty: 90 }, // a much harder calibrated bucket than the intermediate default
+      scoresRows: [{ subject: "math", score: 140, weak_concepts: [], comment: "", rubric: null }],
+      itemDifficulty: { difficulty: 315 }, // a much harder calibrated bucket than the intermediate default
       attemptCount: 3,
     });
     storage.getAdmin.mockReturnValue(sb);
@@ -282,13 +282,13 @@ describe("POST /api/score practice — server-authoritative Glicko-2 score", () 
       { authHeader: true }
     ));
     const j = await res.json();
-    const { newScore } = expectedPracticeScore({ prevScore: 40, grade: PRACTICE_GRADE, itemDifficulty: 90, attemptCount: 3 });
+    const { newScore } = expectedPracticeScore({ prevScore: 140, grade: PRACTICE_GRADE, itemDifficulty: 315, attemptCount: 3 });
     expect(j.newScore).toBe(newScore); // beating a HARD item lifts more than the band default would
   });
 
   it("DOCKS an 'idk' practice answer deterministically — no Groq call, rating drops, all-zero rubric", async () => {
     auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
-    const { sb, calls } = fakeAdmin({ scoresRows: [{ subject: "math", score: 60, weak_concepts: [], comment: "", rubric: { conceptual_understanding: 3 } }] });
+    const { sb, calls } = fakeAdmin({ scoresRows: [{ subject: "math", score: 210, weak_concepts: [], comment: "", rubric: { conceptual_understanding: 3 } }] });
     storage.getAdmin.mockReturnValue(sb);
     const failFetch = vi.fn(() => { throw new Error("must not call Groq on a docked answer"); });
     vi.stubGlobal("fetch", failFetch);
@@ -302,7 +302,7 @@ describe("POST /api/score practice — server-authoritative Glicko-2 score", () 
     expect(j.docked).toBe(true);
     expect(j.reasoningScore).toBeLessThan(10); // single-digit forced score
     expect(Object.values(j.rubric).every((v) => v === 0)).toBe(true); // all-zero rubric this attempt
-    expect(j.newScore).toBeLessThan(60); // docking DROPS the rating (anti-"idk"), not a no-op
+    expect(j.newScore).toBeLessThan(210); // docking DROPS the rating (anti-"idk"), not a no-op
     expect(j.rationale).toMatch(/docked/i);
     // A dock carries no difficulty signal, so the bucket is NOT calibrated from it.
     expect(calls.rpc.find((c) => c.fn === "bump_item_difficulty")).toBeFalsy();
@@ -312,7 +312,7 @@ describe("POST /api/score practice — server-authoritative Glicko-2 score", () 
 
   it("persists the answer-review (p_review) and reveals the worked solution on a substantive attempt (PR 6)", async () => {
     auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
-    const { sb, calls } = fakeAdmin({ scoresRows: [{ subject: "math", score: 40 }] });
+    const { sb, calls } = fakeAdmin({ scoresRows: [{ subject: "math", score: 140 }] });
     storage.getAdmin.mockReturnValue(sb);
     mockGroq({
       ...PRACTICE_GRADE,
@@ -338,7 +338,7 @@ describe("POST /api/score practice — server-authoritative Glicko-2 score", () 
 
   it("ignores a model-supplied score that contradicts its rubric — the headline is ALWAYS the transparent rubric mean (all-zero rubric can't ship an 85)", async () => {
     auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
-    const { sb } = fakeAdmin({ scoresRows: [{ subject: "math", score: 50 }] });
+    const { sb } = fakeAdmin({ scoresRows: [{ subject: "math", score: 175 }] });
     storage.getAdmin.mockReturnValue(sb);
     mockGroq({
       reasoningScore: 85,
@@ -364,7 +364,7 @@ describe("POST /api/score practice — server-authoritative Glicko-2 score", () 
 
   it("returns a generic 500 (no upstream leak) when persistence fails", async () => {
     auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
-    const { sb } = fakeAdmin({ scoresRows: [{ subject: "math", score: 40 }], rpcError: { message: "db boom" } });
+    const { sb } = fakeAdmin({ scoresRows: [{ subject: "math", score: 140 }], rpcError: { message: "db boom" } });
     storage.getAdmin.mockReturnValue(sb);
     mockGroq(PRACTICE_GRADE);
     const res = await POST(req({ kind: "practice", token: tok(), reasoning: REASONING }, { authHeader: true }));
@@ -375,7 +375,7 @@ describe("POST /api/score practice — server-authoritative Glicko-2 score", () 
 
   it("retries ONCE on a 429 from Groq (transient rate cap) and then succeeds", async () => {
     auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
-    storage.getAdmin.mockReturnValue(fakeAdmin({ scoresRows: [{ subject: "math", score: 40 }] }).sb);
+    storage.getAdmin.mockReturnValue(fakeAdmin({ scoresRows: [{ subject: "math", score: 140 }] }).sb);
     const fetchMock = mockGroq(PRACTICE_GRADE, { failFirstN: 1, failStatus: 429 });
     const res = await POST(req({ kind: "practice", token: tok(), reasoning: REASONING }, { authHeader: true }));
     expect(res.status).toBe(200);
@@ -541,7 +541,7 @@ describe("POST /api/score diagnostic — FINALIZE (aggregate the signed walks)",
     // The seed target is the REAL path-weighted aggregate over the walked bands.
     const quality = scoreFromRubric(normalizeRubric(DIAG_GRADE.rubric));
     const walked = ["intermediate", "advanced", "phd", "phd"].map((d) => ({ difficulty: d, reasoningScore: quality }));
-    expect(j.scores.math.score).toBe(diagnosticPathScore(walked));
+    expect(j.scores.math.score).toBe(Math.round((diagnosticPathScore(walked) * 350) / 100)); // quality aggregate → 0–350 placement
     expect(j.masteryUpdates).toHaveLength(ORDER.length * DIAG_STEPS_PER_SUBJECT);
   });
 
@@ -783,7 +783,7 @@ describe("POST /api/score practice — server-issued question tokens (audit P1-1
 
   it("derives band/topic from the TOKEN — loose body fields claiming phd are ignored", async () => {
     auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
-    const { sb, calls } = fakeAdmin({ scoresRows: [{ subject: "math", score: 40 }] });
+    const { sb, calls } = fakeAdmin({ scoresRows: [{ subject: "math", score: 140 }] });
     storage.getAdmin.mockReturnValue(sb);
     mockGroq(PRACTICE_GRADE);
     const res = await POST(req(
@@ -821,7 +821,7 @@ describe("POST /api/score practice — server-issued question tokens (audit P1-1
 
   it("RECOMPUTES once on a concurrency conflict (status:'conflict' → fresh read → second save → 200)", async () => {
     auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
-    const { sb, calls } = fakeAdmin({ scoresRows: [{ subject: "math", score: 40 }] });
+    const { sb, calls } = fakeAdmin({ scoresRows: [{ subject: "math", score: 140 }] });
     const realRpc = sb.rpc;
     let saves = 0;
     sb.rpc = vi.fn(async (fn, args) => {
@@ -894,8 +894,8 @@ describe("POST /api/score diagnostic — global budget", () => {
 describe("POST /api/score — review-round hardening", () => {
   it("CLAMPS the token band to one above the server-stored level (an injection-minted phd label on a low account grades near-level)", async () => {
     auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
-    // Stored level 30 → foundational; a phd-labeled token must clamp to intermediate.
-    const { sb, calls } = fakeAdmin({ scoresRows: [{ subject: "math", score: 30, weak_concepts: [], comment: "", rubric: null, glicko: null }] });
+    // Stored level 105 → Middle band (idx 1); a phd-labeled token must clamp to intermediate (idx 2).
+    const { sb, calls } = fakeAdmin({ scoresRows: [{ subject: "math", score: 105, weak_concepts: [], comment: "", rubric: null, glicko: null }] });
     storage.getAdmin.mockReturnValue(sb);
     mockGroq(PRACTICE_GRADE);
     const res = await POST(req(
@@ -906,13 +906,13 @@ describe("POST /api/score — review-round hardening", () => {
     const save = calls.rpc.find((c) => c.fn === "save_progress_for");
     expect(save.args.p_attempt.band).toBe("intermediate"); // clamped, NOT phd
     // And the at/below-level direction is untouched (deflate-only):
-    const { newScore } = expectedPracticeScore({ prevScore: 30, grade: PRACTICE_GRADE, band: "intermediate" });
+    const { newScore } = expectedPracticeScore({ prevScore: 105, grade: PRACTICE_GRADE, band: "intermediate" });
     expect(save.args.p_scores[0].score).toBe(newScore);
   });
 
-  it("a HIGH-level account is not clamped (phd at stored 85 stays phd)", async () => {
+  it("a HIGH-level account is not clamped (phd at stored 298 stays phd)", async () => {
     auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
-    const { sb, calls } = fakeAdmin({ scoresRows: [{ subject: "math", score: 85, weak_concepts: [], comment: "", rubric: null, glicko: null }] });
+    const { sb, calls } = fakeAdmin({ scoresRows: [{ subject: "math", score: 298, weak_concepts: [], comment: "", rubric: null, glicko: null }] });
     storage.getAdmin.mockReturnValue(sb);
     mockGroq(PRACTICE_GRADE);
     const res = await POST(req(
@@ -953,11 +953,11 @@ describe("POST /api/score — review-round hardening", () => {
 
   it("conflict recompute genuinely RE-READS: pass 2 computes from the moved row and threads its updated_at + the SAME jti", async () => {
     auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
-    // Mutable fixture: the first persist-loop read sees score 40/t1; after the
-    // conflict, the second read sees the concurrently-moved row (score 48/t2).
+    // Mutable fixture: the first persist-loop read sees score 140/t1; after the
+    // conflict, the second read sees the concurrently-moved row (score 168/t2).
     const states = [
-      [{ subject: "math", score: 40, weak_concepts: [], comment: "", rubric: null, glicko: null, updated_at: "2026-06-11T00:00:01.000000+00:00" }],
-      [{ subject: "math", score: 48, weak_concepts: [], comment: "", rubric: null, glicko: null, updated_at: "2026-06-11T00:00:02.000000+00:00" }],
+      [{ subject: "math", score: 140, weak_concepts: [], comment: "", rubric: null, glicko: null, updated_at: "2026-06-11T00:00:01.000000+00:00" }],
+      [{ subject: "math", score: 168, weak_concepts: [], comment: "", rubric: null, glicko: null, updated_at: "2026-06-11T00:00:02.000000+00:00" }],
     ];
     let scoreReads = 0;
     const saves = [];
@@ -994,8 +994,8 @@ describe("POST /api/score — review-round hardening", () => {
     // Pass 1 was computed from the t1 row; pass 2 MUST reflect the fresh t2 read.
     expect(saves[0].p_expected_updated_at).toBe("2026-06-11T00:00:01.000000+00:00");
     expect(saves[1].p_expected_updated_at).toBe("2026-06-11T00:00:02.000000+00:00");
-    const s1 = expectedPracticeScore({ prevScore: 40, grade: PRACTICE_GRADE, band: "intermediate" });
-    const s2 = expectedPracticeScore({ prevScore: 48, grade: PRACTICE_GRADE, band: "intermediate" });
+    const s1 = expectedPracticeScore({ prevScore: 140, grade: PRACTICE_GRADE, band: "intermediate" });
+    const s2 = expectedPracticeScore({ prevScore: 168, grade: PRACTICE_GRADE, band: "intermediate" });
     expect(saves[0].p_scores[0].score).toBe(s1.newScore);
     expect(saves[1].p_scores[0].score).toBe(s2.newScore); // recomputed, not reused
     expect(saves[1].p_attempt.jti).toBe(saves[0].p_attempt.jti); // same served question

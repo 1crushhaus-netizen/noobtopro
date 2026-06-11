@@ -243,7 +243,7 @@ begin
   insert into public.scores (user_id, subject, score, weak_concepts, comment, rubric, glicko, updated_at)
   select uid,
          s->>'subject',
-         greatest(0, least(100, coalesce(case when pg_input_is_valid(s->>'score', 'numeric') then round((s->>'score')::numeric) end, 0)))::int,
+         greatest(0, least(350, coalesce(case when pg_input_is_valid(s->>'score', 'numeric') then round((s->>'score')::numeric) end, 0)))::int,
          coalesce(
            (select array_agg(v order by ord)
               from (select left(value, 200) as v, ord
@@ -518,7 +518,7 @@ begin
   insert into public.scores (user_id, subject, score, weak_concepts, comment, rubric, glicko, updated_at)
   select p_user,
          s->>'subject',
-         greatest(0, least(100, coalesce(case when pg_input_is_valid(s->>'score', 'numeric') then round((s->>'score')::numeric) end, 0)))::int,
+         greatest(0, least(350, coalesce(case when pg_input_is_valid(s->>'score', 'numeric') then round((s->>'score')::numeric) end, 0)))::int,
          coalesce(
            (select array_agg(v order by ord)
               from (select left(value, 200) as v, ord
@@ -1072,9 +1072,9 @@ begin
   end if;
   insert into public.item_difficulty (subject, topic, band, difficulty, attempts, updated_at)
   values (p_subject, p_topic, p_band,
-          greatest(0, least(100, coalesce(p_seed, 50) + coalesce(p_delta, 0))), 1, now())
+          greatest(0, least(350, coalesce(p_seed, 175) + coalesce(p_delta, 0))), 1, now())
   on conflict (subject, topic, band) do update
-    set difficulty = greatest(0, least(100, public.item_difficulty.difficulty + coalesce(p_delta, 0))),
+    set difficulty = greatest(0, least(350, public.item_difficulty.difficulty + coalesce(p_delta, 0))),
         attempts   = public.item_difficulty.attempts + 1,
         updated_at = now()
   returning difficulty into v_difficulty;
@@ -1112,7 +1112,7 @@ as $$
   ),
   banded as (
     select track, user_id, score,
-      case when score < 20 then 0 when score < 40 then 1 when score < 60 then 2 when score < 80 then 3 else 4 end as bidx
+      case when score < 70 then 0 when score < 140 then 1 when score < 210 then 2 when score < 280 then 3 else 4 end as bidx
     from base
   ),
   counts as (

@@ -148,15 +148,15 @@ function KpiStats({ scores, attempts }) {
   return (
     <div className="np-dash-kpis">
       <div className="np-card np-statcard">
-        <span className="np-eyebrow np-eyebrow--xs">PhD-level intelligence</span>
+        <span className="np-eyebrow np-eyebrow--xs">Doctorate index</span>
         <span className="np-statnum" style={{ color: "var(--math)" }}>
-          {phdIndex(scores)}<span style={{ color: "var(--muted)", fontSize: 15 }}> / 100</span>
+          {phdIndex(scores)}<span style={{ color: "var(--muted)", fontSize: 15 }}> / 350</span>
         </span>
       </div>
       <div className="np-card np-statcard">
         <span className="np-eyebrow np-eyebrow--xs">Total points</span>
         <span className="np-statnum">
-          {totalPoints(scores)}<span style={{ color: "var(--muted)", fontSize: 15 }}> / 300</span>
+          {totalPoints(scores)}<span style={{ color: "var(--muted)", fontSize: 15 }}> / 1050</span>
         </span>
       </div>
       <div className="np-card np-statcard">
@@ -186,7 +186,7 @@ function BySubject({ scores, mastery, onPractice }) {
               <span className="np-dash-sublabel">{SUBJECTS[k].label}</span>
               <MiniBar value={scores[k]?.score || 0} color={SUBJECTS[k].color} />
               <span style={{ fontFamily: "var(--mono)", fontWeight: 700, width: 58, textAlign: "right" }}>
-                {scores[k]?.score || 0}<span style={{ color: "var(--muted)" }}>/100</span>
+                {scores[k]?.score || 0}<span style={{ color: "var(--muted)" }}>/350</span>
               </span>
               <button className="np-ghost" onClick={() => onPractice && onPractice(k)} style={{ whiteSpace: "nowrap" }}>Practice</button>
             </div>
@@ -468,7 +468,7 @@ export default function Dashboard({
           <div className="np-charttitle">Total points over time</div>
           <div className="np-chartsub">From your starting scores through every graded attempt.</div>
           {linePoints.length >= 2 ? (
-            <LineChart values={linePoints} yMax={300} color={SUBJECTS.math.color} />
+            <LineChart values={linePoints} yMax={1050} color={SUBJECTS.math.color} />
           ) : (
             <p className="np-statsub">Answer a practice problem to start the trend line.</p>
           )}
