@@ -28,8 +28,8 @@ describe("db/schema.sql — curation-only invariant (auto-grown guides are never
     expect(promote).not.toContain("'public'"); // no public-visibility coupling
   });
 
-  it("register_concepts stores grader stubs as status='pending' (excluded by the read policy)", () => {
-    expect(fnBody("register_concepts")).toContain("'pending'");
+  it("register_concepts (the retired auto-grow writer) stays DROPPED (0014) — the schema must not resurrect it", () => {
+    expect(schema).not.toMatch(/create or replace function public\.register_concepts/);
   });
 
   it("the public read policy only exposes visibility='public' AND status='ready'", () => {
