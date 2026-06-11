@@ -712,29 +712,11 @@ returns text language sql immutable set search_path = '' as $$
          );
 $$;
 
--- Auto-grow: register grader-recommended weak concepts as PENDING stubs (hidden
--- from the public hub until generated). service-role only; never disturbs an
--- existing pending/ready row.
-create or replace function public.register_concepts(p_subject text, p_concepts jsonb)
-returns void language plpgsql security definer set search_path = public as $$
-begin
-  if p_subject not in ('math','physics','chemistry') then return; end if;
-  -- Best-effort global cap on auto-grown PENDING stubs so steered grader traffic
-  -- can't grow concept_guides without bound (no TTL/cleanup yet); curated/ready rows
-  -- are unaffected. A small overshoot under concurrency is fine for this P3 guard.
-  if (select count(*) from public.concept_guides where status = 'pending') >= 50000 then return; end if;
-  -- Stubs are visibility='hidden' (curation-only invariant: auto-grown rows are never
-  -- public). status='pending' alone already excludes them from the read policy; storing
-  -- 'hidden' too keeps them excluded even if that policy ever drops the status check.
-  insert into public.concept_guides (subject, concept_key, concept, topic, status, content, visibility, source)
-  select p_subject, _concept_key(val), left(val, 200), 'general_' || p_subject, 'pending', null, 'hidden', 'grader'
-  from jsonb_array_elements_text(coalesce(p_concepts, '[]'::jsonb)) as val
-  where coalesce(btrim(val), '') <> '' and _concept_key(val) <> ''
-  on conflict (subject, concept_key) do nothing;
-end;
-$$;
-revoke all on function public.register_concepts(text, jsonb) from public, anon, authenticated;
-grant execute on function public.register_concepts(text, jsonb) to service_role;
+-- ---- auto-grow registration — DROPPED (0014) --------------------------------
+-- register_concepts once turned the grader's weak concepts into PENDING hidden
+-- stubs (the hub's organic-growth pipeline). Retired by owner decision
+-- 2026-06-11 (#75) — the curated curriculum + written guides superseded the
+-- organic catalog — and dropped in 0014_drop_register_concepts.sql.
 
 -- On a /api/learn generation: promote a pending stub to ready, or insert a fresh
 -- user-originated guide. CURATION-ONLY MODEL (security): auto-grown guides are
