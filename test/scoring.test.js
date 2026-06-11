@@ -636,3 +636,48 @@ describe("lowestRubricDimensions", () => {
     expect(lowestRubricDimensions({})).toEqual([]);
   });
 });
+
+// ---- diagnosticPathScore (the §8 adaptive walk's aggregate) -----------------
+import { diagnosticPathScore, diagnosticSeedFromReasoning as _seedFR } from "@/lib/scoring";
+
+describe("diagnosticPathScore (path-weighted, no full-weight floor)", () => {
+  it("is the plain difficulty-weighted mean over the walked bands", () => {
+    // intermediate(50)·80 + advanced(70)·60 → (4000+4200)/120 ≈ 68
+    expect(diagnosticPathScore([
+      { difficulty: "intermediate", reasoningScore: 80 },
+      { difficulty: "advanced", reasoningScore: 60 },
+    ])).toBe(68);
+    // Acing a LOW walked path scores high on ITS bands — no fixed-tier floor
+    // punishing the descent (the signed chain already forced every step)…
+    expect(diagnosticPathScore([
+      { difficulty: "beginner", reasoningScore: 100 },
+      { difficulty: "beginner", reasoningScore: 100 },
+    ])).toBe(100);
+    // …while a descending walk that FAILED its high bands stays low: the early
+    // failures carry the largest weights in the same mean.
+    expect(diagnosticPathScore([
+      { difficulty: "intermediate", reasoningScore: 10 },
+      { difficulty: "foundational", reasoningScore: 20 },
+      { difficulty: "beginner", reasoningScore: 95 },
+      { difficulty: "beginner", reasoningScore: 95 },
+    ])).toBe(Math.round((50 * 10 + 30 * 20 + 10 * 95 + 10 * 95) / 100));
+  });
+
+  it("handles junk: empty/missing input → 0; unknown bands fall back to the intermediate anchor", () => {
+    expect(diagnosticPathScore([])).toBe(0);
+    expect(diagnosticPathScore(null)).toBe(0);
+    expect(diagnosticPathScore([{ difficulty: "bogus", reasoningScore: 50 }])).toBe(50);
+  });
+
+  it("diagnosticSeedFromReasoning({ pathWeighted: true }) pins the seed score on the path aggregate", () => {
+    const rubric = { comprehension: 3, principle: 3, justification: 3, strategy: 3, logic: 3, execution_method: 3, computation: 3, verification: 3, communication: 3 };
+    const qs = [
+      { difficulty: "intermediate", reasoningScore: 75, rubric },
+      { difficulty: "advanced", reasoningScore: 75, rubric },
+      { difficulty: "phd", reasoningScore: 75, rubric },
+      { difficulty: "phd", reasoningScore: 75, rubric },
+    ];
+    const seed = _seedFR(qs, { pathWeighted: true });
+    expect(seed.score).toBe(diagnosticPathScore(qs));
+  });
+});

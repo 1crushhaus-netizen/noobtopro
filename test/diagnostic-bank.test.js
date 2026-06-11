@@ -1,76 +1,98 @@
 import { describe, it, expect } from "vitest";
-import { DIAGNOSTIC_BANK, buildDiagnostic, diagnosticSurfaceFor, diagnosticConceptFor } from "@/lib/diagnosticBank";
+import {
+  DIAGNOSTIC_BANK,
+  diagnosticItemById,
+  pickDiagnosticItem,
+  nextDiagBand,
+  DIAG_STEPS_PER_SUBJECT,
+  DIAG_START_BAND,
+  DIAG_STEP_UP_QUALITY,
+} from "@/lib/diagnosticBank";
 import { isCurriculumConcept } from "@/lib/mastery";
-import { ORDER, DIAGNOSTIC_DIFFICULTIES } from "@/lib/scoring";
+import { BAND_LADDER } from "@/lib/curriculum";
+import { ORDER } from "@/lib/scoring";
 import { isValidTopic } from "@/lib/taxonomy";
 
-describe("curated diagnostic bank", () => {
-  it("has exactly ONE curated question per (subject × level) — 9 total", () => {
-    expect(DIAGNOSTIC_BANK).toHaveLength(ORDER.length * DIAGNOSTIC_DIFFICULTIES.length); // 3 × 3
-    const slots = new Set();
+describe("curated adaptive diagnostic bank (RANKS_PLAN §8)", () => {
+  it("has exactly TWO items per (subject × band) across ALL FIVE bands — 30 total", () => {
+    expect(DIAGNOSTIC_BANK).toHaveLength(ORDER.length * BAND_LADDER.length * 2);
+    const cells = {};
+    const ids = new Set();
     for (const q of DIAGNOSTIC_BANK) {
       expect(ORDER).toContain(q.subject);
-      expect(DIAGNOSTIC_DIFFICULTIES).toContain(q.difficulty);
-      const key = `${q.subject}:${q.difficulty}`;
-      expect(slots.has(key)).toBe(false); // no duplicate slot
-      slots.add(key);
+      expect(BAND_LADDER).toContain(q.band);
+      expect(ids.has(q.id), `duplicate id ${q.id}`).toBe(false);
+      ids.add(q.id);
+      expect(q.id.startsWith(`${q.subject}:${q.band}:`), `id ${q.id} not canonical`).toBe(true);
+      cells[`${q.subject}:${q.band}`] = (cells[`${q.subject}:${q.band}`] || 0) + 1;
     }
-    for (const s of ORDER) for (const d of DIAGNOSTIC_DIFFICULTIES) expect(slots.has(`${s}:${d}`)).toBe(true);
+    for (const s of ORDER) for (const b of BAND_LADDER) expect(cells[`${s}:${b}`], `${s}/${b}`).toBe(2);
   });
 
-  it("every question is substantive (reasoning-rich, not a one-liner) and tagged with a valid topic slug", () => {
+  it("every item is substantive, topic-tagged with a valid slug, and mastery-tagged with a REAL same-subject concept", () => {
     for (const q of DIAGNOSTIC_BANK) {
       expect(typeof q.question).toBe("string");
       expect(q.question.trim().length).toBeGreaterThan(40);
       expect(typeof q.targetConcept).toBe("string");
-      expect(isValidTopic(q.subject, q.topicSlug)).toBe(true);
+      expect(isValidTopic(q.subject, q.topicSlug), `${q.id} slug ${q.topicSlug}`).toBe(true);
+      expect(isCurriculumConcept(q.subject, q.conceptKey), `${q.id} -> ${q.conceptKey}`).toBe(true);
     }
   });
 
-  it("buildDiagnostic returns a FRESH 9-question copy that can't corrupt the bank", () => {
-    const a = buildDiagnostic();
-    expect(a.curated).toBe(true);
-    expect(a.questions).toHaveLength(9);
-    a.questions[0].question = "MUTATED";
-    expect(buildDiagnostic().questions[0].question).not.toBe("MUTATED");
-    expect(DIAGNOSTIC_BANK[0].question).not.toBe("MUTATED");
-  });
-
-  it("every question declares an allow-listed reasoningSurface (trap ⇒ a trap description)", () => {
+  it("every item declares an allow-listed reasoningSurface (trap ⇒ a trap description, and only then)", () => {
     const ALLOWED = new Set(["multi-step", "branch", "trap"]);
     for (const q of DIAGNOSTIC_BANK) {
-      expect(ALLOWED.has(q.reasoningSurface)).toBe(true);
-      if (q.reasoningSurface === "trap") expect(typeof q.trap === "string" && q.trap.trim().length > 0).toBe(true);
+      expect(ALLOWED.has(q.reasoningSurface), q.id).toBe(true);
+      if (q.reasoningSurface === "trap") expect(typeof q.trap === "string" && q.trap.trim().length > 0, q.id).toBe(true);
+      else expect(q.trap, `${q.id} has a trap on a non-trap surface`).toBeUndefined();
     }
   });
 });
 
-describe("diagnosticSurfaceFor (server-side bank lookup — the grader's source of truth)", () => {
-  it("returns the bank's surface/trap for every real slot", () => {
-    for (const q of DIAGNOSTIC_BANK) {
-      const s = diagnosticSurfaceFor(q.subject, q.difficulty);
-      expect(s.reasoningSurface).toBe(q.reasoningSurface);
-      expect(s.trap).toBe(q.trap || "");
-    }
-  });
-  it("returns an empty surface for an unknown/prototype slot (never throws)", () => {
-    expect(diagnosticSurfaceFor("math", "phd")).toEqual({ reasoningSurface: null, trap: "" });
-    expect(diagnosticSurfaceFor("astrology", "beginner")).toEqual({ reasoningSurface: null, trap: "" });
-    expect(diagnosticSurfaceFor("__proto__", "beginner")).toEqual({ reasoningSurface: null, trap: "" });
+describe("diagnosticItemById (the grader's server-side source of truth)", () => {
+  it("resolves every bank item by id; null for unknown/prototype ids", () => {
+    for (const q of DIAGNOSTIC_BANK) expect(diagnosticItemById(q.id)).toBe(q);
+    expect(diagnosticItemById("math:beginner:99")).toBe(null);
+    expect(diagnosticItemById("__proto__")).toBe(null);
+    expect(diagnosticItemById(null)).toBe(null);
   });
 });
 
-describe("diagnosticConceptFor (server-side mastery tagging — the bank's source of truth)", () => {
-  it("every bank question is tagged with a REAL curriculum concept for its subject", () => {
-    for (const q of DIAGNOSTIC_BANK) {
-      expect(typeof q.conceptKey).toBe("string");
-      expect(isCurriculumConcept(q.subject, q.conceptKey), `${q.subject}:${q.difficulty} -> ${q.conceptKey}`).toBe(true);
-    }
+describe("pickDiagnosticItem (deterministic, standardized serving)", () => {
+  it("serves the cell's first item, then the second when the first was asked", () => {
+    const first = pickDiagnosticItem("math", "intermediate", []);
+    expect(first.id).toBe("math:intermediate:1");
+    const second = pickDiagnosticItem("math", "intermediate", [first.id]);
+    expect(second.id).toBe("math:intermediate:2");
+    // Exhausted cell (unreachable on a real 4-step walk) falls back, never null.
+    expect(pickDiagnosticItem("math", "intermediate", [first.id, second.id]).id).toBe("math:intermediate:1");
   });
-  it("returns the bank's conceptKey per slot, null for unknown/prototype slots", () => {
-    for (const q of DIAGNOSTIC_BANK) expect(diagnosticConceptFor(q.subject, q.difficulty)).toBe(q.conceptKey);
-    expect(diagnosticConceptFor("math", "phd")).toBe(null);
-    expect(diagnosticConceptFor("astrology", "beginner")).toBe(null);
-    expect(diagnosticConceptFor("__proto__", "beginner")).toBe(null);
+
+  it("is deterministic across calls (identical paths face identical items) and null only for unknown cells", () => {
+    expect(pickDiagnosticItem("physics", "phd", [])).toBe(pickDiagnosticItem("physics", "phd", []));
+    expect(pickDiagnosticItem("astrology", "beginner", [])).toBe(null);
+  });
+});
+
+describe("nextDiagBand (the §8 ±1-band walk)", () => {
+  it("moves one band up at/above the threshold, one band down below it, clamped at the ladder ends", () => {
+    expect(nextDiagBand("intermediate", DIAG_STEP_UP_QUALITY)).toBe("advanced");
+    expect(nextDiagBand("intermediate", DIAG_STEP_UP_QUALITY - 1)).toBe("foundational");
+    expect(nextDiagBand("phd", 100)).toBe("phd"); // top clamp
+    expect(nextDiagBand("beginner", 0)).toBe("beginner"); // bottom clamp
+  });
+
+  it("re-centers a malformed band on the start band (never walks off the ladder)", () => {
+    expect(nextDiagBand("bogus", 100)).toBe("advanced"); // intermediate +1
+    expect(nextDiagBand(undefined, 0)).toBe("foundational"); // intermediate -1
+  });
+
+  it("the walk's constants match the §8 decisions (4 steps, middle start)", () => {
+    expect(DIAG_STEPS_PER_SUBJECT).toBe(4);
+    expect(DIAG_START_BAND).toBe("intermediate");
+    // From the middle, a 4-step ±1 walk can reach either extreme…
+    expect(nextDiagBand(nextDiagBand(DIAG_START_BAND, 100), 100)).toBe("phd");
+    expect(nextDiagBand(nextDiagBand(DIAG_START_BAND, 0), 0)).toBe("beginner");
+    // …and any band at most twice — which is why two items per cell suffice.
   });
 });

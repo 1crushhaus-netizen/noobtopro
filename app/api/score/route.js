@@ -27,13 +27,12 @@
 
 import { NextResponse, after } from "next/server";
 import { groqJSON, fenceGuard, PRACTICE_GRADE_SYS, DIAG_GRADE_SYS } from "@/lib/groq";
-import { verifyQuestionToken } from "@/lib/questionToken";
+import { verifyQuestionToken, verifyDiagToken, signDiagState } from "@/lib/questionToken";
 import {
   ORDER,
   normalizeRubric,
   totalPoints,
   phdIndex,
-  DIAGNOSTIC_DIFFICULTIES,
   defaultDifficultyForBand,
   scoreFromRubric,
   explainRankMove,
@@ -45,7 +44,7 @@ import {
 } from "@/lib/scoring";
 import { normalizeTopic } from "@/lib/taxonomy";
 import { BAND_LADDER } from "@/lib/curriculum";
-import { diagnosticSurfaceFor, diagnosticConceptFor, diagnosticQuestionFor } from "@/lib/diagnosticBank";
+import { diagnosticItemById, pickDiagnosticItem, nextDiagBand, DIAG_STEPS_PER_SUBJECT } from "@/lib/diagnosticBank";
 import { isCurriculumConcept } from "@/lib/mastery";
 import { preGradeDock } from "@/lib/preGrade";
 import { checkRateLimit, clientKey, chargeGlobalGroq } from "@/lib/rateLimit";
@@ -57,13 +56,11 @@ import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, no
 
 export const dynamic = "force-dynamic";
 // Bound a hung request explicitly (audit P2-10): the Groq fetch carries a 30s abort,
-// and the diagnostic fans out up to 9 grades at concurrency 3, so the worst case
-// needs real headroom. 300s = the Fluid-compute maximum on the current (Hobby) plan —
-// revisit if the plan changes (Vercel rejects over-plan values at deploy time).
-export const maxDuration = 300;
+// and every path here grades AT MOST ONE answer per request (practice, or one
+// adaptive-diagnostic step — the old 9-grade batch fan-out is gone), with at most a
+// primary + one 429 retry. 90s leaves real headroom over that worst case.
+export const maxDuration = 90;
 
-const GRADE_CONCURRENCY = 3; // simultaneous Groq grade calls per diagnostic
-const MAX_DIAGNOSTIC_ANSWERS = ORDER.length * DIAGNOSTIC_DIFFICULTIES.length; // 9 (3 subjects × 3 tiers)
 const RETRY_DELAY_MS = 700;
 
 const nowIso = () => new Date().toISOString();
@@ -136,12 +133,12 @@ function bumpConceptMastery(sb, uid, entries) {
   }
 }
 
-// Grade one question's reasoning, retrying ONCE on a 429 after a short backoff. The
-// diagnostic fans out several grades; a transient per-minute 429 shouldn't sink an
-// answer. groqJSON re-throws hard upstream errors with .status set, so a 429 surfaces
-// here for the retry. We do NOT retry IMAGE grades: groqJSON already falls back to a
-// text-only call internally on a recoverable vision failure, so re-issuing the whole
-// call would fire a SECOND (expensive, multi-MB) vision request — a cost-amplifier.
+// Grade one question's reasoning, retrying ONCE on a 429 after a short backoff
+// (a transient per-minute 429 shouldn't sink a step). groqJSON re-throws hard
+// upstream errors with .status set, so a 429 surfaces here for the retry. We do
+// NOT retry IMAGE grades: groqJSON already falls back to a text-only call
+// internally on a recoverable vision failure, so re-issuing the whole call would
+// fire a SECOND (expensive, multi-MB) vision request — a cost-amplifier.
 async function gradeOne(args) {
   try {
     return await groqJSON({ ...args, grade: true });
@@ -152,27 +149,6 @@ async function gradeOne(args) {
     }
     throw e;
   }
-}
-
-// Bounded-concurrency map that NEVER rejects: each item resolves to
-// { ok:true, value } or { ok:false, error } (Promise.allSettled semantics), so one
-// failed grade can't fail the whole diagnostic. At most `limit` run at once.
-async function settledPool(items, limit, fn) {
-  const out = new Array(items.length);
-  let next = 0;
-  async function worker() {
-    while (next < items.length) {
-      const i = next++;
-      try {
-        out[i] = { ok: true, value: await fn(items[i], i) };
-      } catch (e) {
-        out[i] = { ok: false, error: e };
-      }
-    }
-  }
-  const workers = Math.max(1, Math.min(limit, items.length));
-  await Promise.all(Array.from({ length: workers }, worker));
-  return out;
 }
 
 export async function POST(req) {
@@ -573,254 +549,275 @@ async function handlePractice(req, body) {
   }
 }
 
-// --- diagnostic: auth-OPTIONAL batch baseline grading ---------------------------
+// --- diagnostic: the ADAPTIVE placement (RANKS_PLAN §8) ----------------------
+// kind:"diagnostic" carries either ONE signed step token + the learner's answer
+// (grade it server-side, fold the grade into the signed chain, return the next
+// curated item on the ±1-band walk) or the three completed-subject tokens
+// (aggregate + persist the baseline — zero Groq). The signed chain is what makes
+// the walk server-authoritative with no DB: every band faced, item asked, and
+// grade earned rides in HMAC-signed state the client can only echo back — it can
+// neither forge a grade, skip a step, nor pick its own band. A stale
+// (pre-adaptive) client posting the old batch `answers` shape gets a retryable
+// restart error.
 async function handleDiagnostic(req, body) {
-  // Stricter budget FIRST: one diagnostic request fans out to up to 6 Groq grades, so
-  // reject an over-budget request before any auth round-trip or grading.
-  const diagRl = await checkRateLimit(`${clientKey(req)}:diag`, { max: 4 });
-  if (!diagRl.ok) {
-    reportRateLimit({ req, route: "/api/score" });
+  if (Array.isArray(body && body.tokens)) return handleDiagnosticFinalize(req, body);
+  if (typeof (body && body.token) === "string") return handleDiagnosticStep(req, body);
+  return NextResponse.json(
+    { error: "The placement flow was updated — please restart the diagnostic." },
+    { status: 400 }
+  );
+}
+
+// Optional auth shared by both diagnostic sub-paths: a PRESENTED token must be
+// valid (never silently downgrade a bad token to guest); absent → guest.
+async function optionalDiagAuth(req) {
+  if (!req.headers.get("authorization")) return { uid: null };
+  const auth = await requireUser(req);
+  if (auth.error) return { error: auth.error, status: auth.status };
+  return { uid: auth.user.id };
+}
+
+const tooManyDiag = (req, retryAfter) => {
+  reportRateLimit({ req, route: "/api/score" });
+  return NextResponse.json(
+    { error: "Too many placement steps. Please slow down and try again shortly." },
+    { status: 429, headers: { "Retry-After": String(retryAfter) } }
+  );
+};
+
+// One adaptive step: verify the chain, grade THIS answer (dock or one Groq
+// call), and return either the next signed item or the subject's completion
+// token. Failures leave the presented token valid — the step can be resubmitted.
+async function handleDiagnosticStep(req, body) {
+  // Per-IP step budget: a full sitting is 12 graded steps; 40/min leaves retry
+  // headroom while bounding a burst. (The old per-request :diag cap of 4 guarded
+  // 9-grade fan-outs; a step grades exactly ONE answer.)
+  const diagRl = await checkRateLimit(`${clientKey(req)}:diag`, { max: 40 });
+  if (!diagRl.ok) return tooManyDiag(req, diagRl.retryAfter);
+
+  const who = await optionalDiagAuth(req);
+  if (who.error) return NextResponse.json({ error: who.error }, { status: who.status });
+  if (who.uid) {
+    // Durable PER-ACCOUNT step cap (across IPs/instances) on top of the IP gate.
+    const acctRl = await checkRateLimit(`acct:${who.uid}:diag`, { max: 60 });
+    if (!acctRl.ok) return tooManyDiag(req, acctRl.retryAfter);
+  }
+
+  const v = verifyDiagToken(body.token);
+  if (!v.ok) return NextResponse.json({ error: v.error }, { status: 401 });
+  const st = v.state;
+  // The walk state must be coherent: a mid-run token (never a completed one),
+  // a real in-range step, an item that exists in the bank under this subject,
+  // and exactly step−1 prior grades in the chain.
+  const step = Number(st.step);
+  const item =
+    !st.done && ORDER.includes(st.subject) && Number.isInteger(step) && step >= 1 && step <= DIAG_STEPS_PER_SUBJECT
+      ? diagnosticItemById(st.itemId)
+      : null;
+  if (!item || item.subject !== st.subject || !Array.isArray(st.transcript) || st.transcript.length !== step - 1) {
     return NextResponse.json(
-      { error: "Too many diagnostics. Please slow down and try again shortly." },
-      { status: 429, headers: { "Retry-After": String(diagRl.retryAfter) } }
+      { error: "This placement step could not be verified — please restart the diagnostic." },
+      { status: 400 }
     );
   }
 
-  // Auth is OPTIONAL: a valid token persists the baseline; a guest gets it back. An
-  // INVALID token is still rejected — don't silently downgrade a bad token to guest.
-  let uid = null;
-  let sb = null;
-  if (req.headers.get("authorization")) {
-    const auth = await requireUser(req);
-    if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
-    uid = auth.user.id;
-    // Durable PER-ACCOUNT diagnostic cap (across IPs/instances), on top of the per-IP
-    // :diag budget above.
-    const acctRl = await checkRateLimit(`acct:${uid}:diag`, { max: 6 });
-    if (!acctRl.ok) {
-      reportRateLimit({ req, route: "/api/score" });
-      return NextResponse.json(
-        { error: "Too many diagnostics. Please slow down and try again shortly." },
-        { status: 429, headers: { "Retry-After": String(acctRl.retryAfter) } }
-      );
+  const img = normalizeImage(body.image);
+  if (!img.ok) return NextResponse.json({ error: img.error }, { status: 400 });
+  const hasText = typeof body.reasoning === "string" && !!body.reasoning.trim();
+  const reasoning = hasText ? capText(body.reasoning.trim()) : "(no written reasoning provided)";
+  // Image-only answer: the photo IS the answer — a vision failure must fail the
+  // step (retryable) rather than text-grade the placeholder (audit P1-3).
+  const imageOnly = !!img.image && !hasText;
+  // Deterministic dock on the RAW answer — a blank / "idk" / off-topic step is
+  // graded low with NO Groq call (the §8 walk then descends a band, by design).
+  const dock = img.image ? null : preGradeDock(capText(body.reasoning));
+
+  if (img.image) {
+    // The costliest Groq path (multimodal) stays under the same :img budget as
+    // practice — one token per image-bearing step.
+    const imgRl = await checkRateLimit(`${clientKey(req)}:img`, { max: 10 });
+    if (!imgRl.ok) return tooManyDiag(req, imgRl.retryAfter);
+  }
+  if (!dock) {
+    // GLOBAL Groq budget (audit P2-3): one token per LIVE grade; docks are free.
+    const glob = await chargeGlobalGroq(1, { img: img.image ? 1 : 0 });
+    if (!glob.ok) return tooManyDiag(req, glob.retryAfter);
+  }
+  reportInjection({ req, route: "/api/score", subject: item.subject, text: hasText ? reasoning : "" });
+
+  try {
+    // Reasoning-surface context resolved SERVER-SIDE from the bank by the signed
+    // item id — like every other grading fact here, never from the request body.
+    const surfaceCtx = reasoningSurfaceContext(item.reasoningSurface || null, item.trap || "");
+    const data = dock
+      ? dock
+      : await gradeOne({
+          system: DIAG_GRADE_SYS,
+          user:
+            `Subject: ${item.subject}\n` +
+            `Question difficulty band: ${item.band}\n` +
+            (surfaceCtx ? surfaceCtx + "\n" : "") +
+            `Question:\n"""${capText(item.question)}"""\n\n` +
+            // fenceGuard (audit P2-12): learner text can't fake closing the block.
+            `Learner's reasoning:\n"""${fenceGuard(reasoning)}"""`,
+          image: img.image,
+          imageRequired: imageOnly,
+          maxTokens: 1800, // grader's solve block + 9-axis rubric + typed errors
+        });
+    // Grader-output gate (audit P2-1): no usable rubric → retryable failure, never
+    // a zero entry in the signed chain.
+    if (!dock && (!data || typeof data !== "object" || !data.rubric || typeof data.rubric !== "object")) {
+      throw new Error("grader returned no usable rubric");
     }
-    // Resolve the service-role client UP FRONT: if persistence is impossible, fail
-    // before spending Groq tokens on a baseline we couldn't save.
+    const rubric = normalizeRubric(data?.rubric);
+    const reasoningScore = dock ? data.reasoningScore : scoreFromRubric(rubric);
+
+    // Fold the SERVER-graded entry into the signed chain. Compact keys + capped
+    // strings bound the token: 4 entries stay far under the 16 KB verify cap.
+    const entry = {
+      i: item.id,
+      d: item.band,
+      s: reasoningScore,
+      r: rubric,
+      w: normalizeWeakConcepts(data?.weakConcepts).slice(0, 8).map((c) => c.slice(0, 60)),
+      c: typeof data?.comment === "string" ? data.comment.slice(0, 280) : "",
+    };
+    const transcript = [...st.transcript, entry];
+    const graded = { subject: item.subject, difficulty: item.band, reasoningScore };
+
+    if (step >= DIAG_STEPS_PER_SUBJECT) {
+      // Subject complete: a done-token carrying the full graded walk — finalize
+      // verifies one per subject and aggregates.
+      const finalToken = signDiagState({ subject: item.subject, done: true, transcript });
+      return NextResponse.json({ graded, subjectComplete: true, finalToken });
+    }
+    const nextBand = nextDiagBand(item.band, reasoningScore);
+    const asked = Array.isArray(st.asked) ? st.asked : [];
+    const nextItem = pickDiagnosticItem(item.subject, nextBand, asked);
+    const token = signDiagState({
+      subject: item.subject,
+      step: step + 1,
+      itemId: nextItem.id,
+      asked: [...asked, nextItem.id],
+      transcript,
+    });
+    return NextResponse.json({
+      graded,
+      next: {
+        subject: item.subject,
+        difficulty: nextItem.band,
+        topic: nextItem.topic,
+        question: nextItem.question,
+        stepNo: step + 1,
+        stepsTotal: DIAG_STEPS_PER_SUBJECT,
+        token,
+      },
+    });
+  } catch (e) {
+    console.error("[/api/score diagnostic step]", e);
+    return NextResponse.json({ error: "Grading is temporarily unavailable. Please try again." }, { status: 500 });
+  }
+}
+
+// Aggregate the three completed-subject chains into the baseline and persist it
+// for a signed-in caller (guest gets it back to store locally). ZERO Groq —
+// every grade already rides, server-signed, in the transcripts.
+async function handleDiagnosticFinalize(req, body) {
+  const diagRl = await checkRateLimit(`${clientKey(req)}:diag`, { max: 40 });
+  if (!diagRl.ok) return tooManyDiag(req, diagRl.retryAfter);
+
+  const who = await optionalDiagAuth(req);
+  if (who.error) return NextResponse.json({ error: who.error }, { status: who.status });
+  const uid = who.uid;
+  let sb = null;
+  if (uid) {
+    // Resolve persistence UP FRONT: if saving is impossible, fail before touching
+    // anything (same rule the batch path had).
     sb = getSupabaseAdmin();
     if (!sb) return NextResponse.json({ error: "Scoring is temporarily unavailable." }, { status: 503 });
   }
 
-  const rawAnswers = body && Array.isArray(body.answers) ? body.answers : null;
-  if (!rawAnswers || rawAnswers.length === 0) {
-    return NextResponse.json({ error: "answers must be a non-empty array." }, { status: 400 });
-  }
-  if (rawAnswers.length > MAX_DIAGNOSTIC_ANSWERS) {
-    return NextResponse.json({ error: "Too many answers." }, { status: 400 });
-  }
-
-  // Validate + DEDUPE by subject:difficulty so a client can't multiply the Groq
-  // fan-out by sending the same slot many times.
-  const seen = new Set();
-  const items = [];
-  for (const a of rawAnswers) {
-    if (!a || typeof a !== "object") continue;
-    const subject = a.subject;
-    if (!ORDER.includes(subject)) continue;
-    const difficulty = DIAGNOSTIC_DIFFICULTIES.includes(a.difficulty) ? a.difficulty : null;
-    if (!difficulty) continue;
-    const key = `${subject}:${difficulty}`;
-    if (seen.has(key)) continue;
-    // The GRADED question text comes from the curated bank by slot — never from the
-    // request body (audit P1-1 family): the diagnostic is the standardized placement,
-    // so a client substituting its own easier question must not earn the slot's
-    // baseline credit. (The bank covers every (subject, difficulty) slot; a missing
-    // lookup means a forged slot → skip.)
-    const bankQuestion = diagnosticQuestionFor(subject, difficulty);
-    if (!bankQuestion) continue;
-    // Serve/submit consistency (review P2): the client echoes the question it actually
-    // DISPLAYED; if the bank was edited between serve and submit (a deploy mid-
-    // diagnostic), grading the new text against an answer to the old text would
-    // silently persist a wrong baseline. Reject retryably instead — restarting the
-    // (free, zero-Groq) diagnostic is cheap; a corrupted Glicko seed is not.
-    if (typeof a.question === "string" && a.question.trim() && capText(a.question.trim()) !== capText(bankQuestion)) {
-      return NextResponse.json(
-        { error: "The placement questions were updated while you were answering — please restart the diagnostic." },
-        { status: 409 }
-      );
-    }
-    const img = normalizeImage(a.image);
-    if (!img.ok) return NextResponse.json({ error: img.error }, { status: 400 });
-    seen.add(key);
-    const hasText = typeof a.reasoning === "string" && !!a.reasoning.trim();
-    // Reasoning-surface context DERIVED SERVER-SIDE from the curated bank by (subject,
-    // difficulty) — NOT trusted from the request body — so a crafted answer can't spoof the
-    // grader's calibration. "" when the slot has no surface.
-    const bankSurface = diagnosticSurfaceFor(subject, difficulty);
-    items.push({
-      subject,
-      difficulty,
-      question: capText(bankQuestion),
-      surfaceCtx: reasoningSurfaceContext(bankSurface.reasoningSurface, bankSurface.trap),
-      reasoning: hasText ? capText(a.reasoning.trim()) : "(no written reasoning provided)",
-      // Image-only answer: the photo IS the answer — a vision failure must fail this
-      // grade (allSettled drops the tier) rather than text-grade the placeholder
-      // (audit P1-3).
-      imageOnly: !!img.image && !hasText,
-      // Deterministic dock on the RAW answer (before the placeholder substitution
-      // above), so a blank / "idk" / off-topic diagnostic answer is graded low with no
-      // LLM call, just like practice. Skip the dock when a photo is attached — an
-      // image-only answer must reach the vision grader (preGradeDock only sees text).
-      dock: img.image ? null : preGradeDock(capText(a.reasoning)), // cap before the dock (bounded regex/Set work)
-      image: img.image,
-    });
-  }
-  if (items.length === 0) {
-    return NextResponse.json({ error: "No valid answers to grade." }, { status: 400 });
+  const restart = () =>
+    NextResponse.json(
+      { error: "This placement could not be verified — please restart the diagnostic." },
+      { status: 400 }
+    );
+  if (body.tokens.length !== ORDER.length) return restart();
+  const bySubject = {};
+  for (const t of body.tokens) {
+    const v = verifyDiagToken(t);
+    if (!v.ok) return NextResponse.json({ error: v.error }, { status: 401 });
+    const st = v.state;
+    // Exactly one COMPLETED chain per subject, each with the full 4-step walk.
+    if (!st.done || !ORDER.includes(st.subject) || bySubject[st.subject]) return restart();
+    if (!Array.isArray(st.transcript) || st.transcript.length !== DIAG_STEPS_PER_SUBJECT) return restart();
+    bySubject[st.subject] = st.transcript;
   }
 
-  // Charge the per-IP IMAGE budget for the diagnostic's vision grades — one token per
-  // image-bearing answer — so the costliest Groq path (multimodal, multi-MB) is bounded
-  // identically to the practice route. Without this, a diagnostic could drive up to 6
-  // vision calls/request entirely outside the :img cap.
-  const imgCount = items.filter((i) => i.image).length;
-  if (imgCount) {
-    let imgRl;
-    // Charge one :img token per image-bearing answer, but stop as soon as the budget is
-    // exceeded — no point spending further durable-RPC round-trips once we'll reject.
-    for (let i = 0; i < imgCount; i++) {
-      imgRl = await checkRateLimit(`${clientKey(req)}:img`, { max: 10 });
-      if (!imgRl.ok) break;
-    }
-    if (!imgRl.ok) {
-      reportRateLimit({ req, route: "/api/score" });
-      return NextResponse.json(
-        { error: "Too many image grades. Please slow down and try again shortly." },
-        { status: 429, headers: { "Retry-After": String(imgRl.retryAfter) } }
-      );
-    }
-  }
-
-  // GLOBAL Groq budget (audit P2-3): charge one token per LIVE grade (docked answers
-  // cost nothing) so platform-wide spend stays bounded under IP rotation.
-  const liveGrades = items.filter((i) => !i.dock).length;
-  if (liveGrades) {
-    const glob = await chargeGlobalGroq(liveGrades, { img: imgCount });
-    if (!glob.ok) {
-      reportRateLimit({ req, route: "/api/score" });
-      return NextResponse.json(
-        { error: "Too many requests. Please slow down and try again shortly." },
-        { status: 429, headers: { "Retry-After": String(glob.retryAfter) } }
-      );
+  // Rehydrate the graded rows from the signed transcripts; every entry's item
+  // must still resolve in the bank under the right subject and band (a deploy
+  // that edits the bank mid-sitting fails closed into a free restart).
+  const results = [];
+  for (const s of ORDER) {
+    for (const e of bySubject[s]) {
+      const item = e && diagnosticItemById(e.i);
+      if (!item || item.subject !== s || item.band !== e.d) return restart();
+      const score = Math.max(0, Math.min(100, Math.round(Number(e.s) || 0)));
+      results.push({
+        subject: s,
+        difficulty: item.band,
+        reasoningScore: score,
+        rubric: e.r,
+        weakConcepts: normalizeWeakConcepts(e.w),
+        comment: typeof e.c === "string" ? e.c.slice(0, 280) : "",
+        conceptKey: item.conceptKey,
+      });
     }
   }
-
-  reportInjection({ req, route: "/api/score", text: items.map((i) => i.reasoning).join("\n") });
 
   try {
-    const graded = await settledPool(items, GRADE_CONCURRENCY, async (it) => {
-      const data = it.dock
-        ? it.dock
-        : await gradeOne({
-            system: DIAG_GRADE_SYS,
-            user:
-              `Subject: ${it.subject}\n` +
-              `Question difficulty band: ${it.difficulty}\n` +
-              (it.surfaceCtx ? it.surfaceCtx + "\n" : "") +
-              `Question:\n"""${it.question}"""\n\n` +
-              // fenceGuard (audit P2-12): learner text can't fake closing the untrusted block.
-              `Learner's reasoning:\n"""${fenceGuard(it.reasoning)}"""`,
-            image: it.image,
-            imageRequired: it.imageOnly, // audit P1-3: never text-grade the placeholder for an image-only answer
-            maxTokens: 1800, // room for the grader's solve block + 9-axis rubric + typed errors
-          });
-      // Grader-output gate (audit P2-1): no usable rubric → this grade is a settled
-      // FAILURE (the tier drops out; retry-once already happened), not a zero baseline.
-      if (!it.dock && (!data || typeof data !== "object" || !data.rubric || typeof data.rubric !== "object")) {
-        throw new Error("grader returned no usable rubric");
-      }
-      const rubric = normalizeRubric(data?.rubric);
-      // The dock carries its own forced low reasoningScore; the live grade's headline is
-      // the TRANSPARENT weighted mean of the rubric axes (path-independent — the grader no
-      // longer emits a score). Baseline aggregation (diagnosticSubjectScore) uses these.
-      const reasoningScore = it.dock ? data.reasoningScore : scoreFromRubric(rubric);
-      return {
-        subject: it.subject,
-        difficulty: it.difficulty,
-        reasoningScore,
-        rubric,
-        weakConcepts: normalizeWeakConcepts(data?.weakConcepts),
-        comment: typeof data?.comment === "string" ? data.comment.slice(0, 2000) : "",
-      };
-    });
-
-    const results = graded.filter((g) => g.ok).map((g) => g.value);
-    if (results.length === 0) {
-      // Every grade failed (sustained 429 / outage) — retryable error, don't persist
-      // an all-zero baseline.
-      return NextResponse.json(
-        { error: "Grading is temporarily unavailable. Please try again." },
-        { status: 503 }
-      );
-    }
-
-    // Aggregate each subject's graded answers into a difficulty-weighted baseline
-    // (score + rubric profile), mirroring the prior client logic. ACCEPTED RESIDUALS:
-    // (a) a subject whose answers PARTIALLY failed grading is re-weighted from the
-    //     survivors (a missing hard tier slightly inflates that subject) — preferred
-    //     over discarding the subject for one transient failure; retry-once covers most;
-    // (b) the diagnostic is a re-baseline: re-taking it overwrites accumulated scores
-    //     (upsert), the same destructive semantics the client had before.
+    // Per-subject baseline: PATH-weighted aggregate over the walk the learner
+    // actually faced (diagnosticPathScore — the signed chain already forced every
+    // step, so the batch path's full-weight anti-gaming floor is unnecessary and
+    // would punish a legitimately-descending walk).
     const scores = {};
     for (const s of ORDER) {
       const subjectQs = results.filter((r) => r.subject === s);
-      if (subjectQs.length === 0) continue;
-      // Seed the per-axis Glicko state by ANCHORING the aggregate on the difficulty-weighted
-      // reasoning score (full 0–100 placement range; a blank/idk test lands at the dock floor,
-      // a flawless one ≈ 100) with the radar shape from the per-tier rubrics, at full RD so
-      // practice then refines it — one unified, difficulty-aware baseline.
-      const seed = diagnosticSeedFromReasoning(subjectQs);
+      const seed = diagnosticSeedFromReasoning(subjectQs, { pathWeighted: true });
       const weakConcepts = Array.from(
         new Set(subjectQs.flatMap((r) => r.weakConcepts).filter((c) => typeof c === "string" && c.trim()))
       ).slice(0, 8);
       const hardest = [...subjectQs].sort(
-        (a, b) => DIAGNOSTIC_DIFFICULTIES.indexOf(b.difficulty) - DIAGNOSTIC_DIFFICULTIES.indexOf(a.difficulty)
+        (a, b) => BAND_LADDER.indexOf(b.difficulty) - BAND_LADDER.indexOf(a.difficulty)
       )[0];
       scores[s] = { score: seed.score, weakConcepts, comment: (hardest && hardest.comment) || "", rubric: seed.rubric, glicko: seed.glicko };
     }
 
     // Auto-grow the concept hub from the baseline's weak concepts (non-blocking).
     for (const s of ORDER) {
-      if (scores[s] && scores[s].weakConcepts.length) registerWeakConcepts(s, scores[s].weakConcepts);
+      if (scores[s].weakConcepts.length) registerWeakConcepts(s, scores[s].weakConcepts);
     }
 
-    // Per-concept mastery updates — the diagnostic colors EXACTLY the concepts it
-    // tested (direct-only, §12.1). The concept key is derived SERVER-SIDE from the
-    // curated bank by (subject, difficulty) — like the reasoning surface, never from
-    // the request body — and the quality is the server-computed grade, so a crafted
-    // payload can't color (or farm) arbitrary concepts. A docked skip counts: it
-    // marks the concept red ("study the foundations first") by design.
+    // Per-concept mastery — the walk colors EXACTLY the concepts it tested
+    // (direct-only, §12.1): concept keys come from the bank items the signed
+    // chain names; qualities are the server-computed step grades. A docked skip
+    // counts (it marks the concept red by design).
     const masteryUpdates = results
-      .map((r) => {
-        const conceptKey = diagnosticConceptFor(r.subject, r.difficulty);
-        return conceptKey ? { subject: r.subject, conceptKey, quality: r.reasoningScore } : null;
-      })
-      .filter(Boolean);
+      .filter((r) => isCurriculumConcept(r.subject, r.conceptKey))
+      .map((r) => ({ subject: r.subject, conceptKey: r.conceptKey, quality: r.reasoningScore }));
 
     if (uid) {
-      // sb was resolved and null-checked up front (so we never grade for a user we
-      // can't persist for); reuse it here.
       const t = nowIso();
-      // Snapshot total/phd over the user's FULL post-write score map: a subject whose
-      // grades all failed keeps its EXISTING score (the upsert only writes submitted
-      // subjects), so computing over `scores` alone would understate the totals.
+      // Snapshot total/phd over the FULL post-write score map (the adaptive flow
+      // always writes all three subjects, but keep the merge for safety/parity).
       const { data: existingRows, error: existingErr } = await sb.from("scores").select("subject, score").eq("user_id", uid);
-      if (existingErr) throw existingErr; // a silent miss would understate total_after/phd_after on the baseline row
+      if (existingErr) throw existingErr;
       const merged = {};
       for (const r of existingRows || []) merged[r.subject] = { score: r.score };
-      for (const s of ORDER) if (scores[s]) merged[s] = { score: scores[s].score };
+      for (const s of ORDER) merged[s] = { score: scores[s].score };
       const totalAfter = totalPoints(merged);
       const phdAfter = phdIndex(merged);
-      const p_scores = ORDER.filter((s) => scores[s]).map((s) => ({
+      const p_scores = ORDER.map((s) => ({
         subject: s,
         score: scores[s].score,
         weak_concepts: (scores[s].weakConcepts || []).slice(0, 64),
@@ -834,7 +831,6 @@ async function handleDiagnostic(req, body) {
         p_attempt: { type: "baseline", total_after: totalAfter, phd_after: phdAfter, created_at: t },
       });
       if (saveErr) throw saveErr;
-      // Persist the tested concepts' mastery counters (non-blocking, after the save).
       bumpConceptMastery(sb, uid, masteryUpdates.map((u) => ({ subject: u.subject, concept_key: u.conceptKey, quality: u.quality })));
       return NextResponse.json({
         scores,
@@ -853,8 +849,8 @@ async function handleDiagnostic(req, body) {
       });
     }
 
-    // Guest: return the graded baseline (+ the server-derived mastery updates) for
-    // the client to store locally.
+    // Guest: return the graded baseline (+ the server-derived mastery updates)
+    // for the client to store locally.
     return NextResponse.json({ scores, persisted: false, attempt: null, masteryUpdates });
   } catch (e) {
     console.error("[/api/score diagnostic]", e);

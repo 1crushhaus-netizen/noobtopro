@@ -47,29 +47,53 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-// The 3-tier diagnostic: every subject × {beginner, intermediate, hard} (9 questions).
-// Listed out of order on purpose — beginDiagnostic re-orders them subject-major, easy→hard.
-const DIAGNOSTIC = {
-  questions: [
-    { subject: "physics", topic: "t", difficulty: "advanced", question: "PHYS-ADV" },
-    { subject: "math", topic: "t", difficulty: "beginner", question: "MATH-BEG" },
-    { subject: "math", topic: "t", difficulty: "advanced", question: "MATH-ADV" },
-    { subject: "physics", topic: "t", difficulty: "beginner", question: "PHYS-BEG" },
-    { subject: "chemistry", topic: "t", difficulty: "advanced", question: "CHEM-ADV" },
-    { subject: "chemistry", topic: "t", difficulty: "intermediate", question: "CHEM-INT" },
-    { subject: "math", topic: "t", difficulty: "intermediate", question: "MATH-INT" },
-    { subject: "chemistry", topic: "t", difficulty: "beginner", question: "CHEM-BEG" },
-    { subject: "physics", topic: "t", difficulty: "intermediate", question: "PHYS-INT" },
-  ],
-};
+// ---- the ADAPTIVE diagnostic (RANKS_PLAN §8): stateful fetch-stub server ----
+// /api/generate returns one signed starter per subject; each /api/score STEP
+// returns that subject's next question (token encodes subject+step so the stub
+// stays stateless); the 4th step completes the subject; the finalize call
+// (tokens[]) returns the canned scores payload. Mirrors the real route contract
+// pinned in test/api-score.test.js.
+const DIAG_SUBJECTS = ["math", "physics", "chemistry"];
+const DIAG_STEPS = 4;
+const diagQ = (subject, stepNo) => ({
+  subject,
+  topic: "t",
+  difficulty: "intermediate",
+  question: `${subject.toUpperCase()}-Q${stepNo}`,
+  stepNo,
+  stepsTotal: DIAG_STEPS,
+  token: `tok-${subject}-${stepNo}`,
+});
+function mockAdaptiveServer({ scoresPayload = {}, masteryUpdates = [], persisted = false, attempt = null } = {}) {
+  const fetchMock = vi.fn(async (path, init) => {
+    if (path === "/api/generate") {
+      return jsonRes({ adaptive: true, stepsPerSubject: DIAG_STEPS, curated: true, questions: DIAG_SUBJECTS.map((s) => diagQ(s, 1)) });
+    }
+    if (path === "/api/score") {
+      const body = JSON.parse(init.body);
+      if (Array.isArray(body.tokens)) {
+        return jsonRes({ scores: scoresPayload, persisted, attempt, masteryUpdates });
+      }
+      const [, subject, stepStr] = String(body.token).split("-");
+      const stepNo = Number(stepStr);
+      const graded = { subject, difficulty: "intermediate", reasoningScore: 60 };
+      if (stepNo >= DIAG_STEPS) {
+        return jsonRes({ graded, subjectComplete: true, finalToken: `final-${subject}` });
+      }
+      return jsonRes({ graded, next: diagQ(subject, stepNo + 1) });
+    }
+    return jsonRes({});
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
 
-// The order beginDiagnostic presents them in: subject-major (math, physics,
-// chemistry), each beginner→intermediate→advanced.
-const DIAGNOSTIC_ORDER = [
-  "MATH-BEG", "MATH-INT", "MATH-ADV",
-  "PHYS-BEG", "PHYS-INT", "PHYS-ADV",
-  "CHEM-BEG", "CHEM-INT", "CHEM-ADV",
-];
+// The order the adaptive flow presents questions in: the three starters, then
+// each subject's next step as its grade lands (round-robin by construction).
+const DIAGNOSTIC_ORDER = [];
+for (let step = 1; step <= DIAG_STEPS; step++) {
+  for (const s of DIAG_SUBJECTS) DIAGNOSTIC_ORDER.push(`${s.toUpperCase()}-Q${step}`);
+}
 
 async function attachImageToCurrentComposer(container) {
   const input = container.querySelector('input[type="file"]');
@@ -79,8 +103,8 @@ async function attachImageToCurrentComposer(container) {
   await screen.findByAltText("your work");
 }
 
-describe("Noobtopro — diagnostic image previews are revoked on completion (leak fix)", () => {
-  it("grades the 9 answers in ONE batched /api/score request and revokes every preview", async () => {
+describe("Noobtopro — adaptive diagnostic flow (steps + finalize) & preview leak fix", () => {
+  it("walks all 12 steps (one grade each), finalizes once, and revokes every preview", async () => {
     // The server-derived mastery updates the guest path must hand to saveProgress —
     // this seam (Noobtopro -> store) is the feature's ONLY guest activation path.
     const MASTERY_UPDATES = [
@@ -92,21 +116,13 @@ describe("Noobtopro — diagnostic image previews are revoked on completion (lea
       physics: { score: 40, weakConcepts: [], comment: "", rubric: { conceptual_understanding: 2, logical_structure: 2, strategy: 2, execution_accuracy: 2, communication: 2 } },
       chemistry: { score: 30, weakConcepts: [], comment: "", rubric: { conceptual_understanding: 2, logical_structure: 2, strategy: 2, execution_accuracy: 2, communication: 2 } },
     };
-    const fetchMock = vi.fn(async (path) => {
-      if (path === "/api/generate") return jsonRes(DIAGNOSTIC);
-      // Guest diagnostic: server grades + aggregates server-side, returns scores (no
-      // persist) + the server-derived per-concept mastery updates.
-      if (path === "/api/score")
-        return jsonRes({ scores: scoresPayload, persisted: false, attempt: null, masteryUpdates: MASTERY_UPDATES });
-      return jsonRes({});
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = mockAdaptiveServer({ scoresPayload, masteryUpdates: MASTERY_UPDATES });
 
     const { container } = render(<Noobtopro />);
     fireEvent.click(await screen.findByRole("button", { name: /prove it/i }));
 
-    // Step through all 9 questions (subject-major, beginner→hard). Attach an image to
-    // each so there are 9 previews; "Next question" for Q1–Q8, "Get ranked" for Q9.
+    // Walk all 12 steps (3 starters, then each subject's next as its grade lands).
+    // Attach an image to each so there are 12 previews; "Get ranked" on the last.
     for (let i = 0; i < DIAGNOSTIC_ORDER.length; i++) {
       const isLast = i === DIAGNOSTIC_ORDER.length - 1;
       await screen.findByText(DIAGNOSTIC_ORDER[i]);
@@ -116,16 +132,22 @@ describe("Noobtopro — diagnostic image previews are revoked on completion (lea
       );
     }
 
-    // Lands on the dashboard once grading completes.
+    // Lands on the dashboard once the finalize completes.
     await screen.findByText("Where you stand");
 
-    // The fix: grading is ONE batched server request carrying all 9 answers, not the
-    // old per-question parallel client burst that could 429 the whole diagnostic.
+    // 12 per-step grade calls + ONE zero-Groq finalize carrying the 3 done-tokens.
     const scoreCalls = fetchMock.mock.calls.filter(([p]) => p === "/api/score");
-    expect(scoreCalls).toHaveLength(1);
-    const body = JSON.parse(scoreCalls[0][1].body);
-    expect(body.kind).toBe("diagnostic");
-    expect(body.answers).toHaveLength(9);
+    expect(scoreCalls).toHaveLength(DIAGNOSTIC_ORDER.length + 1);
+    const finalize = JSON.parse(scoreCalls[scoreCalls.length - 1][1].body);
+    expect(finalize.kind).toBe("diagnostic");
+    expect(finalize.tokens).toEqual(["final-math", "final-physics", "final-chemistry"]);
+    // Every step call carried its signed token, never a raw question/difficulty.
+    for (const [, init] of scoreCalls.slice(0, -1)) {
+      const b = JSON.parse(init.body);
+      expect(typeof b.token).toBe("string");
+      expect(b.question).toBeUndefined();
+      expect(b.difficulty).toBeUndefined();
+    }
 
     // The server's masteryUpdates rode through to the guest store write (third arg) —
     // the chip-coloring seam between /api/score and lib/store.
@@ -136,10 +158,10 @@ describe("Noobtopro — diagnostic image previews are revoked on completion (lea
     expect(screen.getByRole("img", { name: /Mathematics: Score \d+ of 100/ })).toBeTruthy();
     expect(screen.getByRole("img", { name: /Chemistry: Score \d+ of 100/ })).toBeTruthy();
 
-    // Nine previews were created; all nine must be revoked on completion (no leak).
-    expect(URL.createObjectURL).toHaveBeenCalledTimes(9);
-    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(9);
-    for (let i = 0; i < 9; i++) {
+    // Twelve previews were created; all twelve must be revoked on completion (no leak).
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(DIAGNOSTIC_ORDER.length);
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(DIAGNOSTIC_ORDER.length);
+    for (let i = 0; i < DIAGNOSTIC_ORDER.length; i++) {
       expect(URL.revokeObjectURL).toHaveBeenCalledWith(`blob:p${i}`);
     }
   });
@@ -208,11 +230,11 @@ describe("Noobtopro — submitPractice run-token guard (stale grade after Restar
   });
 });
 
-describe("Noobtopro — beginDiagnostic rejects an incomplete question set", () => {
-  it("surfaces an error (and stays on the intro) when /api/generate returns fewer than 6 questions", async () => {
-    // Defense-in-depth client guard: even if a partial set slips through, beginDiagnostic
-    // must not enter the diagnostic with a short set — it errors instead.
-    const partial = { questions: DIAGNOSTIC.questions.slice(0, 5) }; // 5 of 6
+describe("Noobtopro — beginDiagnostic rejects an incomplete adaptive start", () => {
+  it("surfaces an error (and stays on the intro) when the start is missing a subject's signed starter", async () => {
+    // Defense-in-depth client guard: even if a partial/legacy payload slips through,
+    // beginDiagnostic must not enter the flow without one tokened starter per subject.
+    const partial = { adaptive: true, stepsPerSubject: DIAG_STEPS, questions: [diagQ("math", 1), diagQ("physics", 1)] };
     vi.stubGlobal("fetch", vi.fn(async (path) => {
       if (path === "/api/generate") return jsonRes(partial);
       return jsonRes({});
@@ -221,27 +243,30 @@ describe("Noobtopro — beginDiagnostic rejects an incomplete question set", () 
     render(<Noobtopro />);
     fireEvent.click(await screen.findByRole("button", { name: /prove it/i }));
 
-    expect(await screen.findByText(/could not generate a full diagnostic/i)).toBeTruthy();
+    expect(await screen.findByText(/could not start the diagnostic/i)).toBeTruthy();
     // Did NOT advance into the diagnostic (no question rendered).
-    expect(screen.queryByText(DIAGNOSTIC.questions[0].question)).toBe(null);
+    expect(screen.queryByText("MATH-Q1")).toBe(null);
+  });
+
+  it("rejects a tokenless (legacy batch) payload the same way", async () => {
+    const legacy = { questions: DIAG_SUBJECTS.map((s) => ({ subject: s, difficulty: "beginner", question: `${s}-OLD` })) };
+    vi.stubGlobal("fetch", vi.fn(async (path) => (path === "/api/generate" ? jsonRes(legacy) : jsonRes({}))));
+    render(<Noobtopro />);
+    fireEvent.click(await screen.findByRole("button", { name: /prove it/i }));
+    expect(await screen.findByText(/could not start the diagnostic/i)).toBeTruthy();
   });
 });
 
 describe("Noobtopro — time-locked 'I don't know' skip", () => {
-  it("locks the skip for 10s, then advances the diagnostic without grading (no Groq waste)", async () => {
+  it("locks the skip for 10s, then advances and submits the skip as ONE empty signed step (server docks it — no Groq)", async () => {
     vi.useFakeTimers();
-    const fetchMock = vi.fn(async (path) => {
-      if (path === "/api/generate") return jsonRes(DIAGNOSTIC);
-      if (path === "/api/score") return jsonRes({ scores: {}, persisted: false, attempt: null });
-      return jsonRes({});
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = mockAdaptiveServer({});
 
     await act(async () => { render(<Noobtopro />); await vi.advanceTimersByTimeAsync(0); });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /prove it/i })); await vi.advanceTimersByTimeAsync(0); });
 
-    // Q1 (subject-major, beginner first) is shown.
-    expect(screen.getByText("MATH-BEG")).toBeTruthy();
+    // The math starter is shown first.
+    expect(screen.getByText("MATH-Q1")).toBeTruthy();
     // You can't advance an EMPTY answer via the normal button (it's disabled)...
     expect(screen.getByRole("button", { name: /next question/i }).disabled).toBe(true);
     // ...and the "I don't know" skip is LOCKED for the first 10 seconds.
@@ -252,10 +277,16 @@ describe("Noobtopro — time-locked 'I don't know' skip", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
     expect(skip().disabled).toBe(false);
 
-    // Clicking it advances to Q2 (math intermediate) — and never grades Q1.
+    // Clicking it advances straight to the next subject's starter (interleaving),
+    // firing exactly ONE step call whose answer is EMPTY — the server's
+    // deterministic dock grades it with no Groq call (and walks the band down).
     await act(async () => { fireEvent.click(skip()); await vi.advanceTimersByTimeAsync(0); });
-    expect(screen.getByText("MATH-INT")).toBeTruthy();
-    expect(fetchMock.mock.calls.filter(([p]) => p === "/api/score")).toHaveLength(0);
+    expect(screen.getByText("PHYSICS-Q1")).toBeTruthy();
+    const stepCalls = fetchMock.mock.calls.filter(([p]) => p === "/api/score");
+    expect(stepCalls).toHaveLength(1);
+    const body = JSON.parse(stepCalls[0][1].body);
+    expect(body.token).toBe("tok-math-1");
+    expect(body.reasoning).toBe("");
 
     vi.useRealTimers();
   });
@@ -265,11 +296,7 @@ describe("Noobtopro — time-locked 'I don't know' skip", () => {
 describe("Noobtopro — skip-lock is immune to keystrokes (audit P2-15)", () => {
   it("typing mid-countdown does NOT restart the 10s lock — it is 10s per QUESTION, not per keystroke", async () => {
     vi.useFakeTimers();
-    const fetchMock = vi.fn(async (path) => {
-      if (path === "/api/generate") return jsonRes(DIAGNOSTIC);
-      return jsonRes({});
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    mockAdaptiveServer({});
     await act(async () => { render(<Noobtopro />); await vi.advanceTimersByTimeAsync(0); });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /prove it/i })); await vi.advanceTimersByTimeAsync(0); });
     const skip = () => screen.getByRole("button", { name: /i don't know/i });
@@ -289,11 +316,7 @@ describe("Noobtopro — skip-lock is immune to keystrokes (audit P2-15)", () => 
 
 describe("Noobtopro — attach-time image preparation (audit P1-2)", () => {
   async function startDiagnostic() {
-    const fetchMock = vi.fn(async (path) => {
-      if (path === "/api/generate") return jsonRes(DIAGNOSTIC);
-      return jsonRes({});
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    mockAdaptiveServer({});
     const utils = render(<Noobtopro />);
     fireEvent.click(await screen.findByRole("button", { name: /prove it/i }));
     await screen.findByText(DIAGNOSTIC_ORDER[0]);

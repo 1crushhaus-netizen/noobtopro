@@ -144,9 +144,12 @@ This is the layer that turns "an Elo number" into "objective, rank-defined under
 
 ---
 
-## 8. Adaptive diagnostic placement — ✅ DECIDED (owner, 2026-06-11; build pending)
+## 8. Adaptive diagnostic placement — ✅ SHIPPED (decided + built 2026-06-11)
 
-The next build item. All shape decisions are made:
+Implemented exactly as decided: the 30-item bank lives in `lib/diagnosticItems/*` +
+`lib/diagnosticBank.js`; the walk is server-authoritative via the HMAC-signed step-token
+chain (`signDiagState`/`verifyDiagToken`); `/api/generate` mints the start, `/api/score`
+grades steps and finalizes the path-weighted baseline (`diagnosticPathScore`).
 
 - **Source = a CURATED per-(subject, band) bank** (the §11.4 decision): every step serves
   a vetted reasoning item from an expanded diagnosticBank covering **all five bands —

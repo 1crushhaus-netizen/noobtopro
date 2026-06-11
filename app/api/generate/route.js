@@ -12,7 +12,8 @@ import { signQuestion } from "@/lib/questionToken";
 import { checkRateLimit, clientKey, chargeGlobalGroq } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType, readJsonLimited, MAX_BODY_BYTES_TEXT } from "@/lib/requestGuard";
 import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
-import { buildDiagnostic } from "@/lib/diagnosticBank";
+import { pickDiagnosticItem, DIAG_START_BAND, DIAG_STEPS_PER_SUBJECT } from "@/lib/diagnosticBank";
+import { signDiagState, canSignQuestions } from "@/lib/questionToken";
 
 export const dynamic = "force-dynamic";
 // Bound a hung request (audit P2-10): the Groq fetch has a 30s abort, and at most
@@ -52,17 +53,32 @@ export async function POST(req) {
 
   try {
     if (kind === "diagnostic") {
-      // The diagnostic is the CURATED, standardized placement bank (lib/diagnosticBank.js):
-      // 9 reasoning-rich questions (3 subjects × beginner/intermediate/hard), served with
-      // ZERO Groq calls and no pool — everyone gets the same calibrated set.
-      // STRIP the grader-internal trap/reasoningSurface metadata (audit P2-9): the trap
-      // text states the naive wrong path for the standardized placement, so shipping it
-      // let a devtools reader dodge every trap and inflate their baseline. The grader
-      // derives both server-side from the bank (diagnosticSurfaceFor) — the client never
-      // needed them.
-      const diag = buildDiagnostic();
-      diag.questions = diag.questions.map(({ trap, reasoningSurface, ...q }) => q);
-      return NextResponse.json(diag);
+      // ADAPTIVE placement START (RANKS_PLAN §8): one curated middle-band item per
+      // subject from the bank (ZERO Groq calls), each with a SIGNED step token that
+      // /api/score's step handler will grade against and extend — the token chain is
+      // what makes the ±1-band walk server-authoritative with no DB. Only the id,
+      // question text, band, and topic ship; trap/reasoningSurface/conceptKey stay
+      // server-side (audit P2-9 — the grader resolves them from the bank by id).
+      if (!canSignQuestions()) {
+        // The chain can't run unsigned (a client could otherwise mint its own walk).
+        return NextResponse.json(
+          { error: "Placement is temporarily unavailable. Please try again later." },
+          { status: 503 }
+        );
+      }
+      const questions = ORDER.map((s) => {
+        const item = pickDiagnosticItem(s, DIAG_START_BAND, []);
+        return {
+          subject: s,
+          difficulty: item.band,
+          topic: item.topic,
+          question: item.question,
+          stepNo: 1,
+          stepsTotal: DIAG_STEPS_PER_SUBJECT,
+          token: signDiagState({ subject: s, step: 1, itemId: item.id, asked: [item.id], transcript: [] }),
+        };
+      });
+      return NextResponse.json({ adaptive: true, stepsPerSubject: DIAG_STEPS_PER_SUBJECT, questions, curated: true });
     }
 
     if (kind !== "practice") {

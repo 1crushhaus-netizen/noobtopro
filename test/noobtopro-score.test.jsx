@@ -115,23 +115,19 @@ describe("Noobtopro — signed-in practice is server-authoritative", () => {
   });
 });
 
-describe("Noobtopro — signed-in diagnostic is server-persisted", () => {
-  const DIAGNOSTIC = {
-    questions: [
-      { subject: "math", topic: "t", difficulty: "beginner", question: "MATH-BEG" },
-      { subject: "math", topic: "t", difficulty: "intermediate", question: "MATH-INT" },
-      { subject: "math", topic: "t", difficulty: "advanced", question: "MATH-ADV" },
-      { subject: "physics", topic: "t", difficulty: "beginner", question: "PHYS-BEG" },
-      { subject: "physics", topic: "t", difficulty: "intermediate", question: "PHYS-INT" },
-      { subject: "physics", topic: "t", difficulty: "advanced", question: "PHYS-ADV" },
-      { subject: "chemistry", topic: "t", difficulty: "beginner", question: "CHEM-BEG" },
-      { subject: "chemistry", topic: "t", difficulty: "intermediate", question: "CHEM-INT" },
-      { subject: "chemistry", topic: "t", difficulty: "advanced", question: "CHEM-ADV" },
-    ],
-  };
-  const ORDER = ["MATH-BEG", "MATH-INT", "MATH-ADV", "PHYS-BEG", "PHYS-INT", "PHYS-ADV", "CHEM-BEG", "CHEM-INT", "CHEM-ADV"];
+describe("Noobtopro — signed-in adaptive diagnostic is server-persisted", () => {
+  // Adaptive-server stub (mirrors the route contract): tokened starters, per-step
+  // next questions, done-tokens after 4 steps, finalize on { tokens }.
+  const SUBJECTS3 = ["math", "physics", "chemistry"];
+  const STEPS = 4;
+  const diagQ = (subject, stepNo) => ({
+    subject, topic: "t", difficulty: "intermediate",
+    question: `${subject.toUpperCase()}-Q${stepNo}`, stepNo, stepsTotal: STEPS, token: `tok-${subject}-${stepNo}`,
+  });
+  const PRESENTED = [];
+  for (let step = 1; step <= STEPS; step++) for (const s of SUBJECTS3) PRESENTED.push(`${s.toUpperCase()}-Q${step}`);
 
-  it("sends all 9 answers to /api/score (kind:diagnostic) with the Bearer token, then persists server-side (no saveProgress)", async () => {
+  it("walks the signed steps with the Bearer token and persists via the finalize (no saveProgress)", async () => {
     // Signed-in but no scores yet → starts at the intro so we can run the diagnostic.
     store.loadState.mockResolvedValue({ scores: null, history: [] });
     const persisted = {
@@ -139,37 +135,48 @@ describe("Noobtopro — signed-in diagnostic is server-persisted", () => {
       physics: { score: 40, weakConcepts: [], comment: "", rubric: { conceptual_understanding: 2, logical_structure: 2, strategy: 2, execution_accuracy: 2, communication: 2 } },
       chemistry: { score: 30, weakConcepts: [], comment: "", rubric: { conceptual_understanding: 2, logical_structure: 2, strategy: 2, execution_accuracy: 2, communication: 2 } },
     };
-    const fetchMock = vi.fn(async (path) => {
+    const fetchMock = vi.fn(async (path, init) => {
       if (path === "/api/admin/me") return jsonRes({ isAdmin: false });
-      if (path === "/api/generate") return jsonRes(DIAGNOSTIC);
-      if (path === "/api/score")
-        return jsonRes({
-          scores: persisted,
-          persisted: true,
-          attempt: { type: "baseline", t: "t1", subject: null, totalAfter: 125, phdAfter: 42 },
-        });
+      if (path === "/api/generate") {
+        return jsonRes({ adaptive: true, stepsPerSubject: STEPS, curated: true, questions: SUBJECTS3.map((s) => diagQ(s, 1)) });
+      }
+      if (path === "/api/score") {
+        const body = JSON.parse(init.body);
+        if (Array.isArray(body.tokens)) {
+          return jsonRes({
+            scores: persisted,
+            persisted: true,
+            attempt: { type: "baseline", t: "t1", subject: null, totalAfter: 125, phdAfter: 42 },
+          });
+        }
+        const [, subject, stepStr] = String(body.token).split("-");
+        const stepNo = Number(stepStr);
+        const graded = { subject, difficulty: "intermediate", reasoningScore: 60 };
+        if (stepNo >= STEPS) return jsonRes({ graded, subjectComplete: true, finalToken: `final-${subject}` });
+        return jsonRes({ graded, next: diagQ(subject, stepNo + 1) });
+      }
       return jsonRes({});
     });
     vi.stubGlobal("fetch", fetchMock);
 
     render(<Noobtopro />);
     fireEvent.click(await screen.findByRole("button", { name: /prove it/i }));
-    for (let i = 0; i < ORDER.length; i++) {
-      const isLast = i === ORDER.length - 1;
-      await screen.findByText(ORDER[i]);
+    for (let i = 0; i < PRESENTED.length; i++) {
+      const isLast = i === PRESENTED.length - 1;
+      await screen.findByText(PRESENTED[i]);
       fireEvent.change(screen.getByLabelText("Your reasoning"), { target: { value: `answer ${i}` } });
       fireEvent.click(screen.getByRole("button", { name: isLast ? /get ranked/i : /next question/i }));
     }
 
     await screen.findByText("Where you stand");
 
-    // ONE batched /api/score request, kind:diagnostic, with the Bearer token + 9 answers.
+    // 12 signed step calls + 1 finalize, EVERY one carrying the Bearer token.
     const scoreCalls = fetchMock.mock.calls.filter(([p]) => p === "/api/score");
-    expect(scoreCalls).toHaveLength(1);
-    expect(scoreCalls[0][1].headers.Authorization).toBe("Bearer tok-123");
-    const body = JSON.parse(scoreCalls[0][1].body);
-    expect(body.kind).toBe("diagnostic");
-    expect(body.answers).toHaveLength(9);
+    expect(scoreCalls).toHaveLength(PRESENTED.length + 1);
+    for (const [, init] of scoreCalls) expect(init.headers.Authorization).toBe("Bearer tok-123");
+    const finalize = JSON.parse(scoreCalls[scoreCalls.length - 1][1].body);
+    expect(finalize.kind).toBe("diagnostic");
+    expect(finalize.tokens).toEqual(SUBJECTS3.map((s) => `final-${s}`));
     // Server persisted it — the client never writes locally.
     expect(store.saveProgress).not.toHaveBeenCalled();
   });
