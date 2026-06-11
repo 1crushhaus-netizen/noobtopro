@@ -10,6 +10,8 @@ const store = vi.hoisted(() => ({
   resetAll: vi.fn(async () => {}),
   migrateGuestToAccount: vi.fn(async () => ({ migrated: false })),
   deleteAllUserData: vi.fn(async () => ({ ok: true })),
+  loadMastery: vi.fn(async () => ({ mastery: {} })),
+  loadReviews: vi.fn(async () => ({ reviews: [] })),
 }));
 vi.mock("@/lib/store", () => store);
 vi.mock("@/lib/supabase", () => ({
@@ -322,5 +324,100 @@ describe("Noobtopro — attach-time image preparation (audit P1-2)", () => {
     const { container } = await startDiagnostic();
     await attachImageToCurrentComposer(container);
     expect(screen.getByAltText("your work")).toBeTruthy();
+  });
+});
+
+describe("Noobtopro — AI concept-practice drill flow (increment 3)", () => {
+  it("the Learn-tab concept page's 'Practice this concept' button generates a concept-targeted question and enters practice", async () => {
+    // A diagnosed learner (scores present) so the Learn tab is reachable.
+    store.loadState.mockResolvedValue({
+      scores: {
+        math: { score: 50, weakConcepts: [], comment: "", rubric: null, glicko: null },
+        physics: { score: 40, weakConcepts: [], comment: "", rubric: null, glicko: null },
+        chemistry: { score: 30, weakConcepts: [], comment: "", rubric: null, glicko: null },
+      },
+      history: [],
+    });
+    const fetchMock = vi.fn(async (path, opts) => {
+      if (path === "/api/generate") {
+        const body = JSON.parse(opts.body);
+        // Echo back a concept-tagged, token-bearing question the way the real route would.
+        return jsonRes({
+          subject: body.subject, topic: "Algebra", topicSlug: "algebra",
+          targetConcept: "Quadratic functions & equations", difficulty: "intermediate",
+          reasoningSurface: "multi-step", question: "DRILL-Q: solve x^2-5x+6=0, explain.",
+          conceptKey: body.conceptKey, token: "tok-drill",
+        });
+      }
+      return jsonRes({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<Noobtopro />);
+    // Go to the Learn tab.
+    fireEvent.click(await screen.findByRole("button", { name: /^Learn$/ }));
+    // Open the Quadratics concept page.
+    fireEvent.click(await screen.findByRole("button", { name: "Quadratic functions & equations" }));
+    // Click the drill button.
+    fireEvent.click(await screen.findByRole("button", { name: /practice this concept/i }));
+
+    // It generated a CONCEPT-TARGETED question (the conceptKey is sent)...
+    const genCall = await waitFor(() => {
+      const c = fetchMock.mock.calls.find(([p]) => p === "/api/generate");
+      expect(c).toBeTruthy();
+      return c;
+    });
+    expect(JSON.parse(genCall[1].body)).toMatchObject({ kind: "practice", subject: "math", conceptKey: "quadratics" });
+    // ...and entered the practice flow with the server's question.
+    expect(await screen.findByText(/DRILL-Q/)).toBeTruthy();
+  });
+});
+
+describe("Noobtopro — guest concept-drill updates mastery end-to-end (increment 3)", () => {
+  it("a guest who drills a concept and submits sends the conceptKey mastery update to saveProgress (3rd arg)", async () => {
+    store.loadState.mockResolvedValue({
+      scores: {
+        math: { score: 50, weakConcepts: [], comment: "", rubric: null, glicko: null },
+        physics: { score: 40, weakConcepts: [], comment: "", rubric: null, glicko: null },
+        chemistry: { score: 30, weakConcepts: [], comment: "", rubric: null, glicko: null },
+      },
+      history: [],
+    });
+    store.saveProgress.mockResolvedValue({ history: [] });
+    const RUBRIC = { comprehension: 3, principle: 3, justification: 3, strategy: 3, logic: 3, execution_method: 3, computation: 3, verification: 3, communication: 3 };
+    const fetchMock = vi.fn(async (path, opts) => {
+      if (path === "/api/generate") {
+        const body = JSON.parse(opts.body);
+        return jsonRes({
+          subject: body.subject, topic: "Algebra", topicSlug: "algebra",
+          targetConcept: "Quadratic functions & equations", difficulty: "intermediate",
+          reasoningSurface: "multi-step", question: "DRILL-Q2: solve x^2-1=0.",
+          conceptKey: body.conceptKey, token: "tok-drill2",
+        });
+      }
+      if (path === "/api/grade") {
+        return jsonRes({ reasoningScore: 75, rubric: RUBRIC, weakConcepts: [], strengths: [], improvements: [], correctnessNote: "", socraticHint: "", microLesson: "", solve: null, errors: [], finalAnswerMatches: false });
+      }
+      return jsonRes({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<Noobtopro />);
+    fireEvent.click(await screen.findByRole("button", { name: /^Learn$/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Quadratic functions & equations" }));
+    fireEvent.click(await screen.findByRole("button", { name: /practice this concept/i }));
+    await screen.findByText(/DRILL-Q2/);
+
+    fireEvent.change(screen.getByLabelText("Your reasoning"), { target: { value: "x = ±1 because x^2 = 1; I factored (x-1)(x+1)." } });
+    fireEvent.click(screen.getByRole("button", { name: /submit reasoning/i }));
+
+    // Guest grading goes through /api/grade (NOT /api/score), and saveProgress receives
+    // the concept's mastery update as its third arg — the conceptKey came from the
+    // drill's /api/generate response (the increment-3 guest activation path).
+    await waitFor(() => expect(store.saveProgress).toHaveBeenCalled());
+    const call = store.saveProgress.mock.calls.find((c) => Array.isArray(c[2]) && c[2].length);
+    expect(call).toBeTruthy();
+    expect(call[2]).toEqual([{ subject: "math", conceptKey: "quadratics", quality: 75 }]);
+    expect(fetchMock.mock.calls.some(([p]) => p === "/api/score")).toBe(false); // guest path
   });
 });

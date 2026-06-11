@@ -132,3 +132,36 @@ describe("LearnTab — mastery coloring (RANKS_PLAN §12.1)", () => {
     expect(screen.getByRole("button", { name: "Stoichiometry" })).toBeTruthy();
   });
 });
+
+describe("LearnTab — AI concept-practice drill button (increment 3)", () => {
+  it("the concept page shows a 'Practice this concept' button that calls onPractice with the concept", async () => {
+    const onPractice = vi.fn();
+    await act(async () => { render(<LearnTab onPractice={onPractice} />); });
+    fireEvent.click(screen.getByRole("button", { name: "Quadratic functions & equations" }));
+    const btn = screen.getByRole("button", { name: /practice this concept/i });
+    fireEvent.click(btn);
+    expect(onPractice).toHaveBeenCalledTimes(1);
+    const arg = onPractice.mock.calls[0][0];
+    expect(arg).toMatchObject({ subject: "math", key: "quadratics", rank: "high" });
+  });
+
+  it("shows a generating spinner + disables the button while THIS concept is busy", async () => {
+    await act(async () => { render(<LearnTab onPractice={() => {}} busyConcept="quadratics" />); });
+    fireEvent.click(screen.getByRole("button", { name: "Quadratic functions & equations" }));
+    const btn = screen.getByRole("button", { name: /generating a question/i });
+    expect(btn.disabled).toBe(true);
+  });
+
+  it("a DIFFERENT busy concept does not disable this concept's button", async () => {
+    await act(async () => { render(<LearnTab onPractice={() => {}} busyConcept="some_other_key" />); });
+    fireEvent.click(screen.getByRole("button", { name: "Quadratic functions & equations" }));
+    expect(screen.getByRole("button", { name: /practice this concept/i }).disabled).toBe(false);
+  });
+
+  it("without onPractice (guest/undiagnosed), shows a sign-in/diagnostic hint instead of the button", async () => {
+    await act(async () => { render(<LearnTab />); });
+    fireEvent.click(screen.getByRole("button", { name: "Quadratic functions & equations" }));
+    expect(screen.queryByRole("button", { name: /practice this concept/i })).toBeNull();
+    expect(screen.getByText(/sign in or complete the diagnostic/i)).toBeTruthy();
+  });
+});

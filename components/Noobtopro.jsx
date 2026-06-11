@@ -343,6 +343,9 @@ export default function Noobtopro() {
   // "Regenerate" (session-only). And a flag for that regenerate request.
   const [learnQuestion, setLearnQuestion] = useState(null);
   const [learnRegen, setLearnRegen] = useState(false);
+  // The curriculum concept key currently generating an AI practice drill (increment 3) —
+  // drives the concept-page button's spinner; null when idle.
+  const [drillBusy, setDrillBusy] = useState(null);
 
   // Monotonic token so overlapping hydrate() calls (mount + onAuthStateChange
   // both fire on load) can't clobber each other: only the newest result wins.
@@ -826,50 +829,6 @@ export default function Noobtopro() {
   // Regenerate the "try this" question for the open concept — a fresh, level-
   // calibrated problem (this DOES call the LLM, only on explicit request) shown
   // for the session only; the shared cached guide/question is left untouched.
-  async function regenerateLearnQuestion() {
-    if (!learnConcept) return;
-    const { subject, concept } = learnConcept;
-    // Capture the concept's run token (openLearn bumps it on every switch) so a slow
-    // regenerate can't land a stale question on a concept the user has since moved
-    // away from — which would otherwise mis-grade the attempt under the wrong
-    // concept/subject. No increment: regenerate stays on the current concept.
-    const myRun = learnRun.current;
-    const recentKey = `learn:${subject}::${concept}`;
-    // Steer away from the currently-shown question too (the cached guide one isn't in
-    // the buffer yet on the first regenerate), so the very first "Regenerate" already differs.
-    if (learnQuestion?.question) pushRecentQuestion(recentKey, learnQuestion.question);
-    setLearnError("");
-    setLearnRegen(true);
-    try {
-      const data = await api("/api/generate", {
-        kind: "practice",
-        subject,
-        score: scores?.[subject]?.score ?? 0,
-        weakConcepts: [concept],
-        recentQuestions: getRecentQuestions(recentKey),
-      });
-      if (myRun !== learnRun.current) return; // a newer concept was selected
-      if (!data || typeof data.question !== "string" || !data.question.trim()) {
-        throw new Error("Could not generate a question. Please try again.");
-      }
-      // Normalize the generator's difficulty to a known band (default "intermediate"),
-      // matching the server's normalizeTryThisQuestion, so an off-band string can't
-      // flow to /api/grade and the score model as an unrecognized difficulty.
-      const BANDS = new Set(["beginner", "foundational", "intermediate", "advanced", "phd"]);
-      const d = typeof data.difficulty === "string" ? data.difficulty.trim().toLowerCase() : "";
-      const difficulty = BANDS.has(d) ? d : "intermediate";
-      pushRecentQuestion(recentKey, data.question); // remember it so the next regenerate differs again
-      // Preserve the reasoning-surface metadata (server-normalized) so a Learn-tab practice
-      // attempt carries the grader calibration too; harmlessly absent for cached-guide questions.
-      setLearnQuestion({ question: data.question, targetConcept: data.targetConcept || concept, difficulty, reasoningSurface: data.reasoningSurface, trap: data.trap, token: data.token });
-    } catch (e) {
-      if (myRun !== learnRun.current) return; // don't surface a stale error on a newer concept
-      setLearnError(e.message || "Could not regenerate the question.");
-    } finally {
-      if (myRun === learnRun.current) setLearnRegen(false);
-    }
-  }
-
   /* --- practice --- */
   async function startPractice(subject) {
     const myRun = ++practiceRun.current;
@@ -918,6 +877,44 @@ export default function Noobtopro() {
       setError(e.message || "Could not generate a question.");
     } finally {
       if (myRun === practiceRun.current) setBusy(false);
+    }
+  }
+
+  // AI CONCEPT-PRACTICE DRILL (increment 3, RANKS_PLAN §12.3): from a Learn-tab concept
+  // page, generate a question TARGETING that curriculum concept and enter the practice
+  // flow with it. /api/generate validates the conceptKey against the curriculum, frames
+  // the question at the concept's rank, tags it with `conceptKey` + the rank band, and
+  // signs both into the token — so the graded attempt (signed-in via /api/score, guest
+  // via /api/grade) updates THIS concept's mastery coloring. `concept` is the full
+  // object { subject, key, label, rank, strand } from the concept page.
+  async function startConceptDrill(concept) {
+    if (!concept || !concept.subject || !concept.key) return;
+    const { subject, key } = concept;
+    // Run-token guard (mirrors startPractice): bumping practiceRun supersedes any
+    // in-flight practice/drill generation, and the post-fetch check drops THIS drill
+    // if a newer one (or a sign-out/Restart) started while it was generating — so a
+    // slow drill can't yank the learner into a stale concept's question.
+    const myRun = ++practiceRun.current;
+    setDrillBusy(key);
+    setError("");
+    try {
+      const data = await api("/api/generate", { kind: "practice", subject, conceptKey: key });
+      // Superseded by a newer drill/practice (or sign-out/Restart): bail WITHOUT
+      // touching drillBusy — the newer run now owns that spinner state.
+      if (myRun !== practiceRun.current) return;
+      if (!data || typeof data.question !== "string" || !data.question.trim()) {
+        throw new Error("Could not generate a practice question. Please try again.");
+      }
+      // Clear the spinner BEFORE entering practice — startPracticeWithQuestion bumps
+      // practiceRun (to navigate away), so a run-gated clear afterward would never fire.
+      setDrillBusy(null);
+      // The server set difficulty (the rank band) + conceptKey; enter practice with the
+      // server-issued question verbatim (it carries the token the grader path needs).
+      startPracticeWithQuestion(subject, data);
+    } catch (e) {
+      if (myRun !== practiceRun.current) return; // superseded — don't clear/surface a stale error
+      setDrillBusy(null);
+      setError(e.message || "Could not generate a practice question.");
     }
   }
 
@@ -1283,23 +1280,7 @@ export default function Noobtopro() {
             onOverlayActiveChange={setOverlayActive}
           />
         ) : view === "learn" && scores ? (
-          <LearnTab
-            hubEnabled={HUB_ENABLED}
-            user={user}
-            isAdmin={isAdmin}
-            adminApi={authApi}
-            scores={scores}
-            active={learnConcept}
-            content={learnContent}
-            busy={learnBusy}
-            error={learnError}
-            question={learnQuestion}
-            regenerating={learnRegen}
-            onSelect={openLearn}
-            onPracticeQuestion={startPracticeWithQuestion}
-            onRegenerate={regenerateLearnQuestion}
-            onPractice={(s) => { setView("practice"); startPractice(s); }}
-          />
+          <LearnTab onPractice={startConceptDrill} busyConcept={drillBusy} />
         ) : (
           <>
             {/* INTRO */}

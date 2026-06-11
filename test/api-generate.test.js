@@ -264,3 +264,78 @@ describe("POST /api/generate — server-issued question tokens + stripped diagno
     }
   });
 });
+
+// ---- increment 3: AI concept-practice drill --------------------------------
+import { verifyQuestionToken as _vqt } from "@/lib/questionToken";
+
+describe("POST /api/generate — concept-practice drill (increment 3)", () => {
+  it("a valid curriculum conceptKey targets the concept, forces the rank band, and tags + SIGNS the conceptKey", async () => {
+    process.env.QUESTION_TOKEN_SECRET = "gen-drill-secret";
+    try {
+      const fetchMock = mockGroqReturning({
+        topic: "Algebra", topicSlug: "algebra", targetConcept: "model wants this overridden",
+        difficulty: "beginner", reasoningSurface: "multi-step",
+        question: "If x^2 - 5x + 6 = 0, find x and explain each step.",
+      });
+      // quadratics is a math/high concept → band intermediate.
+      const res = await POST(req({ kind: "practice", subject: "math", conceptKey: "quadratics" }));
+      expect(res.status).toBe(200);
+      const j = await res.json();
+
+      // The prompt targeted the concept by its curated label (not a client string).
+      const sentUser = JSON.parse(fetchMock.mock.calls[0][1].body).messages.find((m) => m.role === "user").content;
+      expect(sentUser).toContain("Quadratic functions & equations");
+      expect(sentUser).toMatch(/high real-world level/i);
+
+      // The response is server-authoritative on the curriculum facts:
+      expect(j.conceptKey).toBe("quadratics");
+      expect(j.difficulty).toBe("intermediate"); // rank band, NOT the model's "beginner"
+      expect(j.targetConcept).toBe("Quadratic functions & equations");
+
+      // And the conceptKey + band are SIGNED into the token (so /api/score reads them
+      // from the verified token and updates mastery).
+      const v = _vqt(j.token);
+      expect(v.ok).toBe(true);
+      expect(v.q.conceptKey).toBe("quadratics");
+      expect(v.q.difficulty).toBe("intermediate");
+    } finally {
+      delete process.env.QUESTION_TOKEN_SECRET;
+    }
+  });
+
+  it("an UNKNOWN/forged conceptKey is ignored → ordinary level-based practice (no conceptKey on the response or token)", async () => {
+    process.env.QUESTION_TOKEN_SECRET = "gen-drill-secret";
+    try {
+      mockGroqReturning({
+        topic: "Algebra", topicSlug: "algebra", targetConcept: "linear equations",
+        difficulty: "intermediate", reasoningSurface: "multi-step",
+        question: "Solve 2x + 3 = 11 and explain.",
+      });
+      // A physics key under math, and a junk key — both fail the curriculum allowlist.
+      for (const conceptKey of ["balanced_unbalanced_forces", "totally_fake", "__proto__"]) {
+        const res = await POST(req({ kind: "practice", subject: "math", score: 50, conceptKey }));
+        expect(res.status).toBe(200);
+        const j = await res.json();
+        expect(j.conceptKey).toBeUndefined();
+        const v = _vqt(j.token);
+        expect(v.ok).toBe(true);
+        expect(v.q.conceptKey).toBeUndefined(); // nothing forged got signed
+      }
+    } finally {
+      delete process.env.QUESTION_TOKEN_SECRET;
+    }
+  });
+
+  it("the drill prompt replaces the weak-concepts line (targets the one concept, not the weak list)", async () => {
+    const fetchMock = mockGroqReturning({
+      topicSlug: "arithmetic_number", difficulty: "beginner", reasoningSurface: "multi-step",
+      question: "How many groups of 3 are in 12? Explain.",
+    });
+    const res = await POST(req({ kind: "practice", subject: "math", weakConcepts: ["should not appear"], conceptKey: "counting_cardinality" }));
+    expect(res.status).toBe(200);
+    const sentUser = JSON.parse(fetchMock.mock.calls[0][1].body).messages.find((m) => m.role === "user").content;
+    expect(sentUser).toContain("Counting & cardinality");
+    expect(sentUser).not.toContain("should not appear");
+    expect((await res.json()).difficulty).toBe("beginner"); // elementary → beginner
+  });
+});

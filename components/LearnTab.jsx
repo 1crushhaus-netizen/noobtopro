@@ -16,7 +16,9 @@ import Icon from "@/components/Icon";
 // yellow in progress / red struggling / grey untouched; direct-only, no propagation).
 // The per-concept guide content + AI practice are added in later increments
 // (see RANKS_PLAN §12).
-export default function LearnTab() {
+// onPractice(concept) — start an AI concept-practice drill for the given curriculum
+// concept (increment 3); busyConcept is the key currently generating (button spinner).
+export default function LearnTab({ onPractice, busyConcept = null } = {}) {
   // selected = the full concept object { subject, key, label, strand, rank } | null
   const [selected, setSelected] = useState(null);
   // mastery = { [subject]: { [conceptKey]: counters } } — guest localStorage or the
@@ -46,6 +48,8 @@ export default function LearnTab() {
         stateFor={stateFor}
         onOpen={setSelected}
         onBack={() => setSelected(null)}
+        onPractice={onPractice}
+        busyConcept={busyConcept}
       />
     );
   }
@@ -138,10 +142,11 @@ function CurriculumList({ stateFor, onOpen }) {
 }
 
 // ---- a single concept's page: title + root-concept navigation (+ guide placeholder) ----
-function ConceptPage({ concept, state, stateFor, onOpen, onBack }) {
+function ConceptPage({ concept, state, stateFor, onOpen, onBack, onPractice, busyConcept }) {
   const { subject, key, label, rank } = concept;
   const color = SUBJECTS[subject] ? SUBJECTS[subject].color : "var(--text)";
   const roots = rootsFor(subject, key); // [{ key, label, strand, rank }]
+  const generating = busyConcept === key;
 
   return (
     <div className="fade-up">
@@ -199,14 +204,35 @@ function ConceptPage({ concept, state, stateFor, onOpen, onBack }) {
         </p>
       )}
 
-      {/* Guide + practice land in later increments (RANKS_PLAN §12.3). */}
+      {/* AI concept-practice drill (increment 3): an on-request question targeting THIS
+          concept, graded process-first, that updates the concept's mastery coloring. */}
       <div className="np-card np-lesson">
-        <div className="np-cardicon" style={{ color }}>Guide</div>
-        <p className="np-lessontext" style={{ color: "var(--muted)" }}>
-          A full explanation with a worked example, questions to think through, and a practice
-          problem tailored to your level are coming to this page soon.
+        <div className="np-cardicon" style={{ color }}>Practice this concept</div>
+        <p className="np-lessontext" style={{ color: "var(--muted)", marginBottom: 12 }}>
+          Get a reasoning question aimed right at <strong style={{ color: "var(--text)" }}>{label}</strong>,
+          framed at the {RANK_LABELS[rank] || rank} level. Explain your thinking and it's graded on
+          reasoning — your attempts update this concept's standing above.
         </p>
+        {onPractice ? (
+          <button
+            type="button"
+            className="np-btn np-primary np-btn--subject"
+            style={{ "--subject": color }}
+            disabled={generating}
+            onClick={() => onPractice(concept)}
+          >
+            {generating ? "Generating a question…" : "Practice this concept"}
+          </button>
+        ) : (
+          <p className="np-hint" style={{ margin: 0 }}>Sign in or complete the diagnostic to practice.</p>
+        )}
       </div>
+
+      {/* The full written guide (explanation + worked example + self-questions) is the
+          remaining Phase-D content (RANKS_PLAN §12.3). */}
+      <p className="np-hint" style={{ marginTop: 14 }}>
+        A full written guide for this concept is coming soon.
+      </p>
     </div>
   );
 }

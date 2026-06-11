@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { groqJSON, PRACTICE_GEN_SYS } from "@/lib/groq";
 import { ORDER, clampScore } from "@/lib/scoring";
 import { topicSlugsFor, normalizeTopic } from "@/lib/taxonomy";
+import { conceptByKey, bandForRank } from "@/lib/curriculum";
 import { pickVariety, varietyDirectiveText, sanitizeRecentQuestions, avoidListText } from "@/lib/questionVariety";
 import { normalizeReasoningSurface, capTrap, capText, normalizeDifficulty } from "@/lib/gradeInput";
 import { signQuestion } from "@/lib/questionToken";
@@ -44,7 +45,7 @@ export async function POST(req) {
     return NextResponse.json({ error: "Request body must be valid JSON." }, { status: 400 });
   }
 
-  const { kind, subject, score, weakConcepts, recentQuestions } = body || {};
+  const { kind, subject, score, weakConcepts, recentQuestions, conceptKey } = body || {};
 
   try {
     if (kind === "diagnostic") {
@@ -77,6 +78,14 @@ export async function POST(req) {
       );
     }
     const safeScore = clampScore(score) ?? 0;
+    // CONCEPT DRILL (increment 3, RANKS_PLAN §12.3): when the request names a
+    // curriculum `conceptKey`, generate a question TARGETING that concept, framed at
+    // its rank's level. The key is allow-listed SERVER-SIDE via conceptByKey (so a
+    // drill can only ever target a real concept), and the resulting question is tagged
+    // with `conceptKey` + the rank-derived band — both signed into the token, so
+    // /api/score reads them from the verified token and updates that concept's mastery.
+    // An unknown/forged conceptKey is simply ignored → ordinary level-based practice.
+    const drill = typeof conceptKey === "string" ? conceptByKey(subject, conceptKey) : null;
     // Bound the concept list (count + per-item length) before it enters the
     // prompt, mirroring the free-text caps on /api/grade.
     const concepts = (Array.isArray(weakConcepts) ? weakConcepts : [])
@@ -106,13 +115,20 @@ export async function POST(req) {
     const variety = pickVariety();
     const directive = varietyDirectiveText(variety);
     const avoid = avoidListText(recent);
+    // For a concept drill, instruct the model to target the named concept at its rank
+    // level. fenceGuard isn't needed — the label/strand are server-curated (from
+    // lib/curriculum.js), not user free-text.
+    const drillDirective = drill
+      ? `Target this SPECIFIC concept and nothing else: "${drill.label}" (strand: ${drill.strand || "core"}). ` +
+        `Frame the question at the ${drill.rank} real-world level. The question must genuinely exercise this concept's reasoning.`
+      : "";
 
     const data = await groqJSON({
       system: PRACTICE_GEN_SYS,
       user:
         `Subject: ${subject}\n` +
         `Learner score: ${safeScore}/100\n` +
-        `Weak concepts: ${concepts.join(", ") || "none recorded"}\n` +
+        (drillDirective ? drillDirective + "\n" : `Weak concepts: ${concepts.join(", ") || "none recorded"}\n`) +
         `Allowed topics (pick exactly one slug for topicSlug): ${topicSlugsFor(subject)}\n` +
         (directive ? directive + "\n" : "") +
         (avoid ? avoid + "\n" : "") +
@@ -144,6 +160,16 @@ export async function POST(req) {
       difficulty: normalizedDifficulty !== "(unspecified)" ? normalizedDifficulty : "intermediate",
       question: capText(data.question.trim()),
     };
+    // A concept drill overrides the model's free choices with the SERVER-authoritative
+    // curriculum facts: the difficulty is the concept's rank band (not the model's
+    // guess), targetConcept is the concept label, and `conceptKey` is set so it gets
+    // signed into the token → /api/score updates that concept's mastery. The grader's
+    // band-clamp (≤1 above the learner's stored level) still applies downstream.
+    if (drill) {
+      question.conceptKey = drill.key;
+      question.difficulty = bandForRank(drill.rank);
+      question.targetConcept = drill.label.slice(0, 200);
+    }
     // SIGN the served question (audit P1-1): /api/score practice only accepts a valid
     // token and derives every rating-relevant field from it, so a client can no longer
     // forge the difficulty band / topic bucket (rating inflation, anti-farm rotation,
