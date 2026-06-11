@@ -748,7 +748,10 @@ export default function Noobtopro() {
         if (myRun !== diagRun.current) return;
         scoresObj = data.scores || {};
         const evt = { type: "baseline", t: now(), totalAfter: totalPoints(scoresObj), phdAfter: phdIndex(scoresObj) };
-        const st = await saveProgress(scoresObj, evt);
+        // data.masteryUpdates = the SERVER-derived per-concept mastery updates (one per
+        // graded bank question) — stored locally so the Learn tab colors the tested
+        // concepts for guests too (signed-in users get them persisted server-side).
+        const st = await saveProgress(scoresObj, evt, data.masteryUpdates);
         if (myRun !== diagRun.current) return; // abandoned during the save round-trip
         if (st && st.history) setHistory(st.history); // null = couldn't refresh; keep current
         setScores(scoresObj);
@@ -996,9 +999,10 @@ export default function Noobtopro() {
           data = await authApi("/api/score", {
             kind: "practice",
             // The server-issued question token (audit P1-1): subject/question/band/
-            // topic/surface all come from the VERIFIED token server-side, so the
-            // client no longer asserts any rating-relevant field. A missing/expired
-            // token gets a clear "generate a new question" error.
+            // topic/surface — AND the curriculum conceptKey for mastery coloring — all
+            // come from the VERIFIED token server-side, so the client no longer asserts
+            // any rating-relevant field. A missing/expired token gets a clear
+            // "generate a new question" error.
             token: pQuestion.token,
             reasoning,
             image: imagePayload,
@@ -1099,7 +1103,12 @@ export default function Noobtopro() {
               finalAnswerMatches: !!r.finalAnswerMatches,
             },
           },
-        });
+        },
+        // Mastery counters for a concept-tagged attempt (a drill from a concept page);
+        // generic practice has no conceptKey → no update. The store allow-lists the key.
+        pQuestion.conceptKey
+          ? [{ subject: pSubject, conceptKey: pQuestion.conceptKey, quality: reasoningScore }]
+          : undefined);
         if (myRun !== practiceRun.current) return; // abandoned during the save round-trip
         if (st && st.history) setHistory(st.history); // null = couldn't refresh; keep current
         setScores(updatedScores);

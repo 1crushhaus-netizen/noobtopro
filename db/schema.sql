@@ -101,6 +101,31 @@ revoke insert, update, delete, truncate on public.attempt_reviews from anon, aut
 create index if not exists attempt_reviews_user_created_idx
   on public.attempt_reviews (user_id, created_at desc);
 
+-- concept_mastery (Learn-tab increment 2, migration 0010): per-(user, subject,
+-- curriculum-concept) mastery counters behind the green/yellow/red/grey chip
+-- coloring (RANKS_PLAN §12.1). The display state derives in lib/mastery.js
+-- (green = ≥2 attempts at quality ≥70, sticky; red = last <40 or skipped).
+-- SELECT-own under RLS; all writes revoked — only bump_concept_mastery /
+-- migrate_guest_data (both SECURITY DEFINER) write it. ⚠️ quality values are
+-- always SERVER-computed reasoning scores; the client never supplies them.
+create table if not exists public.concept_mastery (
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  subject     text not null check (subject in ('math', 'physics', 'chemistry')),
+  concept_key text not null check (char_length(concept_key) between 1 and 80),
+  attempts     int not null default 0 check (attempts >= 0),
+  green_hits   int not null default 0 check (green_hits >= 0),
+  last_quality int check (last_quality between 0 and 100),
+  best_quality int check (best_quality between 0 and 100),
+  updated_at  timestamptz not null default now(),
+  primary key (user_id, subject, concept_key)
+);
+alter table public.concept_mastery enable row level security;
+drop policy if exists concept_mastery_select_own on public.concept_mastery;
+create policy concept_mastery_select_own on public.concept_mastery
+  for select to authenticated using ((select auth.uid()) = user_id);
+revoke all on public.concept_mastery from public, anon, authenticated;
+grant select on public.concept_mastery to authenticated;
+
 -- ---- row-level security ----------------------------------------------------
 -- SERVER-AUTHORITATIVE SCORING: clients may READ their own rows (for hydrate) but
 -- may NOT write scores/attempts directly. Removing the write policy closes the
@@ -179,7 +204,8 @@ $$;
 -- per user + "scores already exist" guard = idempotent and concurrency-safe; both
 -- inserts run in ONE transaction so history can't be partially migrated or
 -- duplicated. Input sizes are bounded. set search_path pins schema resolution.
-create or replace function public.migrate_guest_data(p_scores jsonb, p_attempts jsonb)
+drop function if exists public.migrate_guest_data(jsonb, jsonb);
+create or replace function public.migrate_guest_data(p_scores jsonb, p_attempts jsonb, p_mastery jsonb default null)
 returns boolean
 language plpgsql
 security definer
@@ -198,6 +224,14 @@ begin
 
   if coalesce(jsonb_array_length(coalesce(p_scores, '[]'::jsonb)), 0) > 10
      or coalesce(jsonb_array_length(coalesce(p_attempts, '[]'::jsonb)), 0) > 5000 then
+    raise exception 'migration payload too large';
+  end if;
+  if jsonb_typeof(p_mastery) = 'object'
+     and (select count(*)
+            -- CASE-wrap the inner jsonb_each: a non-object subject value must yield
+            -- zero rows, not depend on planner qual-pushdown to dodge a 22023 error.
+            from jsonb_each(p_mastery) s
+           cross join lateral jsonb_each(case when jsonb_typeof(s.value) = 'object' then s.value else '{}'::jsonb end) c) > 768 then
     raise exception 'migration payload too large';
   end if;
 
@@ -278,6 +312,35 @@ begin
     end if;
   end loop;
 
+  -- Guest per-concept mastery counters -> concept_mastery (Learn-tab chip coloring).
+  -- Shape: { subject: { conceptKey: { attempts, greenHits, lastQuality, bestQuality } } }
+  -- (the lib/mastery.js map, camelCase). Counters clamped; green_hits capped at
+  -- attempts; zero-attempt records skipped. First-writer-wins (the scores-exists
+  -- guard above already ensures an empty account).
+  if jsonb_typeof(p_mastery) = 'object' then
+    insert into public.concept_mastery (user_id, subject, concept_key, attempts, green_hits, last_quality, best_quality, updated_at)
+    select uid,
+           s.key,
+           left(c.key, 80),
+           a.attempts,
+           least(greatest(0, least(100000, coalesce(case when pg_input_is_valid(c.value->>'greenHits', 'numeric') then round((c.value->>'greenHits')::numeric) end, 0)))::int, a.attempts),
+           case when pg_input_is_valid(c.value->>'lastQuality', 'numeric') then greatest(0, least(100, round((c.value->>'lastQuality')::numeric)))::int end,
+           case when pg_input_is_valid(c.value->>'bestQuality', 'numeric') then greatest(0, least(100, round((c.value->>'bestQuality')::numeric)))::int end,
+           now()
+    from jsonb_each(p_mastery) s
+    -- CASE-wrapped for the same planner-independence reason as the size guard above.
+    cross join lateral jsonb_each(case when jsonb_typeof(s.value) = 'object' then s.value else '{}'::jsonb end) c
+    cross join lateral (
+      select greatest(0, least(100000, coalesce(case when pg_input_is_valid(c.value->>'attempts', 'numeric') then round((c.value->>'attempts')::numeric) end, 0)))::int as attempts
+    ) a
+    where s.key in ('math', 'physics', 'chemistry')
+      and jsonb_typeof(s.value) = 'object'
+      and jsonb_typeof(c.value) = 'object'
+      and char_length(c.key) between 1 and 80
+      and a.attempts > 0
+    on conflict (user_id, subject, concept_key) do nothing;
+  end if;
+
   return true;
 end;
 $$;
@@ -286,8 +349,62 @@ $$;
 -- anon role call this RPC (it would still fail the auth.uid() null-check, but no
 -- unauthenticated role should hold the grant at all). Revoke PUBLIC/anon, then
 -- grant only to authenticated.
-revoke all on function public.migrate_guest_data(jsonb, jsonb) from public, anon;
-grant execute on function public.migrate_guest_data(jsonb, jsonb) to authenticated;
+revoke all on function public.migrate_guest_data(jsonb, jsonb, jsonb) from public, anon;
+grant execute on function public.migrate_guest_data(jsonb, jsonb, jsonb) to authenticated;
+
+-- ---- RPC: service-role-only per-concept mastery counter upsert --------------
+-- Called by /api/score (non-blocking, after the attempt persists) with one entry
+-- per graded answer: [{ subject, concept_key, quality }] — quality is the SERVER-
+-- computed reasoning score, never client-supplied. Mirrors the pure increment in
+-- lib/mastery.js#applyMasteryAttempt; the `>= 70` is MASTERY_GREEN_QUALITY — keep
+-- the two in sync (test/schema-invariants.test.js pins this marker).
+create or replace function public.bump_concept_mastery(p_user uuid, p_entries jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v jsonb;
+  v_subject text;
+  v_key text;
+  v_quality int;
+begin
+  if p_user is null then
+    raise exception 'p_user is required';
+  end if;
+  if coalesce(jsonb_array_length(coalesce(p_entries, '[]'::jsonb)), 0) > 16 then
+    raise exception 'too many mastery entries';
+  end if;
+
+  for v in select value from jsonb_array_elements(coalesce(p_entries, '[]'::jsonb)) loop
+    if jsonb_typeof(v) <> 'object' then continue; end if;
+    v_subject := v->>'subject';
+    if v_subject is null or v_subject not in ('math', 'physics', 'chemistry') then continue; end if;
+    v_key := left(coalesce(v->>'concept_key', ''), 80);
+    if v_key = '' then continue; end if;
+    v_quality := case when pg_input_is_valid(v->>'quality', 'numeric')
+                      then greatest(0, least(100, round((v->>'quality')::numeric)))::int end;
+    if v_quality is null then continue; end if;
+
+    insert into public.concept_mastery as cm
+      (user_id, subject, concept_key, attempts, green_hits, last_quality, best_quality, updated_at)
+    values
+      (p_user, v_subject, v_key, 1,
+       case when v_quality >= 70 then 1 else 0 end,  -- MASTERY_GREEN_QUALITY (lib/mastery.js)
+       v_quality, v_quality, now())
+    on conflict (user_id, subject, concept_key) do update set
+      attempts     = least(cm.attempts + 1, 100000),
+      green_hits   = least(cm.green_hits + (case when excluded.last_quality >= 70 then 1 else 0 end), 100000),
+      last_quality = excluded.last_quality,
+      best_quality = greatest(coalesce(cm.best_quality, 0), excluded.best_quality),
+      updated_at   = now();
+  end loop;
+end;
+$$;
+
+revoke all on function public.bump_concept_mastery(uuid, jsonb) from public, anon, authenticated;
+grant execute on function public.bump_concept_mastery(uuid, jsonb) to service_role;
 
 -- ---- RPC: atomic delete of the caller's data (Profile -> "Reset my progress")
 -- SECURITY DEFINER (scores/attempts are SELECT-only under RLS now), self-scoped to
@@ -310,6 +427,7 @@ begin
   perform pg_advisory_xact_lock(hashtextextended(uid::text, 0));
   delete from public.attempts where user_id = uid;
   delete from public.scores   where user_id = uid;
+  delete from public.concept_mastery where user_id = uid;  -- a reset clears the chip coloring too
 end;
 $$;
 

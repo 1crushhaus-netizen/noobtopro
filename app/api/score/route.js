@@ -44,7 +44,8 @@ import {
   REPEAT_WINDOW_K,
 } from "@/lib/scoring";
 import { normalizeTopic } from "@/lib/taxonomy";
-import { diagnosticSurfaceFor, diagnosticQuestionFor } from "@/lib/diagnosticBank";
+import { diagnosticSurfaceFor, diagnosticConceptFor, diagnosticQuestionFor } from "@/lib/diagnosticBank";
+import { isCurriculumConcept } from "@/lib/mastery";
 import { preGradeDock } from "@/lib/preGrade";
 import { checkRateLimit, clientKey, chargeGlobalGroq } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType, readJsonLimited, MAX_BODY_BYTES_IMAGE } from "@/lib/requestGuard";
@@ -100,6 +101,31 @@ function bumpItemDifficulty(sb, subject, topic, band, delta, seed) {
       });
     } catch (e) {
       console.error("[/api/score] bump_item_difficulty", e); // self-heals next attempt
+    }
+  };
+  try {
+    after(run);
+  } catch {
+    void run();
+  }
+}
+
+// Per-concept MASTERY counters (Learn-tab chip coloring, RANKS_PLAN §12.1) — bump
+// AFTER the response, best-effort + non-blocking: mastery is derived/repairable
+// display data, so a failed bump must never fail or slow the learner's grade (and
+// the route keeps working on a DB that predates migration 0010 — the error logs
+// and grading proceeds). `entries` carry the SERVER-computed quality only; the
+// concept keys are allow-listed against the curriculum before reaching here.
+function bumpConceptMastery(sb, uid, entries) {
+  if (!sb || !uid || !Array.isArray(entries) || entries.length === 0) return;
+  const run = async () => {
+    try {
+      // supabase-js RESOLVES failures as { error } (it doesn't throw) — check it,
+      // or a pre-0010 DB / RPC failure would be fully silent instead of logged.
+      const { error } = await sb.rpc("bump_concept_mastery", { p_user: uid, p_entries: entries });
+      if (error) console.error("[/api/score] bump_concept_mastery", error);
+    } catch (e) {
+      console.error("[/api/score] bump_concept_mastery", e); // network-level throw; mastery self-heals on later attempts
     }
   };
   try {
@@ -272,6 +298,13 @@ async function handlePractice(req, body) {
   // Image-only submission: the photo IS the answer, so a vision failure must fail
   // retryably rather than text-grade the placeholder string (audit P1-3).
   const imageOnly = !!img.image && !(typeof reasoning === "string" && reasoning.trim());
+  // Optional curriculum concept tag for MASTERY coloring (RANKS_PLAN §12.1). It rides
+  // in the SIGNED TOKEN (issued.conceptKey) — a concept-targeted drill (increment 3)
+  // signs it at generation; generic practice has none. Allow-listed against
+  // lib/curriculum.js, and the mastery QUALITY is the server-computed reasoning score
+  // below (never client-supplied), so tagging can only ever color a concept with an
+  // honestly-graded attempt — it can't inflate a rating.
+  const masteryKey = isCurriculumConcept(subject, issued.conceptKey) ? issued.conceptKey : null;
 
   try {
     // Cheap PRE-GRADE replay check (review P3): the authoritative jti dedupe lives in
@@ -506,6 +539,9 @@ async function handlePractice(req, body) {
       bumpItemDifficulty(sb, subject, topicSlug, bandKey, diffDelta, seedDifficulty);
     }
     registerWeakConcepts(subject, weakConcepts); // auto-grow the hub (non-blocking)
+    // Mastery counters for a concept-tagged attempt (non-blocking). A DOCKED attempt
+    // still counts — a skip/"idk" on a concept marks it red by design (§12.1).
+    if (masteryKey) bumpConceptMastery(sb, uid, [{ subject, concept_key: masteryKey, quality: reasoningScore }]);
 
     return NextResponse.json({
       reasoningScore,
@@ -526,6 +562,9 @@ async function handlePractice(req, body) {
       docked: !!dock,
       subjectScore: { score: saved.newScore, weakConcepts: saved.newWeak, comment: saved.comment, rubric: saved.newRubric },
       attempt: { type: "attempt", t: saved.t, subject, reasoningScore, delta: saved.delta, newScore: saved.newScore, totalAfter: saved.totalAfter, phdAfter: saved.phdAfter, rationale: saved.rationale },
+      // The applied (allow-listed) mastery update, so the client can mirror it in
+      // memory without refetching; an empty array when the attempt wasn't concept-tagged.
+      masteryUpdates: masteryKey ? [{ subject, conceptKey: masteryKey, quality: reasoningScore }] : [],
     });
   } catch (e) {
     console.error("[/api/score practice]", e);
@@ -753,6 +792,19 @@ async function handleDiagnostic(req, body) {
       if (scores[s] && scores[s].weakConcepts.length) registerWeakConcepts(s, scores[s].weakConcepts);
     }
 
+    // Per-concept mastery updates — the diagnostic colors EXACTLY the concepts it
+    // tested (direct-only, §12.1). The concept key is derived SERVER-SIDE from the
+    // curated bank by (subject, difficulty) — like the reasoning surface, never from
+    // the request body — and the quality is the server-computed grade, so a crafted
+    // payload can't color (or farm) arbitrary concepts. A docked skip counts: it
+    // marks the concept red ("study the foundations first") by design.
+    const masteryUpdates = results
+      .map((r) => {
+        const conceptKey = diagnosticConceptFor(r.subject, r.difficulty);
+        return conceptKey ? { subject: r.subject, conceptKey, quality: r.reasoningScore } : null;
+      })
+      .filter(Boolean);
+
     if (uid) {
       // sb was resolved and null-checked up front (so we never grade for a user we
       // can't persist for); reuse it here.
@@ -781,9 +833,12 @@ async function handleDiagnostic(req, body) {
         p_attempt: { type: "baseline", total_after: totalAfter, phd_after: phdAfter, created_at: t },
       });
       if (saveErr) throw saveErr;
+      // Persist the tested concepts' mastery counters (non-blocking, after the save).
+      bumpConceptMastery(sb, uid, masteryUpdates.map((u) => ({ subject: u.subject, concept_key: u.conceptKey, quality: u.quality })));
       return NextResponse.json({
         scores,
         persisted: true,
+        masteryUpdates,
         attempt: {
           type: "baseline",
           t,
@@ -797,8 +852,9 @@ async function handleDiagnostic(req, body) {
       });
     }
 
-    // Guest: return the graded baseline for the client to store locally.
-    return NextResponse.json({ scores, persisted: false, attempt: null });
+    // Guest: return the graded baseline (+ the server-derived mastery updates) for
+    // the client to store locally.
+    return NextResponse.json({ scores, persisted: false, attempt: null, masteryUpdates });
   } catch (e) {
     console.error("[/api/score diagnostic]", e);
     return NextResponse.json({ error: "Grading is temporarily unavailable. Please try again." }, { status: 500 });

@@ -360,6 +360,55 @@ body {
 }
 .np-concepttag:hover { border-color: var(--line-strong); background: var(--tint-2); }
 .np-concepttag.active { background: var(--tint-2); font-weight: 600; }
+/* Display-only curriculum chip (the Learn tab lists the fixed concept database; these
+   are NOT clickable/generated) — keep the chip look but drop the interactive cues. */
+.np-concepttag--static { cursor: default; }
+.np-concepttag--static:hover { border-color: var(--line); background: var(--tint-1); }
+
+/* Per-concept MASTERY coloring (RANKS_PLAN §12.1): green mastered / yellow in
+   progress / red struggling; grey (untouched) is the base chip. Each state gets a
+   DISTINCT leading glyph (✓ / … / !), not just a recolored dot — hue alone fails
+   WCAG 1.4.1 for sighted colorblind users on touch (title is hover-only and
+   aria-label is SR-only; gold vs coral is the classic deutan confusion pair).
+   The glyph is decorative (the accessible name carries the state). Valence
+   colors follow the eyebrow convention: good = teal, improve = gold, danger. */
+.np-concepttag--green,
+.np-concepttag--yellow,
+.np-concepttag--red { gap: 7px; }
+.np-concepttag--green::before,
+.np-concepttag--yellow::before,
+.np-concepttag--red::before {
+  font-weight: 700; font-size: 11px; line-height: 1; flex: none;
+}
+.np-concepttag--green::before  { content: "✓"; }
+.np-concepttag--yellow::before { content: "…"; }
+.np-concepttag--red::before    { content: "!"; }
+.np-concepttag--green  { border-color: var(--phys);   color: var(--phys);   background: var(--phys-soft); }
+.np-concepttag--yellow { border-color: var(--math);   color: var(--math);   background: var(--math-soft); }
+.np-concepttag--red    { border-color: var(--danger-border); color: var(--danger); background: var(--danger-soft); }
+/* Keep the state tint on hover — the base .np-concepttag:hover would otherwise
+   swap colored chips back to the neutral line/tint. */
+.np-concepttag--green:hover  { border-color: var(--phys);   background: var(--phys-soft); }
+.np-concepttag--yellow:hover { border-color: var(--math);   background: var(--math-soft); }
+.np-concepttag--red:hover    { border-color: var(--danger); background: var(--danger-soft); }
+
+/* The mastery state key above the curriculum listing (glyphs mirror the chips). */
+.np-masterylegend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0 0 16px; }
+.np-masterylegend-item {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12.5px; color: var(--muted); font-family: var(--ui);
+}
+.np-masterylegend-item::before { font-weight: 700; font-size: 11px; line-height: 1; flex: none; content: "·"; }
+.np-masterylegend--green::before  { content: "✓"; color: var(--phys); }
+.np-masterylegend--yellow::before { content: "…"; color: var(--math); }
+.np-masterylegend--red::before    { content: "!"; color: var(--danger); }
+
+/* Concept-page mastery status line + the red "build the foundations first" card. */
+.np-masterystatus { font-size: 13.5px; margin: -4px 0 14px; color: var(--muted); }
+.np-masterystatus--green  { color: var(--phys); }
+.np-masterystatus--yellow { color: var(--math); }
+.np-masterystatus--red    { color: var(--danger); }
+.np-masterywarn { border-color: var(--danger-border); margin-bottom: 16px; }
 
 .np-learnlist { list-style: none; padding: 0; margin: 4px 0 0; display: flex; flex-direction: column; gap: 9px; }
 .np-learnlist li {

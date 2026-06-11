@@ -39,7 +39,7 @@ vi.mock("@/lib/supabase", () => ({
   }),
 }));
 
-import { migrateGuestToAccount, deleteAllUserData, loadState, saveProgress, loadReviews } from "@/lib/store";
+import { migrateGuestToAccount, deleteAllUserData, loadState, saveProgress, loadReviews, loadMastery } from "@/lib/store";
 
 const KEY = "noobtopro:v1";
 const signedIn = { data: { session: { user: { id: "u1" } } } };
@@ -259,7 +259,7 @@ describe("loadState (guest blob sanitization)", () => {
   it("returns a safe empty shape when the guest blob is null", async () => {
     mocks.session = guest;
     const st = await loadState();
-    expect(st).toEqual({ scores: null, history: [] });
+    expect(st).toEqual({ scores: null, history: [], mastery: {} });
   });
 
   it("collapses an all-garbage scores blob to null (so hydrate routes the guest to the intro, not a 0/0/0 dashboard)", async () => {
@@ -384,6 +384,97 @@ describe("loadReviews (answer review)", () => {
     expect(res.reviews).toHaveLength(1);
     expect(res.reviews[0]).toMatchObject({ question: "Q1", answer: "A1", subject: "math", reasoningScore: 40 });
     expect(res.reviews[0].feedback.workedSolution).toBe("S1");
+  });
+});
+
+describe("per-concept mastery (guest storage + signed-in reads + migration)", () => {
+  const MATH_KEY = "ratios_unit_rates";
+
+  it("saveProgress applies allow-listed mastery updates atomically with the score + attempt", async () => {
+    mocks.session = guest;
+    const scores = { math: { score: 50, weakConcepts: [], comment: "" } };
+    await saveProgress(scores, { type: "attempt", subject: "math" }, [
+      { subject: "math", conceptKey: MATH_KEY, quality: 80 },
+      { subject: "math", conceptKey: "fake_concept", quality: 100 }, // dropped by the allowlist
+    ]);
+    const blob = JSON.parse(window.localStorage.getItem(KEY));
+    expect(blob.mastery).toEqual({ math: { [MATH_KEY]: { attempts: 1, greenHits: 1, lastQuality: 80, bestQuality: 80 } } });
+  });
+
+  it("loadMastery (guest) reads the SANITIZED map — junk keys/counters in the blob are dropped", async () => {
+    mocks.session = guest;
+    window.localStorage.setItem(KEY, JSON.stringify({
+      scores: null,
+      history: [],
+      mastery: {
+        math: {
+          [MATH_KEY]: { attempts: 2, greenHits: 99, lastQuality: 80, bestQuality: "garbage" },
+          not_a_concept: { attempts: 5, greenHits: 5, lastQuality: 100, bestQuality: 100 },
+        },
+        biology: { whatever: { attempts: 3 } },
+      },
+    }));
+    const { mastery } = await loadMastery();
+    expect(mastery).toEqual({ math: { [MATH_KEY]: { attempts: 2, greenHits: 2, lastQuality: 80, bestQuality: null } } });
+  });
+
+  it("loadMastery (signed-in) maps the user's own concept_mastery rows; an error surfaces as { error }", async () => {
+    mocks.session = signedIn;
+    mocks.db.attemptsSelect = { data: [
+      { subject: "math", concept_key: MATH_KEY, attempts: 2, green_hits: 2, last_quality: 90, best_quality: 95 },
+      { subject: "math", concept_key: "fake_concept", attempts: 1, green_hits: 0, last_quality: 10, best_quality: 10 },
+    ], error: null };
+    const { mastery, error } = await loadMastery();
+    expect(error).toBeUndefined();
+    expect(mastery).toEqual({ math: { [MATH_KEY]: { attempts: 2, greenHits: 2, lastQuality: 90, bestQuality: 95 } } });
+    // RLS-scoping filter present (defense-in-depth alongside RLS itself).
+    expect(mocks.calls.concept_mastery.eq).toContainEqual(["user_id", "u1"]);
+
+    mocks.calls = {};
+    mocks.db.attemptsSelect = { data: null, error: { message: "relation does not exist" } };
+    const res = await loadMastery();
+    expect(res.error).toBeTruthy();
+  });
+
+  it("migration carries the guest mastery map (p_mastery) and falls back to 2-arg on a pre-0010 DB", async () => {
+    mocks.session = signedIn;
+    const guestBlob = {
+      scores: { math: { score: 40, weakConcepts: [], comment: "" } },
+      history: [],
+      mastery: { math: { [MATH_KEY]: { attempts: 1, greenHits: 1, lastQuality: 80, bestQuality: 80 } } },
+    };
+    window.localStorage.setItem(KEY, JSON.stringify(guestBlob));
+    await migrateGuestToAccount();
+    let [fn, args] = mocks.rpc.mock.calls[0];
+    expect(fn).toBe("migrate_guest_data");
+    expect(args.p_mastery).toEqual(guestBlob.mastery);
+
+    // Pre-0010 DB: the 3-arg signature is missing (PGRST202) → retry without p_mastery.
+    window.localStorage.setItem(KEY, JSON.stringify(guestBlob));
+    mocks.rpc.mockClear();
+    mocks.rpc
+      .mockResolvedValueOnce({ error: { code: "PGRST202", message: "no matching function" } })
+      .mockResolvedValueOnce({ error: null });
+    const res = await migrateGuestToAccount();
+    expect(res.migrated).toBe(true);
+    expect(mocks.rpc.mock.calls).toHaveLength(2);
+    expect(mocks.rpc.mock.calls[1][1].p_mastery).toBeUndefined();
+    // The un-migrated mastery map is PRESERVED in the cleared blob (not destroyed) —
+    // scores/history are gone (they migrated), mastery stays recoverable.
+    const blob = JSON.parse(window.localStorage.getItem(KEY));
+    expect(blob.scores).toBeNull();
+    expect(blob.mastery).toEqual(guestBlob.mastery);
+  });
+
+  it("migration omits p_mastery entirely when the guest has none (no needless 3-arg call)", async () => {
+    mocks.session = signedIn;
+    window.localStorage.setItem(KEY, JSON.stringify({
+      scores: { math: { score: 40, weakConcepts: [], comment: "" } },
+      history: [],
+    }));
+    await migrateGuestToAccount();
+    const [, args] = mocks.rpc.mock.calls[0];
+    expect("p_mastery" in args).toBe(false);
   });
 });
 

@@ -1,115 +1,134 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
-import LearnTab from "@/components/LearnTab";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
+import { render, screen, fireEvent, cleanup, waitFor, act } from "@testing-library/react";
 
+// LearnTab loads the per-concept mastery map on mount; tests install the map they need.
+const mocks = vi.hoisted(() => ({ loadMastery: vi.fn(async () => ({ mastery: {} })) }));
+vi.mock("@/lib/store", () => ({ loadMastery: (...a) => mocks.loadMastery(...a) }));
+
+import LearnTab from "@/components/LearnTab";
+import { RANK_LABELS } from "@/lib/curriculum";
+
+beforeEach(() => {
+  mocks.loadMastery.mockReset();
+  mocks.loadMastery.mockResolvedValue({ mastery: {} });
+});
 afterEach(cleanup);
 
-const scores = {
-  math: { score: 0, weakConcepts: ["removable discontinuities", "function modification"] },
-  physics: { score: 0, weakConcepts: ["energy transformation"] },
-  chemistry: { score: 0, weakConcepts: [] },
-};
+// Render and flush the mount-time loadMastery resolution so state updates land
+// inside act() (avoids races between assertions and the async setMastery).
+async function renderTab() {
+  let utils;
+  await act(async () => {
+    utils = render(<LearnTab />);
+  });
+  return utils;
+}
 
-describe("LearnTab", () => {
-  it("shows an empty state when there are no weak concepts", () => {
-    render(<LearnTab scores={{ math: { score: 0, weakConcepts: [] } }} active={null} content={null} busy={false} error="" onSelect={() => {}} />);
-    expect(screen.getByText(/no concepts to learn yet/i)).toBeTruthy();
+describe("LearnTab — curriculum listing", () => {
+  it("renders concepts from the database as clickable buttons, grouped by rank", async () => {
+    await renderTab();
+    expect(screen.getByRole("button", { name: "Place value & the base-ten system" })).toBeTruthy(); // math · elementary
+    expect(screen.getByRole("button", { name: "Stoichiometry" })).toBeTruthy(); // chemistry · high
+    for (const label of Object.values(RANK_LABELS)) {
+      expect(screen.getAllByText(label).length).toBe(3); // once per subject
+    }
   });
 
-  it("renders a clickable chip per weak concept and calls onSelect with subject + concept", () => {
-    const onSelect = vi.fn();
-    render(<LearnTab scores={scores} active={null} content={null} busy={false} error="" onSelect={onSelect} />);
-    const chip = screen.getByRole("button", { name: "removable discontinuities" });
-    fireEvent.click(chip);
-    expect(onSelect).toHaveBeenCalledWith("math", "removable discontinuities");
-    // a concept from another subject is also present
-    expect(screen.getByRole("button", { name: "energy transformation" })).toBeTruthy();
+  it("greys out the empty Doctorate rank with the WIP note (no chips)", async () => {
+    await renderTab();
+    expect(screen.getAllByText(/in development/i).length).toBe(3); // one per subject
+  });
+});
+
+describe("LearnTab — concept page + root navigation", () => {
+  it("opening a concept shows its dedicated page (title + Back)", async () => {
+    await renderTab();
+    fireEvent.click(screen.getByRole("button", { name: "Quadratic functions & equations" }));
+    expect(screen.getByRole("heading", { name: "Quadratic functions & equations" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /back to concepts/i })).toBeTruthy();
   });
 
-  it("shows a loading state while fetching, announced to screen readers (role=status)", () => {
-    render(<LearnTab scores={scores} active={{ subject: "math", concept: "limits" }} content={null} busy={true} error="" onSelect={() => {}} />);
-    expect(screen.getByText(/building your guide to limits/i)).toBeTruthy();
-    // The async loading state must live in a polite live region so AT users hear it.
-    expect(screen.getByRole("status").textContent).toMatch(/building your guide to limits/i);
+  it("shows the root concepts and navigates when one is clicked (branched path)", async () => {
+    await renderTab();
+    fireEvent.click(screen.getByRole("button", { name: "Quadratic functions & equations" }));
+    // quadratics' roots include Algebraic expressions (a lower-rank prerequisite)
+    fireEvent.click(screen.getByRole("button", { name: "Algebraic expressions" }));
+    expect(screen.getByRole("heading", { name: "Algebraic expressions" })).toBeTruthy();
   });
 
-  it("announces an async error to screen readers (role=alert)", () => {
-    render(<LearnTab scores={scores} active={{ subject: "math", concept: "limits" }} content={null} busy={false} error="Could not load the concept guide." onSelect={() => {}} />);
-    expect(screen.getByRole("alert").textContent).toMatch(/could not load the concept guide/i);
+  it("a foundational (elementary) concept shows no prerequisites", async () => {
+    await renderTab();
+    fireEvent.click(screen.getByRole("button", { name: "Place value & the base-ten system" }));
+    expect(screen.getByText(/foundational concept/i)).toBeTruthy();
+    expect(screen.queryByText(/understand these first/i)).toBeNull();
   });
 
-  it("renders the guidance sections (no answer, just teaching)", () => {
-    const content = {
-      subject: "math",
-      concept: "removable discontinuities",
-      overview: "A hole you can patch.",
-      keyIdeas: ["the limit exists", "the value is missing or wrong"],
-      socraticQuestions: ["What makes a discontinuity removable?"],
-      pitfalls: ["confusing with a jump"],
-      tryThis: "Factor and cancel, then check the limit.",
-    };
-    const onPractice = vi.fn();
-    render(<LearnTab scores={scores} active={{ subject: "math", concept: "removable discontinuities" }} content={content} busy={false} error="" onSelect={() => {}} onPractice={onPractice} />);
-    expect(screen.getByText("A hole you can patch.")).toBeTruthy();
-    expect(screen.getByText(/key ideas/i)).toBeTruthy();
-    expect(screen.getByText("the limit exists")).toBeTruthy();
-    expect(screen.getByText(/questions to think through/i)).toBeTruthy();
-    expect(screen.getByText(/common pitfalls/i)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /practice mathematics/i }));
-    expect(onPractice).toHaveBeenCalledWith("math");
+  it("Back returns to the full curriculum listing", async () => {
+    await renderTab();
+    fireEvent.click(screen.getByRole("button", { name: "Stoichiometry" }));
+    expect(screen.getByRole("heading", { name: "Stoichiometry" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /back to concepts/i }));
+    expect(screen.getByRole("heading", { name: "Learn" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Place value & the base-ten system" })).toBeTruthy();
+  });
+});
+
+describe("LearnTab — mastery coloring (RANKS_PLAN §12.1)", () => {
+  // Counter records for each state: green (2 hits), yellow (1 good attempt),
+  // red (last attempt failed). Keys are real curriculum concepts.
+  const MASTERY = {
+    math: {
+      quadratics: { attempts: 2, greenHits: 2, lastQuality: 85, bestQuality: 90 }, // green
+      algebraic_expressions: { attempts: 1, greenHits: 1, lastQuality: 80, bestQuality: 80 }, // yellow
+      ratios_unit_rates: { attempts: 1, greenHits: 0, lastQuality: 5, bestQuality: 5 }, // red
+    },
+  };
+
+  it("colors chips by state with the state in the accessible name; untouched chips stay plain", async () => {
+    mocks.loadMastery.mockResolvedValue({ mastery: MASTERY });
+    await renderTab();
+    const green = screen.getByRole("button", { name: /Quadratic functions & equations — Mastered/i });
+    expect(green.className).toContain("np-concepttag--green");
+    const yellow = screen.getByRole("button", { name: /Algebraic expressions — In progress/i });
+    expect(yellow.className).toContain("np-concepttag--yellow");
+    const red = screen.getByRole("button", { name: /Ratios & unit rates — Struggling/i });
+    expect(red.className).toContain("np-concepttag--red");
+    // An untouched concept keeps its plain accessible name and no state class.
+    const grey = screen.getByRole("button", { name: "Place value & the base-ten system" });
+    expect(grey.className).not.toMatch(/np-concepttag--(green|yellow|red)/);
   });
 
-  it("renders the 'Why it works' proof/derivation section when present (PR 5 depth)", () => {
-    const content = {
-      subject: "math", concept: "the pythagorean theorem", overview: "o", keyIdeas: ["k"],
-      whyItWorks: "Arrange four copies of the triangle in a square of side (a+b); equate areas to get a^2 + b^2 = c^2.",
-      socraticQuestions: [], pitfalls: [], tryThis: "",
-    };
-    render(<LearnTab scores={scores} active={{ subject: "math", concept: "the pythagorean theorem" }} content={content} busy={false} error="" onSelect={() => {}} onPractice={() => {}} />);
-    expect(screen.getByText(/why it works/i)).toBeTruthy();
-    expect(screen.getByText(/equate areas to get/i)).toBeTruthy();
+  it("renders the color key legend once", async () => {
+    await renderTab();
+    expect(screen.getByLabelText(/concept color key/i)).toBeTruthy();
+    expect(screen.getByText("Mastered")).toBeTruthy();
+    expect(screen.getByText("Not attempted")).toBeTruthy();
   });
 
-  const guide = { subject: "physics", concept: "energy transformation", overview: "o", keyIdeas: [], socraticQuestions: [], pitfalls: [], tryThis: "think about conservation" };
-
-  it("shows the cached 'try this' problem and practices it WITHOUT generating a new question", () => {
-    const onPracticeQuestion = vi.fn();
-    const onPractice = vi.fn();
-    const q = { question: "A 2kg block slides down a ramp — trace the energy flow.", targetConcept: "energy transformation", difficulty: "advanced" };
-    render(
-      <LearnTab scores={scores} active={{ subject: "physics", concept: "energy transformation" }} content={guide} busy={false} error=""
-        question={q} onSelect={() => {}} onPractice={onPractice} onPracticeQuestion={onPracticeQuestion} onRegenerate={() => {}} />
-    );
-    expect(screen.getByText(/2kg block slides/i)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /practice this problem/i }));
-    expect(onPracticeQuestion).toHaveBeenCalledWith("physics", q);
-    expect(onPractice).not.toHaveBeenCalled(); // reused the cached question — no fresh generation
+  it("a RED concept's page shows the build-the-foundations warning pointing at its roots", async () => {
+    mocks.loadMastery.mockResolvedValue({
+      mastery: { math: { quadratics: { attempts: 1, greenHits: 0, lastQuality: 10, bestQuality: 10 } } },
+    });
+    await renderTab();
+    fireEvent.click(screen.getByRole("button", { name: /Quadratic functions & equations — Struggling/i }));
+    expect(screen.getByText(/build the foundations first/i)).toBeTruthy();
+    expect(screen.getByText(/root concepts below/i)).toBeTruthy();
+    expect(screen.getByText(/understand these first/i)).toBeTruthy(); // the roots card is right there
   });
 
-  it("regenerate calls onRegenerate, and the button is disabled while regenerating", () => {
-    const onRegenerate = vi.fn();
-    const q = { question: "Q?", targetConcept: "energy transformation", difficulty: "intermediate" };
-    const { rerender } = render(
-      <LearnTab scores={scores} active={{ subject: "physics", concept: "energy transformation" }} content={guide} busy={false} error=""
-        question={q} regenerating={false} onSelect={() => {}} onRegenerate={onRegenerate} onPracticeQuestion={() => {}} />
-    );
-    fireEvent.click(screen.getByRole("button", { name: /regenerate question/i }));
-    expect(onRegenerate).toHaveBeenCalled();
-    rerender(
-      <LearnTab scores={scores} active={{ subject: "physics", concept: "energy transformation" }} content={guide} busy={false} error=""
-        question={q} regenerating={true} onSelect={() => {}} onRegenerate={onRegenerate} onPracticeQuestion={() => {}} />
-    );
-    expect(screen.getByRole("button", { name: /generating a new one/i }).disabled).toBe(true);
+  it("a green concept's page shows the mastered status line and NO warning", async () => {
+    mocks.loadMastery.mockResolvedValue({ mastery: MASTERY });
+    await renderTab();
+    fireEvent.click(screen.getByRole("button", { name: /Quadratic functions & equations — Mastered/i }));
+    expect(screen.getByText(/clear understanding shown/i)).toBeTruthy();
+    expect(screen.queryByText(/build the foundations first/i)).toBeNull();
   });
 
-  it("falls back to a fresh 'Practice <subject>' button when a guide has no cached question", () => {
-    const onPractice = vi.fn();
-    render(
-      <LearnTab scores={scores} active={{ subject: "math", concept: "limits" }} content={{ subject: "math", concept: "limits", overview: "o", keyIdeas: [], socraticQuestions: [], pitfalls: [], tryThis: "" }} busy={false} error=""
-        question={null} onSelect={() => {}} onPractice={onPractice} onPracticeQuestion={() => {}} onRegenerate={() => {}} />
-    );
-    fireEvent.click(screen.getByRole("button", { name: /practice mathematics/i }));
-    expect(onPractice).toHaveBeenCalledWith("math");
+  it("a mastery load FAILURE (e.g. pre-0010 DB) still renders the full uncolored curriculum", async () => {
+    mocks.loadMastery.mockResolvedValue({ error: { message: "relation does not exist" } });
+    await renderTab();
+    expect(screen.getByRole("button", { name: "Place value & the base-ten system" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Stoichiometry" })).toBeTruthy();
   });
 });

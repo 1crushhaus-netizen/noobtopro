@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { DIAGNOSTIC_BANK, buildDiagnostic, diagnosticSurfaceFor } from "@/lib/diagnosticBank";
+import { DIAGNOSTIC_BANK, buildDiagnostic, diagnosticSurfaceFor, diagnosticConceptFor } from "@/lib/diagnosticBank";
+import { isCurriculumConcept } from "@/lib/mastery";
 import { ORDER, DIAGNOSTIC_DIFFICULTIES } from "@/lib/scoring";
 import { isValidTopic } from "@/lib/taxonomy";
 
@@ -56,5 +57,20 @@ describe("diagnosticSurfaceFor (server-side bank lookup — the grader's source 
     expect(diagnosticSurfaceFor("math", "phd")).toEqual({ reasoningSurface: null, trap: "" });
     expect(diagnosticSurfaceFor("astrology", "beginner")).toEqual({ reasoningSurface: null, trap: "" });
     expect(diagnosticSurfaceFor("__proto__", "beginner")).toEqual({ reasoningSurface: null, trap: "" });
+  });
+});
+
+describe("diagnosticConceptFor (server-side mastery tagging — the bank's source of truth)", () => {
+  it("every bank question is tagged with a REAL curriculum concept for its subject", () => {
+    for (const q of DIAGNOSTIC_BANK) {
+      expect(typeof q.conceptKey).toBe("string");
+      expect(isCurriculumConcept(q.subject, q.conceptKey), `${q.subject}:${q.difficulty} -> ${q.conceptKey}`).toBe(true);
+    }
+  });
+  it("returns the bank's conceptKey per slot, null for unknown/prototype slots", () => {
+    for (const q of DIAGNOSTIC_BANK) expect(diagnosticConceptFor(q.subject, q.difficulty)).toBe(q.conceptKey);
+    expect(diagnosticConceptFor("math", "phd")).toBe(null);
+    expect(diagnosticConceptFor("astrology", "beginner")).toBe(null);
+    expect(diagnosticConceptFor("__proto__", "beginner")).toBe(null);
   });
 });
