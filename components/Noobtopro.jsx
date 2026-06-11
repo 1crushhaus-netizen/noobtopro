@@ -829,50 +829,6 @@ export default function Noobtopro() {
   // Regenerate the "try this" question for the open concept — a fresh, level-
   // calibrated problem (this DOES call the LLM, only on explicit request) shown
   // for the session only; the shared cached guide/question is left untouched.
-  async function regenerateLearnQuestion() {
-    if (!learnConcept) return;
-    const { subject, concept } = learnConcept;
-    // Capture the concept's run token (openLearn bumps it on every switch) so a slow
-    // regenerate can't land a stale question on a concept the user has since moved
-    // away from — which would otherwise mis-grade the attempt under the wrong
-    // concept/subject. No increment: regenerate stays on the current concept.
-    const myRun = learnRun.current;
-    const recentKey = `learn:${subject}::${concept}`;
-    // Steer away from the currently-shown question too (the cached guide one isn't in
-    // the buffer yet on the first regenerate), so the very first "Regenerate" already differs.
-    if (learnQuestion?.question) pushRecentQuestion(recentKey, learnQuestion.question);
-    setLearnError("");
-    setLearnRegen(true);
-    try {
-      const data = await api("/api/generate", {
-        kind: "practice",
-        subject,
-        score: scores?.[subject]?.score ?? 0,
-        weakConcepts: [concept],
-        recentQuestions: getRecentQuestions(recentKey),
-      });
-      if (myRun !== learnRun.current) return; // a newer concept was selected
-      if (!data || typeof data.question !== "string" || !data.question.trim()) {
-        throw new Error("Could not generate a question. Please try again.");
-      }
-      // Normalize the generator's difficulty to a known band (default "intermediate"),
-      // matching the server's normalizeTryThisQuestion, so an off-band string can't
-      // flow to /api/grade and the score model as an unrecognized difficulty.
-      const BANDS = new Set(["beginner", "foundational", "intermediate", "advanced", "phd"]);
-      const d = typeof data.difficulty === "string" ? data.difficulty.trim().toLowerCase() : "";
-      const difficulty = BANDS.has(d) ? d : "intermediate";
-      pushRecentQuestion(recentKey, data.question); // remember it so the next regenerate differs again
-      // Preserve the reasoning-surface metadata (server-normalized) so a Learn-tab practice
-      // attempt carries the grader calibration too; harmlessly absent for cached-guide questions.
-      setLearnQuestion({ question: data.question, targetConcept: data.targetConcept || concept, difficulty, reasoningSurface: data.reasoningSurface, trap: data.trap, token: data.token });
-    } catch (e) {
-      if (myRun !== learnRun.current) return; // don't surface a stale error on a newer concept
-      setLearnError(e.message || "Could not regenerate the question.");
-    } finally {
-      if (myRun === learnRun.current) setLearnRegen(false);
-    }
-  }
-
   /* --- practice --- */
   async function startPractice(subject) {
     const myRun = ++practiceRun.current;

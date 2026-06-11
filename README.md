@@ -457,7 +457,7 @@ Components: **SignIn** (provider buttons), **Dashboard** (the merged Profile+Pro
 
 ## 13. Testing
 
-**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **639 tests across 39 files**, all passing.
+**Vitest**, configured in `vitest.config.js` (node env by default; component tests opt into `jsdom` via a `// @vitest-environment jsdom` docblock; automatic JSX runtime; `@/` alias). Run with `npm test` (CI uses this) or `npm run test:watch`. **640 tests across 39 files**, all passing.
 
 | File | Covers |
 |---|---|
