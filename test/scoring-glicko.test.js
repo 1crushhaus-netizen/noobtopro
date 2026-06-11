@@ -15,6 +15,8 @@ import {
   subjectScoreFromGlicko,
   radarFromGlicko,
   diagnosticSeedGlicko,
+  diagnosticSeedFromReasoning,
+  diagnosticSubjectScore,
   repeatFactorForCount,
   repeatFactorFromHistory,
   repeatFactorFromRecent,
@@ -193,6 +195,44 @@ describe("diagnostic seeding", () => {
       { difficulty: "advanced", rubric: fullRubric(1) },
     ]).score;
     expect(bombHard).toBeLessThan(aceAll);
+  });
+});
+
+describe("diagnosticSeedFromReasoning (reasoning-anchored placement)", () => {
+  // tiers built from a uniform reasoning score + matching rubric value, mirroring how
+  // /api/score feeds it ({difficulty, reasoningScore, rubric}).
+  const tiers = (rubVal, rs) =>
+    ["beginner", "intermediate", "advanced"].map((difficulty) => ({ difficulty, reasoningScore: rs, rubric: fullRubric(rubVal) }));
+
+  it("places a blank/idk (docked) diagnostic at the dock floor, NOT the old ~18", () => {
+    // a docked answer carries reasoningScore = DOCK_SCORE (3) + an all-zero rubric
+    const seed = diagnosticSeedFromReasoning(tiers(0, 3));
+    expect(seed.score).toBeLessThanOrEqual(5); // was 18 under the Glicko-games seed
+  });
+
+  it("places a flawless diagnostic near 100 (full range restored; was capped ~77)", () => {
+    expect(diagnosticSeedFromReasoning(tiers(4, 100)).score).toBeGreaterThanOrEqual(95);
+  });
+
+  it("the subject score equals the difficulty-weighted reasoning score (the anchor)", () => {
+    for (const [rub, rs] of [[0, 3], [1, 30], [2, 50], [4, 100]]) {
+      const qs = tiers(rub, rs);
+      expect(diagnosticSeedFromReasoning(qs).score).toBe(diagnosticSubjectScore(qs));
+    }
+  });
+
+  it("is monotonic in answer quality (blank < weak < middling < flawless)", () => {
+    const s = (rub, rs) => diagnosticSeedFromReasoning(tiers(rub, rs)).score;
+    expect(s(0, 3)).toBeLessThan(s(1, 30));
+    expect(s(1, 30)).toBeLessThan(s(2, 50));
+    expect(s(2, 50)).toBeLessThan(s(4, 100));
+  });
+
+  it("returns a finite 9-axis profile + glicko state, and 0 for no answers", () => {
+    const seed = diagnosticSeedFromReasoning(tiers(2, 50));
+    expect(Object.keys(seed.rubric)).toHaveLength(9);
+    for (const k of RUBRIC_KEYS) expect(Number.isFinite(seed.glicko[k].rating)).toBe(true);
+    expect(diagnosticSeedFromReasoning([]).score).toBe(0);
   });
 });
 
