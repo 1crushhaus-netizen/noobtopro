@@ -278,14 +278,19 @@ Each concept chip is colored by the learner's per-concept state:
   learning path explicit and branched. The same graph powers the red-concept "start with roots"
   nudge in §12.1.
 
-### 12.3 Concept page content (Phase D — separate later project)
-The page body (explicitly deferred by the owner to its own project):
-- a section explaining the concept **with a solved example problem**;
-- a section of **self-questions** to promote thinking;
-- an on-request **AI-generated problem targeting this concept** — this is the per-concept
-  *calibrated drill* (difficulty tied to the learner's mastery of this concept, per §6).
+### 12.3 Concept page content (Phase D) — ✅ SHIPPED
+The page body:
+- a section explaining the concept **with a solved example problem**; ✅
+- a section of **self-questions** to promote thinking; ✅
+- an on-request **AI-generated problem targeting this concept** — the per-concept
+  *calibrated drill* (difficulty tied to the learner's mastery of this concept, per §6). ✅
+  *(shipped earlier as increment 3)*
 The explanation/example/self-questions are **curated, static** content (authored once); only the
-targeted problem is generated at runtime.
+targeted problem is generated at runtime. *Implementation: all 224 guides live in
+`lib/guides/<subject>/<rank>.js` (one module per populated cell, lazily code-split via
+`lib/guides/index.js` so the main bundle ships none of them); shape rules in
+`lib/guides/validate.js` are enforced by `test/guides.test.js` (full coverage, no orphans)
+and re-runnable via `node scripts/validate-guides.mjs`.*
 
 ### 12.4 Build order
 1. **Prerequisite graph** (`roots` in `lib/curriculum.js`) — self-contained authoring; unblocks
@@ -293,4 +298,5 @@ targeted problem is generated at runtime.
 2. **Concept-tagged attempts + per-concept mastery storage** — the foundation for §12.1 coloring.
 3. **Coloring (Phase B).**
 4. **Concept-page shell + root navigation (Phase C).**
-5. **Page content + AI drill (Phase D)** — later project.
+5. **Page content + AI drill (Phase D).** ✅ *(drill shipped as increment 3; the 224 curated
+   written guides shipped as the Phase-D content project)*

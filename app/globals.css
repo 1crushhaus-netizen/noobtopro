@@ -227,6 +227,18 @@ body {
 .np-lesson { margin-bottom: 18px; }
 .np-lessontext { font-size: 15px; line-height: 1.65; color: var(--text); }
 
+/* ---- Learn tab: curated written guide on the concept page (Phase D, §12.3) ----
+   Three sections: the idea (paragraphs), worked example (problem statement →
+   numbered reasoning steps → answer), and ask-yourself (open self-questions). */
+.np-guideproblem { font-size: 15px; line-height: 1.6; color: var(--text); background: var(--tint-1); border: 1px solid var(--line); border-radius: var(--radius-inset); padding: 12px 14px; margin: 0 0 12px; }
+.np-guidesteps { margin: 0; padding-left: 24px; display: grid; gap: 8px; }
+.np-guidesteps li { font-size: 15px; line-height: 1.6; color: var(--text); }
+.np-guidesteps li::marker { color: var(--muted); font-weight: 600; }
+.np-guideanswer { font-size: 15px; line-height: 1.6; color: var(--text); margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--line); }
+.np-selfqs { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.np-selfqs li { font-size: 15px; line-height: 1.6; color: var(--text); position: relative; padding-left: 24px; }
+.np-selfqs li::before { content: "?"; position: absolute; left: 4px; top: 0; color: var(--muted); font-family: var(--ui); font-weight: 700; }
+
 /* --- process-first grading: legible score breakdown + typed errors --- */
 .np-sronly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .np-feedsub { font-size: 13px; color: var(--muted); margin-top: 8px; max-width: var(--w-narrow); line-height: 1.5; }

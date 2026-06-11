@@ -165,3 +165,33 @@ describe("LearnTab — AI concept-practice drill button (increment 3)", () => {
     expect(screen.getByText(/sign in or complete the diagnostic/i)).toBeTruthy();
   });
 });
+
+describe("LearnTab — curated written guide on the concept page (Phase D, §12.3)", () => {
+  it("renders the guide sections (idea, worked example, self-questions); no coming-soon hint", async () => {
+    await renderTab();
+    fireEvent.click(screen.getByRole("button", { name: "Quadratic functions & equations" }));
+    // The guide's subject·rank chunk loads lazily — wait for the sections to land.
+    await waitFor(() => expect(screen.getByText("Worked example")).toBeTruthy());
+    expect(screen.getByText("The idea")).toBeTruthy();
+    expect(screen.getByText("Ask yourself")).toBeTruthy();
+    expect(screen.getByText("Answer:")).toBeTruthy();
+    expect(screen.queryByText(/coming soon/i)).toBeNull();
+  });
+
+  it("swaps the guide when navigating to a root concept's page", async () => {
+    await renderTab();
+    fireEvent.click(screen.getByRole("button", { name: "Quadratic functions & equations" }));
+    await waitFor(() => expect(screen.getByText("Worked example")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Algebraic expressions" })); // a lower-rank root
+    expect(screen.getByRole("heading", { name: "Algebraic expressions" })).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("Worked example")).toBeTruthy());
+    expect(screen.getByText("The idea")).toBeTruthy();
+  });
+
+  it("an elementary (foundational) concept also carries its guide", async () => {
+    await renderTab();
+    fireEvent.click(screen.getByRole("button", { name: "Counting & cardinality" }));
+    await waitFor(() => expect(screen.getByText("Worked example")).toBeTruthy());
+    expect(screen.getByText("Ask yourself")).toBeTruthy();
+  });
+});
