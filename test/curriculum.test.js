@@ -1,61 +1,61 @@
 import { describe, it, expect } from "vitest";
-import {
-  CURRICULUM,
-  RANKS,
-  PREREQUISITES,
-  prereqKeysFor,
-  rootsFor,
-  allConcepts,
-} from "@/lib/curriculum";
+import { conceptByKey, bandForRank, RANK_TO_BAND, RANKS, conceptsFor } from "@/lib/curriculum";
 
-const rankIdx = (r) => RANKS.indexOf(r);
+// The concept-practice drill (increment 3) leans on conceptByKey as its server-side
+// allowlist and bandForRank to frame the question — pin both.
 
-// Per-subject key -> rank index, from the curriculum (source of truth).
-const keyRank = {};
-for (const subject of Object.keys(CURRICULUM)) {
-  keyRank[subject] = {};
-  for (const rank of RANKS) for (const c of CURRICULUM[subject][rank]) keyRank[subject][c.key] = rankIdx(rank);
-}
-
-describe("curriculum prerequisite graph", () => {
-  it("has a prerequisite entry for every curriculum concept", () => {
-    for (const c of allConcepts()) {
-      expect(PREREQUISITES[c.subject], `${c.subject} missing in PREREQUISITES`).toBeTruthy();
-      expect(c.key in PREREQUISITES[c.subject], `no prereq entry for ${c.subject}/${c.key}`).toBe(true);
-    }
+describe("conceptByKey (the concept-drill allowlist)", () => {
+  it("resolves a real (subject, key) to its metadata incl. rank", () => {
+    expect(conceptByKey("math", "quadratics")).toEqual({
+      key: "quadratics",
+      label: "Quadratic functions & equations",
+      strand: "Algebra",
+      rank: "high",
+    });
+    expect(conceptByKey("math", "counting_cardinality").rank).toBe("elementary");
   });
 
-  it("every root exists in the same subject and is STRICTLY lower rank (acyclic by construction)", () => {
-    for (const subject of Object.keys(PREREQUISITES)) {
-      for (const [key, roots] of Object.entries(PREREQUISITES[subject])) {
-        for (const r of roots) {
-          expect(r in keyRank[subject], `${subject}/${key} -> unknown root ${r}`).toBe(true);
-          expect(keyRank[subject][r], `${subject}/${key} -> ${r} not lower rank`).toBeLessThan(keyRank[subject][key]);
-          expect(r).not.toBe(key); // no self-edge
+  it("returns null for an unknown key, a cross-subject key, or a bad subject", () => {
+    expect(conceptByKey("math", "totally_fake")).toBeNull();
+    expect(conceptByKey("physics", "quadratics")).toBeNull(); // a math key under physics
+    expect(conceptByKey("biology", "quadratics")).toBeNull();
+  });
+
+  it("is prototype-safe (constructor/__proto__ are not subjects or concepts)", () => {
+    expect(conceptByKey("constructor", "toString")).toBeNull();
+    expect(conceptByKey("__proto__", "quadratics")).toBeNull();
+    expect(conceptByKey("math", "__proto__")).toBeNull();
+    expect(conceptByKey(null, "quadratics")).toBeNull();
+    expect(conceptByKey("math", null)).toBeNull();
+  });
+
+  it("can resolve every concept in the curriculum (round-trip)", () => {
+    for (const subject of ["math", "physics", "chemistry"]) {
+      for (const rank of RANKS) {
+        for (const c of conceptsFor(subject, rank)) {
+          const r = conceptByKey(subject, c.key);
+          expect(r, `${subject}/${c.key}`).toBeTruthy();
+          expect(r.rank).toBe(rank);
+          expect(r.label).toBe(c.label);
         }
-        // no duplicate roots
-        expect(new Set(roots).size).toBe(roots.length);
       }
     }
   });
+});
 
-  it("elementary concepts have no roots (they are the foundation)", () => {
-    for (const subject of Object.keys(CURRICULUM)) {
-      for (const c of CURRICULUM[subject].elementary) {
-        expect(prereqKeysFor(subject, c.key)).toEqual([]);
-      }
-    }
+describe("bandForRank (rank -> difficulty band)", () => {
+  it("maps the five ranks 1:1 onto the five bands", () => {
+    expect(bandForRank("elementary")).toBe("beginner");
+    expect(bandForRank("middle")).toBe("foundational");
+    expect(bandForRank("high")).toBe("intermediate");
+    expect(bandForRank("university")).toBe("advanced");
+    expect(bandForRank("doctorate")).toBe("phd");
+    expect(Object.keys(RANK_TO_BAND).sort()).toEqual([...RANKS].sort());
   });
 
-  it("rootsFor resolves keys to full concept objects with a lower rank", () => {
-    const roots = rootsFor("math", "derivatives");
-    expect(roots.length).toBeGreaterThan(0);
-    for (const r of roots) {
-      expect(r.label).toBeTruthy();
-      expect(rankIdx(r.rank)).toBeLessThan(rankIdx("university"));
-    }
-    // unknown / elementary concept → []
-    expect(rootsFor("math", "counting_cardinality")).toEqual([]);
-    expect(rootsFor("math", "nonexistent_key")).toEqual([]);
+  it("defaults an unknown/prototype rank to intermediate", () => {
+    expect(bandForRank("bogus")).toBe("intermediate");
+    expect(bandForRank("__proto__")).toBe("intermediate");
+    expect(bandForRank(undefined)).toBe("intermediate");
   });
 });

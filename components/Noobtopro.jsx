@@ -343,6 +343,9 @@ export default function Noobtopro() {
   // "Regenerate" (session-only). And a flag for that regenerate request.
   const [learnQuestion, setLearnQuestion] = useState(null);
   const [learnRegen, setLearnRegen] = useState(false);
+  // The curriculum concept key currently generating an AI practice drill (increment 3) —
+  // drives the concept-page button's spinner; null when idle.
+  const [drillBusy, setDrillBusy] = useState(null);
 
   // Monotonic token so overlapping hydrate() calls (mount + onAuthStateChange
   // both fire on load) can't clobber each other: only the newest result wins.
@@ -921,6 +924,33 @@ export default function Noobtopro() {
     }
   }
 
+  // AI CONCEPT-PRACTICE DRILL (increment 3, RANKS_PLAN §12.3): from a Learn-tab concept
+  // page, generate a question TARGETING that curriculum concept and enter the practice
+  // flow with it. /api/generate validates the conceptKey against the curriculum, frames
+  // the question at the concept's rank, tags it with `conceptKey` + the rank band, and
+  // signs both into the token — so the graded attempt (signed-in via /api/score, guest
+  // via /api/grade) updates THIS concept's mastery coloring. `concept` is the full
+  // object { subject, key, label, rank, strand } from the concept page.
+  async function startConceptDrill(concept) {
+    if (!concept || !concept.subject || !concept.key) return;
+    const { subject, key } = concept;
+    setDrillBusy(key);
+    setError("");
+    try {
+      const data = await api("/api/generate", { kind: "practice", subject, conceptKey: key });
+      if (!data || typeof data.question !== "string" || !data.question.trim()) {
+        throw new Error("Could not generate a practice question. Please try again.");
+      }
+      // The server set difficulty (the rank band) + conceptKey; enter practice with the
+      // server-issued question verbatim (it carries the token the grader path needs).
+      startPracticeWithQuestion(subject, data);
+    } catch (e) {
+      setError(e.message || "Could not generate a practice question.");
+    } finally {
+      setDrillBusy(null);
+    }
+  }
+
   // Enter the practice flow with an ALREADY-KNOWN question (the cached "try this"
   // problem from a concept guide, or a regenerated one) — no /api/generate call,
   // so practicing a concept costs zero generation tokens. Grading is unchanged.
@@ -1283,23 +1313,7 @@ export default function Noobtopro() {
             onOverlayActiveChange={setOverlayActive}
           />
         ) : view === "learn" && scores ? (
-          <LearnTab
-            hubEnabled={HUB_ENABLED}
-            user={user}
-            isAdmin={isAdmin}
-            adminApi={authApi}
-            scores={scores}
-            active={learnConcept}
-            content={learnContent}
-            busy={learnBusy}
-            error={learnError}
-            question={learnQuestion}
-            regenerating={learnRegen}
-            onSelect={openLearn}
-            onPracticeQuestion={startPracticeWithQuestion}
-            onRegenerate={regenerateLearnQuestion}
-            onPractice={(s) => { setView("practice"); startPractice(s); }}
-          />
+          <LearnTab onPractice={startConceptDrill} busyConcept={drillBusy} />
         ) : (
           <>
             {/* INTRO */}
