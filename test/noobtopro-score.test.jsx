@@ -61,6 +61,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("Noobtopro — sidebar identity", () => {
+  it("shows the signed-in user's name, email, and overall rank in the sidebar", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonRes({ isAdmin: false })));
+    render(<Noobtopro />);
+    // Identity lives ONLY in the sidebar footer (the Dashboard bento has no
+    // identity bar): name + email + the rankFor(phdIndex) chip.
+    expect(await screen.findByText("u@example.com")).toBeTruthy();
+    // "U" appears as both the avatar-fallback initial and the name line.
+    expect(screen.getAllByText("U").length).toBeGreaterThan(0);
+    expect(screen.getByTitle("Your overall rank")).toBeTruthy();
+  });
+});
+
 describe("Noobtopro — signed-in practice is server-authoritative", () => {
   it("submits to /api/score with the Bearer token, renders the server's trusted result, and never calls /api/grade or saveProgress", async () => {
     const fetchMock = vi.fn(async (path) => {

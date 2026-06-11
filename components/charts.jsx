@@ -104,6 +104,86 @@ export function BarChart({ items }) {
   );
 }
 
+// Overlaid rank-distribution curves for the anonymous leaderboard: one smoothed
+// "bell" line per track (Overall in neutral ink + the three subjects in their
+// accent colors) over the five rank buckets, with a dot marking the caller's own
+// rank on each curve. The buckets are discrete, so each line is a Catmull-Rom
+// interpolation of 5 counts — a shape cue, not a continuous density estimate.
+// `tracks`: [{ key, label, color (CSS color, vars OK — applied via style),
+//             counts: number[5], you: { band } | null }]
+export function RankDistribution({ tracks, rankLabels = [] }) {
+  // Tight viewBox: this renders in a ~1/3-width card, so every extra unit of
+  // width scales the axis type down with the chart.
+  const W = 480, H = 230, padL = 14, padR = 14, padT = 14, padB = 32;
+  const innerW = W - padL - padR;
+  const innerH = H - padT - padB;
+  const baseline = padT + innerH;
+  const maxC = Math.max(1, ...tracks.flatMap((t) => (Array.isArray(t.counts) ? t.counts : [])));
+  const x = (i) => padL + (i / 4) * innerW;
+  const y = (c) => padT + innerH * (1 - Math.max(0, c) / maxC);
+  const clampY = (v) => Math.max(padT, Math.min(baseline, v));
+
+  // Catmull-Rom → cubic Bézier through the 5 bucket points (control-point Ys
+  // clamped so the curve can't dip below the zero baseline or above the box).
+  function curvePath(counts) {
+    const pts = [0, 1, 2, 3, 4].map((i) => [x(i), y(counts[i] || 0)]);
+    let d = `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[i - 1] || pts[i];
+      const p1 = pts[i];
+      const p2 = pts[i + 1];
+      const p3 = pts[i + 2] || p2;
+      const c1 = [p1[0] + (p2[0] - p0[0]) / 6, clampY(p1[1] + (p2[1] - p0[1]) / 6)];
+      const c2 = [p2[0] - (p3[0] - p1[0]) / 6, clampY(p2[1] - (p3[1] - p1[1]) / 6)];
+      d += ` C ${c1[0].toFixed(1)} ${c1[1].toFixed(1)}, ${c2[0].toFixed(1)} ${c2[1].toFixed(1)}, ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
+    }
+    return d;
+  }
+
+  // Text equivalent (the chart is decorative without it).
+  const summary = tracks
+    .map((t) => `${t.label}: ${(t.counts || []).map((c, i) => `${c || 0} ${rankLabels[i] || `tier ${i + 1}`}`).join(", ")}`)
+    .join("; ");
+
+  return (
+    <svg
+      className="np-chart"
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-label={`Rank distribution from ${rankLabels[0] || "lowest"} to ${rankLabels[4] || "highest"}. ${summary}.`}
+    >
+      <line x1={padL} x2={W - padR} y1={baseline} y2={baseline} style={{ stroke: "var(--line-strong)" }} strokeWidth="1" />
+      {rankLabels.map((name, i) => (
+        <text
+          key={name}
+          x={x(i)}
+          y={H - 10}
+          textAnchor={i === 0 ? "start" : i === 4 ? "end" : "middle"}
+          style={{ fill: "var(--muted)", fontFamily: "var(--mono)", fontSize: 14 }}
+        >
+          {name}
+        </text>
+      ))}
+      {tracks.map((t) => (
+        <g key={t.key}>
+          <path d={`${curvePath(t.counts)} L ${(W - padR).toFixed(1)} ${baseline} L ${padL} ${baseline} Z`} style={{ fill: t.color }} opacity="0.07" stroke="none" />
+          <path d={curvePath(t.counts)} fill="none" style={{ stroke: t.color }} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+          {t.you && Number.isInteger(t.you.band) && (
+            <circle
+              cx={x(t.you.band)}
+              cy={y((t.counts || [])[t.you.band] || 0)}
+              r="4"
+              style={{ fill: t.color, stroke: "var(--panel)" }}
+              strokeWidth="2"
+            />
+          )}
+        </g>
+      ))}
+    </svg>
+  );
+}
+
 export function MiniBar({ value, color, max = 350 }) {
   // `value` rides the 0–350 subject-score scale; normalize to a CSS percent.
   return (
@@ -118,12 +198,13 @@ export function MiniBar({ value, color, max = 350 }) {
 // subject so the learner compares their reasoning profile across subjects.
 export function RadarChart({ subjects }) {
   // Sized for the 9 reasoning axes. The label ring sits well outside the data ring
-  // (1.38·R ≈ 40px clear) and each label is anchored AND baselined per quadrant, so
-  // the spoke names never collide with the plotted polygons (the old 1.26·R + a
-  // single horizontal anchor let high-value vertices crowd the text).
-  const W = 660, H = 410;
-  const cx = W / 2, cy = H / 2, R = 104;
-  const LABEL_R = 1.38; // label ring radius as a multiple of R
+  // (1.55·R ≈ 53px clear) and each label is anchored AND baselined per quadrant, so
+  // the spoke names never read as touching the plotted polygons. The viewBox hugs
+  // the content (490×400) — a wider box would scale the whole chart (and its label
+  // type) down when the card is narrow.
+  const W = 490, H = 400;
+  const cx = W / 2, cy = H / 2, R = 96;
+  const LABEL_R = 1.55; // label ring radius as a multiple of R
   const axes = RUBRIC_KEYS;
   const N = axes.length;
   const angleFor = (i) => -Math.PI / 2 + (i * 2 * Math.PI) / N; // first axis at the top

@@ -42,8 +42,15 @@ function statCard(label) {
 }
 
 describe("Dashboard — signed-in identity + KPIs + by-subject", () => {
-  it("shows the user's name and email", () => {
+  it("does NOT duplicate identity in the bento (it lives in the app sidebar); the not-ranked empty state still shows it", () => {
+    // Ranked: the bento's top row is purely KPIs — no name/email bar.
     render(<Dashboard user={user} scores={scores} history={history} onPractice={() => {}} />);
+    expect(screen.queryByText("Ada Lovelace")).toBe(null);
+    expect(screen.queryByText("ada@example.com")).toBe(null);
+    cleanup();
+    // Not ranked yet: there's no sidebar context worth scanning, so the empty
+    // state keeps the identity card.
+    render(<Dashboard user={user} scores={null} history={[]} onPractice={() => {}} />);
     expect(screen.getByText("Ada Lovelace")).toBeTruthy();
     expect(screen.getByText("ada@example.com")).toBeTruthy();
   });
@@ -67,9 +74,9 @@ describe("Dashboard — signed-in identity + KPIs + by-subject", () => {
     expect(screen.getByText("Chemistry")).toBeTruthy();
   });
 
-  it("shows an overall rank chip from the PhD index", () => {
+  it("shows per-subject rank band chips (the overall rank chip moved to the sidebar identity)", () => {
     render(<Dashboard user={user} scores={scores} history={history} onPractice={() => {}} />);
-    // rankFor(105) → "Middle" band name in the identity chip (plus the by-subject chips).
+    // physics 105 → "Middle" on its by-subject band chip.
     expect(screen.getAllByText(/Middle/i).length).toBeGreaterThan(0);
   });
 });

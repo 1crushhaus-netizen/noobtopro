@@ -189,6 +189,7 @@ body {
 .np-side .np-nav { order: 3; width: 100%; }
 .np-side-foot { order: 2; margin-left: auto; display: flex; align-items: center; gap: 10px; }
 .np-side-user { display: none; }
+.np-side-id { display: none; }
 
 @media (min-width: 1024px) {
   .np-side {
@@ -211,8 +212,15 @@ body {
   .np-side-user {
     display: block; font-size: 12px; color: var(--faint);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    padding: 0 2px;
+    padding: 0;
   }
+  /* Signed-in identity block (avatar + name + email + rank chip) — identity's
+     single home; the Dashboard bento carries no identity bar. */
+  .np-side-id { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 0 2px 2px; }
+  .np-side-avatar { width: 30px; height: 30px; font-size: 13px; }
+  .np-side-idtext { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .np-side-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .np-side-rank { font-size: 10px; padding: 2px 8px; flex: none; }
   .np-frame--side { margin-left: var(--w-side); }
 }
 
@@ -427,6 +435,10 @@ body {
 .np-emptytitle { font-family: var(--display); font-size: 18px; font-weight: 600; margin: 0 0 8px; }
 .np-chartsub { font-size: 13px; color: var(--muted); margin-bottom: 14px; }
 .np-chart { width: 100%; height: auto; display: block; }
+/* Chart legend (leaderboard rank-distribution curves) */
+.np-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 10px; }
+.np-legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.np-legend-swatch { width: 14px; height: 2px; border-radius: 1px; flex: none; }
 .np-subjectglyph { font-family: var(--mono); }
 .np-empty { text-align: center; padding: 48px 24px; color: var(--muted); }
 .np-empty .np-question { color: var(--text); margin-bottom: 14px; }
@@ -621,9 +633,10 @@ body {
 .np-dash-identity .np-profilename { font-size: 14px; line-height: 1.25; }
 .np-dash-identity .np-profileemail { font-size: 12px; line-height: 1.25; }
 .np-dash-rankchip { font-family: var(--mono); font-size: 12px; letter-spacing: .02em; color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-pill); padding: 4px 12px; white-space: nowrap; background: var(--tint-1); }
-.np-dash-kpis { grid-column: span 4; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-.np-dash-kpis .np-statcard { padding: 10px 14px; gap: 2px; justify-content: center; }
-.np-dash-kpis .np-statnum { font-size: 22px; }
+/* Row 1 is purely the KPI cluster (identity lives in the sidebar). */
+.np-dash-kpis { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.np-dash-kpis .np-statcard { padding: 12px 16px; gap: 2px; justify-content: center; }
+.np-dash-kpis .np-statnum { font-size: 24px; }
 /* Row 2 splits into equal thirds: the sidebar narrowed the grid vs the old
    tab layout, and at span-3 the text-dense "By subject" gate lines wrapped to
    three lines each — overflowing the height-locked track. */
@@ -697,7 +710,6 @@ body {
     align-items: stretch;
     overflow: hidden;
   }
-  .np-dash-frame .np-dash-identity { grid-row: 1; }
   .np-dash-frame .np-dash-kpis     { grid-row: 1; }
   .np-dash-frame .np-dash-radar    { grid-row: 2; min-height: 0; }
   .np-dash-frame .np-dash-mid      { grid-row: 2; min-height: 0; }
@@ -751,7 +763,11 @@ body {
   .np-dash-frame .np-dash-cardbody::-webkit-scrollbar { width: 8px; }
   .np-dash-frame .np-dash-cardbody::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 4px; }
 
-  .np-dash-frame .np-dash-radar .np-chart { max-height: 380px; }
+  /* Radar: the chart SHRINKS into whatever height is left so the focus rows
+     ("Weakest: …") stay pinned and always visible — no internal scroll here. */
+  .np-dash-frame .np-dash-radarchart { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; }
+  .np-dash-frame .np-dash-radarchart .np-chart { width: 100%; height: 100%; max-height: 300px; }
+  .np-dash-frame .np-dash-radar .np-dash-focus { flex: 0 0 auto; }
 
   .np-dash-frame .np-dash-actions { padding-top: 12px; border-top: 1px solid var(--line); }
   .np-dash-frame .np-dash-actbtn { min-height: 44px; }
