@@ -172,7 +172,11 @@ describe("db/schema.sql — audit-hardening invariants", () => {
   });
 
   it("revokes default client DML on the concept-hub / internal tables (keeps public SELECT + report INSERT)", () => {
-    expect(schema).toMatch(/revoke insert, update, delete, truncate on public\.diagnostic_pool, public\.security_events from anon, authenticated/);
+    expect(schema).toMatch(/revoke insert, update, delete, truncate on public\.security_events from anon, authenticated/);
+    // 0013: diagnostic_pool + try_add_diagnostic were DROPPED (superseded by the
+    // curated lib/diagnosticBank.js) — the schema must not resurrect them.
+    expect(schema).not.toMatch(/create table if not exists public\.diagnostic_pool/);
+    expect(schema).not.toMatch(/create or replace function public\.try_add_diagnostic/);
     expect(schema).toMatch(/revoke insert, update, delete, truncate on public\.concept_guides, public\.concept_topics from anon, authenticated/);
     // 0011 (audit P2-8): the direct INSERT is revoked from EVERYONE — reports go
     // through the rate-bounded submit_concept_report RPC only.

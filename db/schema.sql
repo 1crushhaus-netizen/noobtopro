@@ -4,12 +4,11 @@
 -- This is the full DDL applied to the Supabase project (via the connector /
 -- migrations). It is committed so the database is reproducible from version
 -- control. The app depends on exactly these tables AND on the RPCs below —
--- migrate_guest_data, delete_user_data (called by lib/store.js), save_progress_for
--- (service-role only; called by /api/score for server-authoritative scoring)
--- and try_add_diagnostic (called by the /api/generate server route) — so
--- provisioning the tables alone is NOT enough; the functions must exist or sign-in
--- migration, "Reset my progress", the practice/diagnostic write path, and the
--- diagnostic-pool fill will fail at runtime.
+-- migrate_guest_data, delete_user_data (called by lib/store.js) and
+-- save_progress_for (service-role only; called by /api/score for
+-- server-authoritative scoring) — so provisioning the tables alone is NOT
+-- enough; the functions must exist or sign-in migration, "Reset my progress",
+-- and the practice/diagnostic write path will fail at runtime.
 --
 -- Apply in order. Safe to re-run (idempotent where practical).
 -- ===========================================================================
@@ -861,45 +860,16 @@ $$;
 revoke all on function public.dedupe_pending_stubs() from public, anon, authenticated;
 grant execute on function public.dedupe_pending_stubs() to service_role;
 
--- ---- shared diagnostic pool ------------------------------------------------
--- The diagnostic is a static, level-neutral baseline (no per-user input), so it
--- is safe to standardize across users — same philosophy as concept_guides. We
--- pool a handful of full 3-subject sets, then /api/generate serves them at random
--- with NO Groq call; below DIAG_POOL_TARGET the pool self-fills. INTERNAL table:
--- RLS on, NO policies (service-role only). If SUPABASE_SERVICE_ROLE_KEY is unset,
--- pooling is skipped and the diagnostic is generated fresh each time (still works).
-create table if not exists public.diagnostic_pool (
-  id bigint generated always as identity primary key,
-  content jsonb not null,                 -- a full {questions:[{subject,topic,question}x3]} set
-  created_at timestamptz not null default now()
-);
-alter table public.diagnostic_pool enable row level security;
-
--- Atomic, advisory-locked, count-gated pool insert. Concurrent cold-start fills
--- would otherwise each read count < target and all insert (TOCTOU -> overshoot);
--- serializing on one advisory lock and re-checking the count inside the same
--- statement caps the pool at p_target exactly. SECURITY DEFINER + service-role-only
--- (the table has no RLS policies; only the server's admin client calls this).
-create or replace function public.try_add_diagnostic(p_content jsonb, p_target int default 12)
-returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  perform pg_advisory_xact_lock(hashtext('diagnostic_pool_fill'));
-  if (select count(*) from public.diagnostic_pool) < greatest(coalesce(p_target, 0), 0) then
-    insert into public.diagnostic_pool (content) values (p_content);
-  end if;
-end;
-$$;
-revoke all on function public.try_add_diagnostic(jsonb, int) from public, anon, authenticated;
-grant execute on function public.try_add_diagnostic(jsonb, int) to service_role;
+-- ---- shared diagnostic pool — DROPPED (0013) --------------------------------
+-- diagnostic_pool + try_add_diagnostic once pooled generated 3-subject sets so
+-- /api/generate could serve diagnostics without a Groq call. Superseded by the
+-- CURATED in-repo bank (lib/diagnosticBank.js — zero Groq, fully standardized);
+-- the drained table and its filler RPC were dropped in 0013_drop_diagnostic_pool.
 
 -- ---- admin / abuse monitoring ----------------------------------------------
 -- security_events: server-logged warnings surfaced in the admin dashboard
 -- (prompt-injection attempts, rate-limit/abuse spikes, user reports). INTERNAL:
--- RLS on, NO policy (service-role only — same lock as diagnostic_pool). NEVER
+-- RLS on, NO policy (service-role only — same lock as rate_limits). NEVER
 -- written by the browser; the server logs it via the service-role admin client.
 create table if not exists public.security_events (
   id bigint generated always as identity primary key,
@@ -1008,7 +978,7 @@ grant execute on function public.submit_concept_report(text, text, text) to auth
 -- holds even if a policy is later added by mistake. All legitimate writes to these
 -- tables go through SECURITY DEFINER RPCs / the service-role admin client.
 --   - internal (RLS on, no policy): no browser write at all.
-revoke insert, update, delete, truncate on public.diagnostic_pool, public.security_events from anon, authenticated;
+revoke insert, update, delete, truncate on public.security_events from anon, authenticated;
 --   - public-read content (writes service-role only): keep SELECT, drop writes.
 revoke insert, update, delete, truncate on public.concept_guides, public.concept_topics from anon, authenticated;
 --   - concept_reports: writes go ONLY through submit_concept_report (0011) — the
@@ -1085,7 +1055,7 @@ grant execute on function public.rate_limit_hit(text, int, int) to service_role;
 -- calibrated per BUCKET — (subject, taxonomy-topic-slug, band) — because questions are
 -- generated fresh (no stable per-question id). /api/score reads the bucket difficulty,
 -- computes the Elo update server-side, and nudges the bucket via bump_item_difficulty.
--- INTERNAL: RLS on, NO policy (service-role only — same lock as diagnostic_pool /
+-- INTERNAL: RLS on, NO policy (service-role only — same lock as
 -- rate_limits / security_events; produces the accepted INFO rls_enabled_no_policy
 -- advisor). NEVER browser-read/written; holds NO per-user data.
 create table if not exists public.item_difficulty (
