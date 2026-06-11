@@ -22,6 +22,7 @@ import SignIn from "@/components/SignIn";
 import LearnTab from "@/components/LearnTab";
 import AdminDashboard from "@/components/AdminDashboard";
 import ScoreBreakdown, { ErrorList, hasReasoningError } from "@/components/ScoreBreakdown";
+import ThemeToggle from "@/components/ThemeToggle";
 import { SubjectGlyph, deltaColor } from "@/components/ui";
 
 /* ----------------------------- helpers ----------------------------- */
@@ -191,7 +192,9 @@ function Ring({ value, color, size = 96, stroke = 9, label }) {
       role="img"
       aria-label={`${label ? `${label}: ` : ""}Score ${Math.round(Math.max(0, Math.min(350, value)))} of 350`}
     >
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,.09)" strokeWidth={stroke} />
+      {/* Track + value strokes go through `style` (not presentation attributes) so
+          theme tokens resolve and the ring stays legible on both themes. */}
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" style={{ stroke: "var(--line-strong)" }} strokeWidth={stroke} />
       <circle
         cx={size / 2}
         cy={size / 2}
@@ -254,7 +257,7 @@ function AnswerComposer({ value, onText, img, onAttach, onRemoveImg, onSubmit, o
           <button className="np-iconbtn" onClick={onRemoveImg} aria-label="remove image"><Icon name="x" size={15} /></button>
         </div>
       )}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "10px 12px", borderTop: "1px solid var(--line)", background: "rgba(255,255,255,.015)", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "10px 12px", borderTop: "1px solid var(--line)", background: "var(--tint-1)", flexWrap: "wrap" }}>
         <button className="np-ghost" onClick={() => fileRef.current && fileRef.current.click()}><Icon name="clip" size={15} /> Attach your work</button>
         <input
           ref={fileRef}
@@ -1206,11 +1209,16 @@ export default function Noobtopro() {
   const bgInert = (showSaveModal && !user) || overlayActive ? true : undefined;
 
   /* ----------------------------- render ----------------------------- */
+  // App chrome: the sidebar (nav + account + theme) renders whenever the tabs
+  // used to — once there's progress or a session, outside the sign-in screen.
+  // Chrome-less stages (intro / sign-in) keep a minimal centered header instead.
+  const chrome = (user || scores) && stage !== "signin";
   // np-shell--dash (the viewport-tall height-lock) applies only to the ranked bento
   // grid; the not-ranked empty state keeps normal page scroll so a short viewport
   // can't clip its "Prove it" CTA.
+  const dashLock = view === "dashboard" && user && scores;
   return (
-    <div className={"np-shell" + (view === "dashboard" && user && scores ? " np-shell--dash" : "")}>
+    <div className="np-root">
       {showSaveModal && !user && (
         <div className="np-modal-backdrop" onClick={() => setShowSaveModal(false)}>
           <div
@@ -1248,50 +1256,79 @@ export default function Noobtopro() {
         </div>
       )}
 
-      <header className={"np-top" + (view === "dashboard" && user ? " np-top--wide" : "")} inert={bgInert}>
-        <button className="np-brand" onClick={reset} title="Restart">
-          noob<span className="np-arrow">→</span>topro
-        </button>
-        <span className="np-tag">prove what you know</span>
-        <div className="np-signin">
-          {user ? (
-            <button className="np-signinbtn" onClick={handleSignOut} title={user.email || ""}>
-              <Icon name="logout" size={16} /> Sign out
+      {chrome && (
+        <aside className="np-side" inert={bgInert}>
+          <button className="np-brand" onClick={reset} title="Restart">
+            noob<span className="np-arrow">→</span>topro
+          </button>
+          <nav className="np-nav" aria-label="Primary">
+            <button className={"np-tab" + (view === "practice" ? " active" : "")} onClick={() => setView("practice")}>
+              <Icon name="target" size={16} /> Practice
             </button>
-          ) : (
-            // Guests on the intro see Sign in beside the primary CTA instead, so the
-            // top-right button is hidden there to avoid two sign-in buttons.
-            stage !== "intro" && (
-              isSupabaseConfigured ? (
-                <button className="np-signinbtn" onClick={openSignIn}>
-                  <Icon name="login" size={16} /> Sign in
-                </button>
-              ) : (
-                <button className="np-signinbtn" onClick={() => setShowAuthNote(true)}>
-                  <Icon name="login" size={16} /> Sign in
-                </button>
-              )
-            )
-          )}
-        </div>
-      </header>
-
-      {(user || scores) && stage !== "signin" && (
-        <nav className={"np-nav" + (view === "dashboard" && user ? " np-nav--wide" : "")} inert={bgInert}>
-          <button className={"np-tab" + (view === "practice" ? " active" : "")} onClick={() => setView("practice")}>Practice</button>
-          {scores && (
-            <button className={"np-tab" + (view === "learn" ? " active" : "")} onClick={() => setView("learn")}>Learn</button>
-          )}
-          {/* One merged Dashboard tab (was Progress + Profile). Shown whenever the
-              nav shows; a guest who clicks it gets the sign-in gate. */}
-          <button className={"np-tab" + (view === "dashboard" ? " active" : "")} onClick={() => setView("dashboard")}>Dashboard</button>
-          {user && isAdmin && (
-            <button className={"np-tab" + (view === "admin" ? " active" : "")} onClick={() => setView("admin")}>Admin</button>
-          )}
-        </nav>
+            {scores && (
+              <button className={"np-tab" + (view === "learn" ? " active" : "")} onClick={() => setView("learn")}>
+                <Icon name="book" size={16} /> Learn
+              </button>
+            )}
+            {/* One merged Dashboard tab (was Progress + Profile). Shown whenever the
+                nav shows; a guest who clicks it gets the sign-in gate. */}
+            <button className={"np-tab" + (view === "dashboard" ? " active" : "")} onClick={() => setView("dashboard")}>
+              <Icon name="grid" size={16} /> Dashboard
+            </button>
+            {user && isAdmin && (
+              <button className={"np-tab" + (view === "admin" ? " active" : "")} onClick={() => setView("admin")}>
+                <Icon name="shield" size={16} /> Admin
+              </button>
+            )}
+          </nav>
+          <div className="np-side-foot">
+            <ThemeToggle />
+            {user ? (
+              <button className="np-signinbtn" onClick={handleSignOut} title={user.email || ""}>
+                <Icon name="logout" size={16} /> Sign out
+              </button>
+            ) : (
+              <button
+                className="np-signinbtn"
+                onClick={() => (isSupabaseConfigured ? openSignIn() : setShowAuthNote(true))}
+              >
+                <Icon name="login" size={16} /> Sign in
+              </button>
+            )}
+            {user && user.email && <span className="np-side-user">{user.email}</span>}
+          </div>
+        </aside>
       )}
 
-      <main className={"np-main" + (view === "dashboard" && user ? " np-main--wide" : "")} inert={bgInert}>
+      <div className={"np-frame" + (chrome ? " np-frame--side" : "")} inert={bgInert}>
+        <div className={"np-shell" + (dashLock ? " np-shell--dash" : "")}>
+          {!chrome && (
+            <header className="np-top">
+              <button className="np-brand" onClick={reset} title="Restart">
+                noob<span className="np-arrow">→</span>topro
+              </button>
+              <span className="np-tag">prove what you know</span>
+              <div className="np-signin">
+                <ThemeToggle />
+                {/* Guests on the intro see Sign in beside the primary CTA instead, so
+                    the top-right button is hidden there to avoid two sign-in buttons
+                    (and the sign-in screen needs no second entry point). */}
+                {!user && stage !== "intro" && stage !== "signin" && (
+                  isSupabaseConfigured ? (
+                    <button className="np-signinbtn" onClick={openSignIn}>
+                      <Icon name="login" size={16} /> Sign in
+                    </button>
+                  ) : (
+                    <button className="np-signinbtn" onClick={() => setShowAuthNote(true)}>
+                      <Icon name="login" size={16} /> Sign in
+                    </button>
+                  )
+                )}
+              </div>
+            </header>
+          )}
+
+          <main className={"np-main" + (view === "dashboard" && user ? " np-main--wide" : "")}>
         {showAuthNote && (
           <div className="np-banner fade-up">
             <span>Google sign-in runs through Supabase. Add your Supabase URL + anon key and enable the Google provider by following the README ("Supabase setup"). The app works fully as a guest in the meantime.</span>
@@ -1365,7 +1402,7 @@ export default function Noobtopro() {
                 </div>
                 <div className="np-subjectrow">
                   {ORDER.map((k) => (
-                    <span key={k} className="np-chip" style={{ borderColor: SUBJECTS[k].color }}>
+                    <span key={k} className="np-chip">
                       <SubjectGlyph subject={k} /> {SUBJECTS[k].label}
                     </span>
                   ))}
@@ -1398,7 +1435,7 @@ export default function Noobtopro() {
                   {ORDER.map((s) => (
                     <div key={s} className="np-diag-proggroup">
                       {Array.from({ length: curQ.stepsTotal || 4 }, (_, di) => (
-                        <div key={di} className="np-progdot" style={{ background: di < (diagAnswered[s] || 0) ? SUBJECTS[s].color : "rgba(255,255,255,.12)" }} />
+                        <div key={di} className="np-progdot" style={{ background: di < (diagAnswered[s] || 0) ? SUBJECTS[s].color : "var(--tint-2)" }} />
                       ))}
                     </div>
                   ))}
@@ -1647,9 +1684,13 @@ export default function Noobtopro() {
             )}
           </>
         )}
-      </main>
+          </main>
 
-      <footer className={"np-foot" + (view === "dashboard" && user ? " np-foot--wide" : "")} inert={bgInert}>Prototype · grading is performed live by Groq against a reasoning rubric. Scores are demonstrative.</footer>
+          <footer className={"np-foot" + (view === "dashboard" && user ? " np-foot--wide" : "")}>
+            © {new Date().getFullYear()} noobtopro · your reasoning is graded by AI against a nine-axis rubric
+          </footer>
+        </div>
+      </div>
     </div>
   );
 }

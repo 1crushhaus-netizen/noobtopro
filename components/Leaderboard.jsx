@@ -3,10 +3,17 @@
 import React, { useState, useEffect } from "react";
 import { SUBJECTS, ORDER, RANKS } from "@/lib/scoring";
 
-// Cohesive low→high colour ramp for the 5 rank tiers (Elementary → Doctorate).
-// The top three reuse the subject palette (single source, lib/scoring.js); the two
-// low tiers are neutral grays. Hex (not var()) so it also works if read into SVG.
-const TIER_COLORS = ["#5a6472", "#7a8494", SUBJECTS.physics.color, SUBJECTS.math.color, SUBJECTS.chemistry.color];
+// Low→high NEUTRAL ramp for the 5 rank tiers (Elementary → Doctorate). Rank is not
+// a subject and not a valence, so under the greyscale system the tiers carry no
+// chromatic accent — subject colors appear only on the subject glyphs. The hexes
+// are deliberately theme-stable mid-tone greys (a fill ramp that reads low→high on
+// BOTH the true-black and the pure-white page); because the fills never change
+// with the theme, each segment pairs a fixed count-text color below rather than
+// var(--text-inverse) (which flips with the theme and would go illegible on one).
+const TIER_COLORS = ["#5c5c5c", "#6e6e6e", "#828282", "#969696", "#ababab"];
+// Per-segment count text: white on the two darkest fills, near-black on the three
+// lightest — every pairing stays ≥4.5:1 in both themes (the fills are theme-stable).
+const TIER_TEXT = ["#ffffff", "#ffffff", "#111111", "#111111", "#111111"];
 
 // One track's anonymous tier distribution: a 5-segment bar (segment width ∝ how many
 // ranked learners sit in that rank) with the caller's own tier outlined, plus a caption
@@ -29,7 +36,7 @@ function TierRow({ label, glyph, color, track }) {
           {total} ranked
         </span>
       </div>
-      <div style={{ display: "flex", gap: 3, height: 26, borderRadius: 6, overflow: "hidden" }} role="img"
+      <div style={{ display: "flex", gap: 3, height: 26, borderRadius: "var(--radius-inset)", overflow: "hidden" }} role="img"
         aria-label={`${label} rank distribution: ${RANKS.map((n, i) => `${counts[i] || 0} ${n}`).join(", ")}.${you ? ` You are ${RANKS[youBand]}.` : ""}`}>
         {RANKS.map((name, i) => {
           const c = counts[i] || 0;
@@ -43,14 +50,17 @@ function TierRow({ label, glyph, color, track }) {
               style={{
                 flex,
                 background: TIER_COLORS[i],
-                opacity: c > 0 ? 0.9 : 0.18,
+                // Full-opacity fills keep the fixed TIER_TEXT pairing legible in both
+                // themes (opacity would blend the fill toward the page color); empty
+                // tiers fade to a faint sliver (no text inside, so blending is fine).
+                opacity: c > 0 ? 1 : 0.18,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 fontFamily: "var(--mono)",
                 fontSize: 11,
                 fontWeight: 700,
-                color: "var(--text-inverse)",
+                color: TIER_TEXT[i],
                 outline: isYou ? "2px solid var(--text)" : "none",
                 outlineOffset: -2,
               }}
@@ -63,7 +73,9 @@ function TierRow({ label, glyph, color, track }) {
       <div className="np-statsub" style={{ marginTop: 5 }}>
         {you ? (
           <>
-            You're <strong style={{ color: TIER_COLORS[youBand] }}>{RANKS[youBand]}</strong>
+            {/* Plain ink emphasis — the mid-grey tier fills are bar colors, not text
+                colors (the lowest greys fail contrast as text on the page). */}
+            You're <strong style={{ color: "var(--text)" }}>{RANKS[youBand]}</strong>
             {topPct != null ? <> — top {topPct}%</> : null}
           </>
         ) : (
@@ -123,7 +135,8 @@ export default function Leaderboard({ loadLeaderboard, scrollRegion }) {
           <p className="np-statsub">{error}</p>
         ) : tiers ? (
           <>
-            <TierRow label="Overall" color="var(--math)" track={tiers.overall} />
+            {/* Overall is cross-subject → no glyph and no subject color. */}
+            <TierRow label="Overall" track={tiers.overall} />
             {ORDER.map((k) => (
               <TierRow key={k} label={SUBJECTS[k].label} glyph={SUBJECTS[k].glyph} color={SUBJECTS[k].color} track={tiers[k]} />
             ))}

@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { SUBJECTS, RUBRIC_KEYS, RUBRIC_LABELS, RUBRIC_SHORT, RUBRIC_MAX } from "@/lib/scoring";
+import { RUBRIC_KEYS, RUBRIC_LABELS, RUBRIC_SHORT, RUBRIC_MAX } from "@/lib/scoring";
 
 /* ----------------------------------------------------------------------------
    Dependency-free inline-SVG charting shared by the Dashboard grid (radar +
@@ -9,9 +9,18 @@ import { SUBJECTS, RUBRIC_KEYS, RUBRIC_LABELS, RUBRIC_SHORT, RUBRIC_MAX } from "
    verbatim from the former ProgressDashboard so both surfaces reuse one set of
    primitives. Each chart carries a data-encoding aria-label (the SVG is otherwise
    decorative for screen-reader users).
+
+   Color policy: CSS custom properties do NOT resolve in SVG *presentation
+   attributes* (stroke="var(--x)" silently fails), so every THEME-DEPENDENT color
+   (grid hairlines → --line/--line-strong, labels → --muted, point cores → --bg)
+   goes through the `style` prop, where var() does resolve. Only the theme-stable
+   SUBJECTS hex literals (lib/scoring.js) stay as plain attributes.
 ---------------------------------------------------------------------------- */
 
-export function LineChart({ values, yMax = 1050, color = SUBJECTS.math.color }) {
+// `color` may be a CSS var() (it's applied via style, not attributes); the
+// default is the neutral ink — the total-points trend is a cross-subject
+// aggregate, so it carries no subject accent.
+export function LineChart({ values, yMax = 1050, color = "var(--text)" }) {
   const W = 620, H = 200, padL = 36, padR = 14, padT = 16, padB = 22;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
@@ -33,16 +42,16 @@ export function LineChart({ values, yMax = 1050, color = SUBJECTS.math.color }) 
     >
       {grid.map((g, i) => (
         <g key={i}>
-          <line x1={padL} x2={W - padR} y1={y(g)} y2={y(g)} stroke="rgba(255,255,255,.07)" strokeWidth="1" />
-          <text x={padL - 8} y={y(g)} dominantBaseline="central" textAnchor="end" fill="var(--muted)" style={{ fontFamily: "var(--mono)", fontSize: 13 }}>
+          <line x1={padL} x2={W - padR} y1={y(g)} y2={y(g)} style={{ stroke: "var(--line)" }} strokeWidth="1" />
+          <text x={padL - 8} y={y(g)} dominantBaseline="central" textAnchor="end" style={{ fill: "var(--muted)", fontFamily: "var(--mono)", fontSize: 13 }}>
             {Math.round(g)}
           </text>
         </g>
       ))}
-      <path d={area} fill={color} opacity="0.12" />
-      <path d={line} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+      <path d={area} style={{ fill: color }} opacity="0.12" />
+      <path d={line} fill="none" style={{ stroke: color }} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
       {pts.map((p, i) => (
-        <circle key={i} cx={p.x} cy={p.y} r="3.5" fill="var(--bg)" stroke={color} strokeWidth="2" />
+        <circle key={i} cx={p.x} cy={p.y} r="3.5" style={{ fill: "var(--bg)", stroke: color }} strokeWidth="2" />
       ))}
     </svg>
   );
@@ -70,19 +79,22 @@ export function BarChart({ items }) {
       role="img"
       aria-label={`Points gained or lost across ${items.length} graded attempts.`}
     >
-      <line x1={padL} x2={W - padR} y1={zeroY} y2={zeroY} stroke="rgba(255,255,255,.18)" strokeWidth="1" />
+      <line x1={padL} x2={W - padR} y1={zeroY} y2={zeroY} style={{ stroke: "var(--line-strong)" }} strokeWidth="1" />
       {items.map((d, i) => {
         const cx = padL + slot * (i + 0.5);
         const top = d.value >= 0 ? y(d.value) : zeroY;
         const h = Math.max(2, Math.abs(zeroY - y(d.value)));
-        const fill = d.value >= 0 ? SUBJECTS.physics.color : SUBJECTS.chemistry.color;
+        // Delta VALENCE (not subject identity): gain = --phys, loss = --danger —
+        // the same convention as ui.jsx deltaColor. Set via style so the danger
+        // token (which differs per theme) resolves and flips with the theme.
+        const fill = d.value >= 0 ? "var(--phys)" : "var(--danger)";
         return (
           <g key={i}>
-            <rect x={cx - bw / 2} y={top} width={bw} height={h} rx="3" fill={fill} opacity="0.9" />
-            <text x={cx} y={d.value >= 0 ? top - 6 : top + h + 13} textAnchor="middle" fill={fill} style={{ fontFamily: "var(--mono)", fontSize: 13, fontWeight: 700 }}>
+            <rect x={cx - bw / 2} y={top} width={bw} height={h} rx="3" style={{ fill }} opacity="0.9" />
+            <text x={cx} y={d.value >= 0 ? top - 6 : top + h + 13} textAnchor="middle" style={{ fill, fontFamily: "var(--mono)", fontSize: 13, fontWeight: 700 }}>
               {d.value > 0 ? "+" : ""}{d.value}
             </text>
-            <text x={cx} y={H - 8} textAnchor="middle" fill="var(--muted)" style={{ fontFamily: "var(--mono)", fontSize: 13 }}>
+            <text x={cx} y={H - 8} textAnchor="middle" style={{ fill: "var(--muted)", fontFamily: "var(--mono)", fontSize: 13 }}>
               {d.glyph}
             </text>
           </g>
@@ -143,7 +155,7 @@ export function RadarChart({ subjects }) {
         .join(", ")}. ${summary}.`}
     >
       {[1, 2, 3, 4].map((lvl) => (
-        <polygon key={lvl} points={ringPolygon(lvl / RUBRIC_MAX)} fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="1" />
+        <polygon key={lvl} points={ringPolygon(lvl / RUBRIC_MAX)} fill="none" style={{ stroke: "var(--line)" }} strokeWidth="1" />
       ))}
       {axes.map((k, i) => {
         const [ex, ey] = coord(i, 1);
@@ -158,10 +170,10 @@ export function RadarChart({ subjects }) {
         const dy = sin < -0.5 ? -7 : sin > 0.5 ? 7 : 0; // SVG y grows down: sin<0 = top half
         return (
           <g key={k}>
-            <line x1={cx} y1={cy} x2={ex} y2={ey} stroke="rgba(255,255,255,.10)" strokeWidth="1" />
+            <line x1={cx} y1={cy} x2={ex} y2={ey} style={{ stroke: "var(--line)" }} strokeWidth="1" />
             {/* Abbreviated spoke label (full names live in the breakdown panel + the
                 accessible text summary below), so 9 axes stay legible. */}
-            <text x={lx} y={ly + dy} textAnchor={anchor} dominantBaseline="central" fill="var(--muted)" style={{ fontFamily: "var(--ui)", fontSize: 16, fontWeight: 500 }}>
+            <text x={lx} y={ly + dy} textAnchor={anchor} dominantBaseline="central" style={{ fill: "var(--muted)", fontFamily: "var(--ui)", fontSize: 16, fontWeight: 500 }}>
               {RUBRIC_SHORT[k] || RUBRIC_LABELS[k]}
             </text>
           </g>

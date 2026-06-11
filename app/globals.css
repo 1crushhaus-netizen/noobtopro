@@ -1,46 +1,76 @@
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import "tailwindcss";
+
+/* =============================================================================
+   noobtopro design system — greyscale, true-black dark (default) + pure-white
+   light, switched via [data-theme] on <html> (set pre-paint by the inline
+   script in app/layout.js, so there is no flash of the wrong theme).
+
+   Architecture:
+   - Semantic tokens live on :root (dark) and are overridden by
+     [data-theme="light"]. Every component class and inline style reads ONLY
+     these tokens — never a raw hex — so both themes stay in lockstep.
+   - Tailwind v4 supplies utilities (mapped onto the same tokens via @theme
+     inline below); the `.np-*` component layer carries the shared recipes the
+     markup and the test suite depend on.
+   - Fonts are Geist Sans/Mono, self-hosted through next/font (the `geist`
+     package); the CSS variables --font-geist-* are set on <html> in layout.js.
+   - Color policy: the UI is strictly greyscale. The ONLY chromatic tokens are
+     the desaturated subject accents (--math/--phys/--chem) and the semantic
+     valence set (--danger/success/warn), used solely where color carries
+     meaning: charts, mastery/valence indicators, destructive actions.
+   ========================================================================== */
 
 :root {
-  --bg: #0a0d13;
-  --panel: #12161f;
-  --panel2: #161b26;
-  --line: rgba(255, 255, 255, .085);
-  --line-strong: rgba(255, 255, 255, .18);
-  --text: #ECECE4;
-  --text-inverse: #0a0d13;       /* text on light fills (mirrors --bg) */
-  --muted: #94a0b3;
-  --math: #F2B441;
-  --phys: #5BD6C4;
-  --chem: #FF7E74;
-  --display: 'Fraunces', Georgia, serif;
-  --ui: 'Hanken Grotesk', system-ui, sans-serif;
-  --mono: 'JetBrains Mono', monospace;
+  color-scheme: dark;
 
-  /* --- standardization token scales (single source of truth) --- */
-  /* Semantic — destructive is decoupled from the Chemistry subject hue */
-  --danger: #FF7E74;
-  --danger-soft: rgba(255, 126, 116, .12);
-  --danger-border: rgba(255, 126, 116, .32);
-  --danger-border-strong: rgba(255, 126, 116, .5);
-  --danger-fg: #ffd9d5;          /* alert text on a danger tint */
-  --success-fg: #cdeee8;         /* alert text on a success tint */
+  /* Greyscale surfaces — true black page, panels step up by hairline contrast */
+  --bg: #000000;
+  --panel: #0a0a0a;
+  --panel2: #141414;
+  --line: rgba(255, 255, 255, .09);
+  --line-strong: rgba(255, 255, 255, .2);
+  --text: #ededed;
+  --text-inverse: #0a0a0a;       /* text on light fills (mirrors the primary button) */
+  --muted: #9b9b9b;
+  --faint: #6e6e6e;
+  --focus: #ededed;              /* monochrome keyboard-focus ring */
 
-  /* White-tint scale (collapses ~21 ad-hoc rgba(255,255,255,.0x) spellings) */
-  --tint-1: rgba(255, 255, 255, .05);   /* subtle surface fill / chips */
-  --tint-2: rgba(255, 255, 255, .08);   /* stronger fill */
-  --tint-hover: rgba(255, 255, 255, .1);
+  /* Type — Geist everywhere (variables provided by next/font in layout.js) */
+  --display: var(--font-geist-sans, system-ui), system-ui, sans-serif;
+  --ui: var(--font-geist-sans, system-ui), system-ui, sans-serif;
+  --mono: var(--font-geist-mono, ui-monospace), ui-monospace, monospace;
 
-  /* Subject soft tints (fills/borders) */
-  --math-soft: rgba(242, 180, 65, .12);
-  --phys-soft: rgba(91, 214, 196, .12);
-  --chem-soft: rgba(255, 126, 116, .12);
+  /* White-tint scale (fills / hovers on dark) */
+  --tint-1: rgba(255, 255, 255, .045);
+  --tint-2: rgba(255, 255, 255, .08);
+  --tint-hover: rgba(255, 255, 255, .11);
 
-  /* Radius scale (16 card / 18 elevated is an intentional elevation cue) */
-  --radius-card: 16px;
-  --radius-elevated: 18px;
-  --radius-btn: 11px;
-  --radius-inset: 8px;
-  --radius-alert: 12px;
+  /* Subject accents — the ONLY chromatic tokens, desaturated mid-tones that
+     hold on BOTH themes (same value in dark and light, so they stay in sync
+     with the literal hexes in lib/scoring.js SUBJECTS, which feed SVG). */
+  --math: #97804d;
+  --phys: #56897e;
+  --chem: #9d685e;
+  --math-soft: rgba(151, 128, 77, .14);
+  --phys-soft: rgba(86, 137, 126, .14);
+  --chem-soft: rgba(157, 104, 94, .14);
+
+  /* Semantic valence — muted, meaning-bearing only */
+  --danger: #c2796e;
+  --danger-soft: rgba(194, 121, 110, .12);
+  --danger-border: rgba(194, 121, 110, .35);
+  --danger-border-strong: rgba(194, 121, 110, .55);
+  --danger-fg: #e3bdb6;          /* alert text on a danger tint */
+  --success-fg: #c2d9d3;         /* alert text on a success tint */
+  --success-soft: rgba(116, 168, 155, .11);
+  --success-border: rgba(116, 168, 155, .3);
+
+  /* Radius scale — sharper, product-grade corners */
+  --radius-card: 10px;
+  --radius-elevated: 12px;
+  --radius-btn: 8px;
+  --radius-inset: 6px;
+  --radius-alert: 8px;
   --radius-pill: 999px;
 
   /* Spacing scale */
@@ -52,156 +82,273 @@
   --space-6: 32px;
 
   /* Card padding */
-  --pad-card: 18px;
+  --pad-card: 20px;
   --pad-card-compact: 16px;
 
   /* Misc shared values */
-  --disabled-opacity: .45;       /* unifies .45/.5/.55 across buttons */
-  --eyebrow-ls: 1px;             /* one tracking for the eyebrow primitive */
+  --disabled-opacity: .45;
+  --eyebrow-ls: .08em;
   --w-content: 900px;            /* standard centered column */
   --w-wide: 1560px;              /* Dashboard bento column */
   --w-narrow: 460px;             /* dialogs / sign-in / gate cards */
-  --scrim: rgba(5, 7, 11, .6);   /* modal / drawer / gate backdrop */
-  --shadow-lg: 0 24px 60px rgba(0, 0, 0, .5);
+  --w-side: 248px;               /* app sidebar */
+  --scrim: rgba(0, 0, 0, .7);
+  --shadow-lg: 0 24px 64px rgba(0, 0, 0, .55);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #ffffff;
+  --panel: #ffffff;
+  --panel2: #f5f5f5;
+  --line: rgba(0, 0, 0, .09);
+  --line-strong: rgba(0, 0, 0, .22);
+  --text: #111111;
+  --text-inverse: #fafafa;
+  --muted: #666666;
+  --faint: #999999;
+  --focus: #111111;
+
+  --tint-1: rgba(0, 0, 0, .035);
+  --tint-2: rgba(0, 0, 0, .06);
+  --tint-hover: rgba(0, 0, 0, .085);
+
+  --math-soft: rgba(151, 128, 77, .1);
+  --phys-soft: rgba(86, 137, 126, .1);
+  --chem-soft: rgba(157, 104, 94, .1);
+
+  --danger: #a8554a;
+  --danger-soft: rgba(168, 85, 74, .09);
+  --danger-border: rgba(168, 85, 74, .35);
+  --danger-border-strong: rgba(168, 85, 74, .55);
+  --danger-fg: #7e3a31;
+  --success-fg: #2c574d;
+  --success-soft: rgba(65, 119, 107, .09);
+  --success-border: rgba(65, 119, 107, .3);
+
+  --scrim: rgba(0, 0, 0, .4);
+  --shadow-lg: 0 24px 64px rgba(0, 0, 0, .16);
+}
+
+/* Map the semantic tokens onto Tailwind utility names (bg-panel, text-muted,
+   border-line, font-mono, …) so new markup can be written utility-first while
+   resolving to the SAME live variables the component layer uses. */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel2: var(--panel2);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--text);
+  --color-ink-inverse: var(--text-inverse);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-math: var(--math);
+  --color-phys: var(--phys);
+  --color-chem: var(--chem);
+  --color-danger: var(--danger);
+  --font-sans: var(--ui);
+  --font-mono: var(--mono);
 }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 
 body {
-  background:
-    radial-gradient(900px 500px at 12% -8%, rgba(242, 180, 65, .10), transparent 60%),
-    radial-gradient(800px 500px at 100% 0%, rgba(91, 214, 196, .09), transparent 55%),
-    var(--bg);
+  background: var(--bg);
   color: var(--text);
   font-family: var(--ui);
+  font-size: 15px;
   line-height: 1.5;
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* Safe-area aware: keep side/bottom content clear of notches + the home indicator on
-   modern phones (viewport-fit=cover is set in app/layout.js). env() is 0 on devices
-   without insets, so max() leaves the normal padding untouched there. */
-.np-shell {
-  padding: 28px clamp(16px, 5vw, 56px) 60px;
-  padding-left: max(clamp(16px, 5vw, 56px), env(safe-area-inset-left));
-  padding-right: max(clamp(16px, 5vw, 56px), env(safe-area-inset-right));
-  padding-bottom: max(60px, env(safe-area-inset-bottom));
+::selection { background: var(--line-strong); }
+
+/* =============================================================================
+   App shell — left sidebar (≥1024px) that collapses into a top band on
+   smaller screens. One DOM tree, two layouts, so nav buttons are never
+   duplicated (test queries rely on unique accessible names).
+   ========================================================================== */
+.np-root { min-height: 100vh; }
+
+.np-side {
+  display: flex; flex-direction: row; flex-wrap: wrap; align-items: center;
+  gap: 10px 16px;
+  padding: 12px clamp(16px, 4vw, 24px) 0;
+  padding-left: max(clamp(16px, 4vw, 24px), env(safe-area-inset-left));
+  padding-right: max(clamp(16px, 4vw, 24px), env(safe-area-inset-right));
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+.np-side .np-nav { order: 3; width: 100%; }
+.np-side-foot { order: 2; margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.np-side-user { display: none; }
+
+@media (min-width: 1024px) {
+  .np-side {
+    position: fixed; top: 0; left: 0; bottom: 0; z-index: 50;
+    width: var(--w-side);
+    flex-direction: column; flex-wrap: nowrap; align-items: stretch;
+    gap: 0;
+    padding: 22px 14px 18px;
+    padding-bottom: max(18px, env(safe-area-inset-bottom));
+    border-bottom: none;
+    border-right: 1px solid var(--line);
+  }
+  .np-side .np-brand { padding: 0 10px; margin-bottom: 22px; }
+  .np-side .np-nav { order: 0; width: auto; }
+  .np-side-foot {
+    order: 0; margin-left: 0; margin-top: auto;
+    flex-direction: column; align-items: stretch; gap: 10px;
+    padding-top: 14px; border-top: 1px solid var(--line);
+  }
+  .np-side-user {
+    display: block; font-size: 12px; color: var(--faint);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    padding: 0 2px;
+  }
+  .np-frame--side { margin-left: var(--w-side); }
 }
 
-/* The four chrome bands (top · nav · main · foot) share ONE centered column width
-   so the brand bar, tabs, content, and footer left/right edges all align — and they
-   widen together (--wide) on the Dashboard so switching tabs causes no relative shift. */
-.np-top { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; margin: 0 auto 18px; max-width: var(--w-content); }
-.np-brand { font-family: var(--display); font-weight: 700; font-size: 26px; letter-spacing: -.5px; cursor: pointer; color: var(--text); background: none; border: none; padding: 0; }
-.np-arrow { color: var(--math); padding: 0 2px; }
-.np-tag { font-size: 13px; color: var(--muted); font-family: var(--mono); letter-spacing: .3px; }
-.np-signin { margin-left: auto; }
+/* Brand wordmark — tight, monochrome; the arrow is the only flourish. */
+.np-brand {
+  font-family: var(--ui); font-weight: 650; font-size: 18px;
+  letter-spacing: -.02em; cursor: pointer; color: var(--text);
+  background: none; border: none; padding: 0; text-align: left;
+  display: inline-flex; align-items: center; min-height: 32px;
+}
+.np-arrow { color: var(--faint); padding: 0 1px; font-family: var(--mono); font-weight: 500; }
+.np-tag { font-size: 12px; color: var(--faint); font-family: var(--mono); letter-spacing: .02em; }
+.np-signin { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+
+/* Chrome-less header (intro / sign-in screens — no sidebar). */
+.np-top { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 0 auto 28px; max-width: var(--w-content); }
 
 .np-main { max-width: var(--w-content); margin: 0 auto; }
 
-.np-nav { display: flex; gap: 6px; max-width: var(--w-content); margin: 0 auto 24px; border-bottom: 1px solid var(--line); }
-.np-tab { background: none; border: none; border-bottom: 2px solid transparent; color: var(--muted); font-family: var(--ui); font-size: 15px; font-weight: 600; padding: 10px 14px; cursor: pointer; margin-bottom: -1px; display: inline-flex; align-items: center; min-height: 44px; }
-.np-tab:hover { color: var(--text); }
-.np-tab.active { color: var(--text); border-bottom-color: var(--math); }
+/* Nav — vertical rail items in the sidebar, underline tabs in the top band. */
+.np-nav { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
+.np-nav::-webkit-scrollbar { display: none; }
+.np-tab {
+  background: none; border: none; border-radius: var(--radius-btn);
+  color: var(--muted); font-family: var(--ui); font-size: 14px; font-weight: 500;
+  padding: 9px 12px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 10px; min-height: 44px;
+  white-space: nowrap;
+  transition: color .15s ease, background .15s ease;
+}
+.np-tab svg { flex: none; opacity: .85; }
+.np-tab:hover { color: var(--text); background: var(--tint-1); }
+.np-tab.active { color: var(--text); background: var(--tint-2); }
+@media (min-width: 1024px) {
+  .np-side .np-nav { flex-direction: column; overflow: visible; }
+  .np-side .np-tab { min-height: 38px; padding: 8px 10px; }
+}
 
-.np-h1 { font-family: var(--display); font-weight: 600; font-size: clamp(30px, 5vw, 46px); line-height: 1.08; letter-spacing: -.8px; margin: 0 0 18px; }
-.np-h2 { font-family: var(--display); font-weight: 600; font-size: clamp(26px, 4vw, 36px); letter-spacing: -.6px; margin: 0 0 6px; }
-.np-lede { font-size: 17px; color: var(--muted); max-width: 64ch; margin: 0 0 26px; }
-.np-lede em, .np-h1 em { color: var(--text); font-style: italic; }
+/* =============================================================================
+   Typography primitives
+   ========================================================================== */
+.np-h1 { font-family: var(--display); font-weight: 600; font-size: clamp(30px, 4.5vw, 44px); line-height: 1.08; letter-spacing: -.03em; margin: 0 0 16px; }
+.np-h2 { font-family: var(--display); font-weight: 600; font-size: clamp(22px, 3vw, 28px); letter-spacing: -.02em; margin: 0 0 6px; }
+.np-lede { font-size: 15px; color: var(--muted); max-width: 64ch; margin: 0 0 26px; }
+.np-lede em, .np-h1 em { color: var(--text); font-style: normal; font-weight: 600; }
 
-.np-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 24px; }
+.np-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px; }
 .np-step { display: flex; flex-direction: column; gap: 8px; }
-.np-stepnum { font-family: var(--mono); font-size: 13px; color: var(--math); letter-spacing: 1px; }
-.np-steptitle { font-family: var(--display); font-size: 21px; font-weight: 600; }
-.np-stepdesc { font-size: 14px; color: var(--muted); }
+.np-stepnum { font-family: var(--mono); font-size: 12px; color: var(--faint); letter-spacing: .08em; }
+.np-steptitle { font-family: var(--display); font-size: 16px; font-weight: 600; letter-spacing: -.01em; }
+.np-stepdesc { font-size: 13px; color: var(--muted); line-height: 1.55; }
 
-.np-subjectrow { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 30px; }
-.np-chip { border: 1px solid var(--line-strong); border-radius: var(--radius-pill); padding: 7px 15px; font-size: 14px; font-weight: 500; color: var(--text); background: var(--tint-1); }
+.np-subjectrow { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 30px; }
+.np-chip { border: 1px solid var(--line-strong); border-radius: var(--radius-pill); padding: 6px 14px; font-size: 13px; font-weight: 500; color: var(--text); background: var(--tint-1); }
 
 .np-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-card); padding: var(--pad-card); }
 
-/* ---- buttons: ONE base + role modifiers (primary · secondary · danger · ghost) ---- */
-.np-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: none; border-radius: var(--radius-btn); padding: 11px 18px; min-height: 44px; font-family: var(--ui); font-size: 15px; font-weight: 600; cursor: pointer; transition: transform .15s ease, filter .15s ease, opacity .15s, background .15s ease, border-color .15s ease; }
+/* =============================================================================
+   Buttons — ONE base + role modifiers (primary · secondary · danger · ghost)
+   ========================================================================== */
+.np-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid transparent; border-radius: var(--radius-btn); padding: 10px 16px; min-height: 44px; font-family: var(--ui); font-size: 14px; font-weight: 500; cursor: pointer; transition: opacity .15s ease, background .15s ease, border-color .15s ease, color .15s ease, transform .12s ease; }
 .np-btn:active { transform: translateY(1px); }
 .np-btn:disabled { opacity: var(--disabled-opacity); cursor: not-allowed; }
-/* primary — the single solid CTA per view */
-.np-primary { background: var(--text); color: var(--text-inverse); }
-.np-primary:hover:not(:disabled) { filter: brightness(1.08); }
-/* secondary — the canonical filled panel-tint button for ALL secondary actions
-   (promoted from the old .np-dash-actbtn so Practice/Learn/Dashboard match) */
-.np-secondary { background: var(--panel2); border: 1px solid var(--line-strong); color: var(--text); }
-.np-secondary:hover:not(:disabled) { background: var(--tint-hover); border-color: var(--line-strong); }
-.np-secondary svg { color: var(--math); }
-/* subject-accent: the leading/trailing icon (e.g. the → arrow) takes the subject hue */
-.np-btn--subject svg { color: var(--subject, var(--math)); }
-/* danger — the canonical destructive button (filled panel tint + coral border/text) */
-.np-danger { background: var(--panel2); border: 1px solid var(--danger-border); color: var(--danger); }
+/* primary — the single solid CTA per view (white-on-black in dark, inverse in light) */
+.np-primary { background: var(--text); color: var(--text-inverse); font-weight: 600; }
+.np-primary:hover:not(:disabled) { opacity: .88; }
+/* secondary — quiet bordered surface button for ALL secondary actions */
+.np-secondary { background: var(--tint-1); border-color: var(--line); color: var(--text); }
+.np-secondary:hover:not(:disabled) { background: var(--tint-2); border-color: var(--line-strong); }
+.np-secondary svg { color: var(--muted); }
+/* subject-accent slot — neutral under the greyscale system (kept for markup compat) */
+.np-btn--subject svg { color: var(--muted); }
+/* danger — the canonical destructive button (muted red, meaning-bearing) */
+.np-danger { background: var(--tint-1); border-color: var(--danger-border); color: var(--danger); }
 .np-danger:hover:not(:disabled) { background: var(--danger-soft); border-color: var(--danger-border-strong); }
 .np-danger svg { color: var(--danger); }
-/* full-width modifier (replaces inline width:100%;justify-content:center) */
 .np-btn--block { width: 100%; justify-content: center; }
-.np-big { font-size: 17px; padding: 14px 24px; margin-top: 6px; }
-/* Intro primary-action row: the big "Prove it" CTA + (guest) a normal-size,
-   secondary Sign in beside it. The row owns the top margin; cancel the CTA's own
-   margin-top (from .np-big) so the two buttons line up. */
+.np-big { font-size: 15px; padding: 13px 22px; margin-top: 6px; }
+/* Intro primary-action row */
 .np-introcta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
 .np-introcta .np-big { margin-top: 0; }
-/* ghost — true inline text-links only (dismiss, "See your dashboard", row actions) */
-.np-ghost { display: inline-flex; align-items: center; gap: 6px; background: none; border: none; color: var(--muted); font-family: var(--ui); font-size: 14px; cursor: pointer; padding: 4px 2px; min-height: 44px; }
+/* ghost — true inline text-links only */
+.np-ghost { display: inline-flex; align-items: center; gap: 6px; background: none; border: none; color: var(--muted); font-family: var(--ui); font-size: 13.5px; font-weight: 500; cursor: pointer; padding: 4px 2px; min-height: 44px; transition: color .15s ease; }
 .np-ghost:hover:not(:disabled) { color: var(--text); }
 .np-ghost:disabled { opacity: var(--disabled-opacity); cursor: not-allowed; }
 .np-ghost--danger { color: var(--danger); }
-.np-ghost--danger:hover:not(:disabled) { color: var(--danger); filter: brightness(1.12); }
-.np-iconbtn { background: none; border: none; color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 4px; min-width: 44px; min-height: 44px; border-radius: var(--radius-inset); }
+.np-ghost--danger:hover:not(:disabled) { color: var(--danger); opacity: .85; }
+.np-iconbtn { background: none; border: none; color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 4px; min-width: 44px; min-height: 44px; border-radius: var(--radius-inset); transition: color .15s ease, background .15s ease; }
 .np-iconbtn:hover { color: var(--text); background: var(--tint-1); }
-.np-signinbtn { display: inline-flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; color: var(--text); font-family: var(--ui); font-size: 14px; font-weight: 600; padding: 8px 14px; min-height: 44px; cursor: pointer; }
-.np-signinbtn:hover { background: var(--panel2); }
+.np-signinbtn { display: inline-flex; align-items: center; gap: 8px; background: var(--tint-1); border: 1px solid var(--line); border-radius: var(--radius-btn); color: var(--text); font-family: var(--ui); font-size: 13.5px; font-weight: 500; padding: 8px 14px; min-height: 44px; cursor: pointer; transition: background .15s ease, border-color .15s ease; }
+.np-signinbtn:hover { background: var(--tint-2); border-color: var(--line-strong); }
 
+/* Theme switcher — 3-way segmented control (light / system / dark) */
+.np-theme { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: var(--radius-pill); padding: 3px; background: var(--tint-1); }
+.np-theme-btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border: none; border-radius: var(--radius-pill); background: none; color: var(--faint); cursor: pointer; transition: color .15s ease, background .15s ease; }
+.np-theme-btn:hover { color: var(--text); }
+.np-theme-btn.active { background: var(--tint-2); color: var(--text); }
+@media (min-width: 1024px) {
+  .np-side-foot .np-theme { justify-content: center; display: flex; }
+  .np-side-foot .np-theme-btn { flex: 1; }
+}
+
+/* =============================================================================
+   Question flow
+   ========================================================================== */
 .np-progress { display: flex; gap: 8px; margin-bottom: 20px; }
 .np-progdot { height: 4px; flex: 1; border-radius: 3px; transition: background .4s ease; }
-/* 3-tier diagnostic: 3 subject groups, each with 3 difficulty pips (wider gap between groups). */
 .np-diag-progress { display: flex; gap: 16px; margin-bottom: 20px; }
 .np-diag-proggroup { display: flex; gap: 5px; flex: 1; }
 .np-qmeta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-bottom: 12px; }
-/* The mono "SUBJECT · DIFFICULTY" meta line (text is uppercased in markup) — one class
-   replaces three copy-pasted inline {fontFamily:mono, letterSpacing:1} spans. */
-.np-metaline { font-family: var(--mono); letter-spacing: var(--eyebrow-ls); }
+.np-metaline { font-family: var(--mono); font-size: 12px; letter-spacing: var(--eyebrow-ls); }
 .np-topic { background: var(--tint-1); border: 1px solid var(--line); border-radius: var(--radius-inset); padding: 3px 9px; font-size: 12px; }
-.np-livescore { margin-left: auto; font-family: var(--mono); font-weight: 700; border: 1px solid; border-radius: var(--radius-pill); padding: 4px 12px; font-size: 14px; }
-.np-question { font-family: var(--display); font-size: 21px; line-height: 1.4; font-weight: 500; margin-bottom: 16px; }
+.np-livescore { margin-left: auto; font-family: var(--mono); font-weight: 700; border: 1px solid; border-radius: var(--radius-pill); padding: 4px 12px; font-size: 13px; }
+.np-question { font-family: var(--display); font-size: 17px; line-height: 1.55; font-weight: 500; margin-bottom: 16px; }
 
 .np-input { width: 100%; background: transparent; border: none; outline: none; resize: vertical; color: var(--text); font-family: var(--ui); font-size: 16px; line-height: 1.6; padding: 18px 18px 8px; min-height: 120px; }
-/* Visible keyboard-focus indicator on the answer/report textareas (the most-used
-   control). Without this, .np-input's outline:none leaves keyboard users no focus cue
-   (WCAG 2.4.7). outline-offset keeps the ring inside the wrapping .np-card. */
-.np-input:focus-visible { outline: 2px solid var(--math); outline-offset: -2px; border-radius: 4px; }
-.np-input::placeholder { color: var(--muted); }
-/* Canonical textarea wrapper: the .np-input always renders flush to the card edge
-   (Practice + Learn used a padding:0 vs padding:18px card — this unifies them). */
+.np-input:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 4px; }
+.np-input::placeholder { color: var(--faint); }
 .np-input-card { padding: 0; overflow: hidden; }
 
 .np-hint { font-size: 13px; color: var(--muted); margin: 12px 2px 0; }
-.np-hint em { color: var(--text); font-style: italic; }
+.np-hint em { color: var(--text); font-style: normal; font-weight: 600; }
 
-.np-grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.np-grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 .np-scorecard { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; }
 .np-scorehead { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-.np-scorelabel { font-family: var(--display); font-size: 19px; font-weight: 600; }
-.np-bandtag { font-family: var(--mono); font-size: 13px; letter-spacing: .5px; font-weight: 500; margin-top: 4px; }
+.np-scorelabel { font-family: var(--display); font-size: 16px; font-weight: 600; }
+.np-bandtag { font-family: var(--mono); font-size: 12px; letter-spacing: .04em; font-weight: 500; margin-top: 4px; }
 .np-comment { font-size: 13px; color: var(--muted); margin-top: 2px; }
 .np-weakwrap { width: 100%; margin-top: 6px; }
 .np-weakwrap .np-eyebrow { margin-bottom: 6px; }
 .np-weaktags { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-start; }
 .np-weaktag { background: var(--tint-1); border: 1px solid var(--line); border-radius: var(--radius-inset); padding: 3px 8px; font-size: 12px; }
 
-/* ---- canonical eyebrow (the small UPPERCASE section/stat label) ----
-   One recipe replaces the byte-identical np-statlabel/np-feedlabel/np-weaklabel.
-   Default is muted; valence/subject color is opt-in via a modifier (never an ad-hoc
-   inline color). np-cardicon stays as the icon'd, colored *section* eyebrow (13px). */
-.np-eyebrow { font-family: var(--ui); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: var(--eyebrow-ls); color: var(--muted); }
-.np-eyebrow--sm { font-size: 11px; }
-.np-eyebrow--xs { font-size: 10px; letter-spacing: .6px; line-height: 1.25; }
+/* ---- canonical eyebrow (the small UPPERCASE section/stat label) ---- */
+.np-eyebrow { font-family: var(--ui); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: var(--eyebrow-ls); color: var(--muted); }
+.np-eyebrow--sm { font-size: 10.5px; }
+.np-eyebrow--xs { font-size: 10px; letter-spacing: .06em; line-height: 1.25; }
 .np-eyebrow--icon { display: inline-flex; align-items: center; gap: 7px; }
 .np-eyebrow--good { color: var(--phys); }
 .np-eyebrow--improve { color: var(--math); }
@@ -209,46 +356,38 @@ body {
 .np-eyebrow--subject { color: var(--subject, var(--muted)); }
 
 .np-feedhead { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 14px; }
-.np-feedscore { font-family: var(--mono); font-size: 40px; font-weight: 700; line-height: 1.1; }
+.np-feedscore { font-family: var(--mono); font-size: 38px; font-weight: 700; line-height: 1.1; letter-spacing: -.02em; }
 .np-rubric { flex: 1; min-width: 240px; display: flex; flex-direction: column; gap: 9px; }
 .np-rubrow { display: grid; grid-template-columns: 130px 1fr; align-items: center; gap: 12px; }
 .np-rublabel { font-size: 13px; color: var(--muted); }
-.np-note { font-size: 14px; color: var(--text); background: var(--tint-1); border-left: 2px solid var(--muted); border-radius: 0 var(--radius-inset) var(--radius-inset) 0; padding: 10px 14px; margin-bottom: 14px; }
+.np-note { font-size: 14px; color: var(--text); background: var(--tint-1); border-left: 2px solid var(--line-strong); border-radius: 0 var(--radius-inset) var(--radius-inset) 0; padding: 10px 14px; margin-bottom: 14px; }
 
-/* Accent-bordered card: one rule reads a --accent custom prop (replaces ad-hoc
-   per-card border-color overrides like the teal Socratic / gold save-CTA). */
+/* Accent-bordered card: one rule reads a --accent custom prop */
 .np-card--accent { border-color: var(--accent, var(--line)); }
-.np-socratic { margin-bottom: 14px; border-color: rgba(91, 214, 196, .35); }
-/* The icon'd section eyebrow. Default is NEUTRAL muted; valence/subject color is set
-   explicitly at the use site (--good teal / --improve gold / subject) so the color
-   carries meaning instead of every section defaulting to teal. */
-.np-cardicon { display: flex; align-items: center; gap: 7px; font-size: 13px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin-bottom: 8px; font-weight: 600; }
-.np-socratictext { font-family: var(--display); font-size: 19px; font-weight: 500; line-height: 1.4; }
+.np-socratic { margin-bottom: 14px; border-color: var(--line-strong); }
+.np-cardicon { display: flex; align-items: center; gap: 7px; font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin-bottom: 8px; font-weight: 600; }
+.np-socratictext { font-family: var(--display); font-size: 16px; font-weight: 500; line-height: 1.5; }
 .np-lesson { margin-bottom: 18px; }
-.np-lessontext { font-size: 15px; line-height: 1.65; color: var(--text); }
+.np-lessontext { font-size: 14px; line-height: 1.65; color: var(--text); }
 
-/* ---- Learn tab: curated written guide on the concept page (Phase D, §12.3) ----
-   Three sections: the idea (paragraphs), worked example (problem statement →
-   numbered reasoning steps → answer), and ask-yourself (open self-questions). */
-.np-guideproblem { font-size: 15px; line-height: 1.6; color: var(--text); background: var(--tint-1); border: 1px solid var(--line); border-radius: var(--radius-inset); padding: 12px 14px; margin: 0 0 12px; }
+/* ---- Learn tab: curated written guide on the concept page ---- */
+.np-guideproblem { font-size: 14px; line-height: 1.6; color: var(--text); background: var(--tint-1); border: 1px solid var(--line); border-radius: var(--radius-inset); padding: 12px 14px; margin: 0 0 12px; }
 .np-guidesteps { margin: 0; padding-left: 24px; display: grid; gap: 8px; }
-.np-guidesteps li { font-size: 15px; line-height: 1.6; color: var(--text); }
+.np-guidesteps li { font-size: 14px; line-height: 1.6; color: var(--text); }
 .np-guidesteps li::marker { color: var(--muted); font-weight: 600; }
-.np-guideanswer { font-size: 15px; line-height: 1.6; color: var(--text); margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--line); }
+.np-guideanswer { font-size: 14px; line-height: 1.6; color: var(--text); margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--line); }
 .np-selfqs { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
-.np-selfqs li { font-size: 15px; line-height: 1.6; color: var(--text); position: relative; padding-left: 24px; }
+.np-selfqs li { font-size: 14px; line-height: 1.6; color: var(--text); position: relative; padding-left: 24px; }
 .np-selfqs li::before { content: "?"; position: absolute; left: 4px; top: 0; color: var(--muted); font-family: var(--ui); font-weight: 700; }
 
 /* --- process-first grading: legible score breakdown + typed errors --- */
 .np-sronly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .np-feedsub { font-size: 13px; color: var(--muted); margin-top: 8px; max-width: var(--w-narrow); line-height: 1.5; }
 .np-scorebreak { margin-bottom: 18px; }
-/* The disclosure toggle is a tap target: give it a comfortable ≥44px hit area
-   (it was a 20px-tall summary, below the WCAG 2.5.8 24px floor on touch). */
 .np-scorebreak > summary { list-style: none; display: flex; align-items: center; min-height: 44px; }
 .np-scorebreak > summary::-webkit-details-marker { display: none; }
-.np-brkrow { display: flex; align-items: center; gap: 10px; padding: 5px 0; border-bottom: 1px solid rgba(255, 255, 255, .05); }
-.np-brkhead { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; border-bottom-color: rgba(255, 255, 255, .12); }
+.np-brkrow { display: flex; align-items: center; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--line); }
+.np-brkhead { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; border-bottom-color: var(--line-strong); }
 .np-brktotal { border-bottom: none; border-top: 1px solid var(--line); margin-top: 2px; padding-top: 8px; }
 .np-brklabel { flex: 1; font-size: 13px; }
 .np-brkbar { width: 92px; flex: 0 0 92px; }
@@ -256,7 +395,7 @@ body {
 .np-brkpts { width: 52px; flex: 0 0 52px; text-align: right; font-family: var(--mono); font-weight: 700; }
 .np-errors { margin-bottom: 18px; }
 .np-errlist { list-style: none; margin: 8px 0 0; padding: 0; }
-.np-erritem { display: flex; gap: 10px; align-items: flex-start; padding: 9px 0; border-bottom: 1px solid rgba(255, 255, 255, .05); }
+.np-erritem { display: flex; gap: 10px; align-items: flex-start; padding: 9px 0; border-bottom: 1px solid var(--line); }
 .np-erritem:last-child { border-bottom: none; }
 .np-errbadge { flex: 0 0 auto; font-family: var(--mono); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; border: 1px solid; border-radius: var(--radius-pill); padding: 2px 9px; white-space: nowrap; }
 .np-errbody { flex: 1; min-width: 0; }
@@ -268,32 +407,30 @@ body {
 .np-feedactions { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 
 .np-error, .np-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-radius: var(--radius-alert); padding: 12px 16px; margin-bottom: 18px; font-size: 14px; }
-.np-error { background: var(--danger-soft); border: 1px solid rgba(255, 126, 116, .4); color: var(--danger-fg); }
-.np-banner { background: rgba(91, 214, 196, .1); border: 1px solid rgba(91, 214, 196, .35); color: var(--success-fg); }
+.np-error { background: var(--danger-soft); border: 1px solid var(--danger-border); color: var(--danger-fg); }
+.np-banner { background: var(--success-soft); border: 1px solid var(--success-border); color: var(--success-fg); }
 
-.np-foot { max-width: var(--w-content); margin: 40px auto 0; font-size: 12px; color: var(--muted); font-family: var(--mono); text-align: center; }
+.np-foot { max-width: var(--w-content); margin: 48px auto 0; font-size: 12px; color: var(--faint); font-family: var(--ui); text-align: center; }
 
-/* ---- progress dashboard ---- */
-.np-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 18px; }
+/* =============================================================================
+   Progress dashboard
+   ========================================================================== */
+.np-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 18px; }
 .np-statcard { display: flex; flex-direction: column; gap: 4px; }
-.np-statnum { font-family: var(--mono); font-size: 34px; font-weight: 700; line-height: 1.1; }
+.np-statnum { font-family: var(--mono); font-size: 32px; font-weight: 700; line-height: 1.1; letter-spacing: -.02em; }
 .np-statsub { font-size: 13px; color: var(--muted); }
 .np-chartcard { margin-bottom: 16px; }
-.np-charttitle { font-family: var(--display); font-size: 18px; font-weight: 600; margin-bottom: 2px; }
-/* A larger in-card / drawer / empty-state title (replaces inline fontSize:22 on np-h2
-   and np-charttitle, and the inline 20/22 sizes used for empty-state headings). */
-.np-sectiontitle { font-family: var(--display); font-size: 22px; font-weight: 600; letter-spacing: -.3px; margin: 0 0 4px; }
-.np-emptytitle { font-family: var(--display); font-size: 20px; font-weight: 600; margin: 0 0 8px; }
+.np-charttitle { font-family: var(--display); font-size: 15px; font-weight: 600; letter-spacing: -.01em; margin-bottom: 2px; }
+.np-sectiontitle { font-family: var(--display); font-size: 19px; font-weight: 600; letter-spacing: -.015em; margin: 0 0 4px; }
+.np-emptytitle { font-family: var(--display); font-size: 18px; font-weight: 600; margin: 0 0 8px; }
 .np-chartsub { font-size: 13px; color: var(--muted); margin-bottom: 14px; }
 .np-chart { width: 100%; height: auto; display: block; }
-/* Subject identity glyph (∑ ∂ ⌬): always monospace so the three line up; color is set
-   per-subject at the use site (via the SubjectGlyph component). */
 .np-subjectglyph { font-family: var(--mono); }
 .np-empty { text-align: center; padding: 48px 24px; color: var(--muted); }
 .np-empty .np-question { color: var(--text); margin-bottom: 14px; }
 
-.fade-up { animation: fadeUp .5s cubic-bezier(.2, .7, .2, 1) both; }
-@keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.fade-up { animation: fadeUp .35s cubic-bezier(.2, .7, .2, 1) both; }
+@keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 .np-pulse { animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
 
@@ -302,10 +439,7 @@ body {
   .np-rubrow { grid-template-columns: 110px 1fr; }
 }
 
-/* ---- phones: keep the score-breakdown table on-screen + comfortable tap tags ----
-   The breakdown row's fixed bar/weight/points columns (92+52+52 + gaps) overran the
-   card on ≤360px screens, forcing a horizontal scroll on the (core) results screen.
-   Shrink the fixed columns and let the label wrap so the row fits the viewport. */
+/* ---- phones: keep the score-breakdown table on-screen + comfortable tap tags ---- */
 @media (max-width: 480px) {
   .np-brkrow { gap: 7px; }
   .np-brkbar { width: 54px; flex: 0 0 54px; }
@@ -314,11 +448,9 @@ body {
   .np-brklabel { font-size: 12px; }
 }
 
-/* ---- elevated surface (shared by the modal AND the dashboard guest-gate card) ----
-   One recipe for "a card that floats above a scrim"; each consumer adds only its own
-   sizing/positioning. */
+/* ---- elevated surface (shared by the modal AND the dashboard guest-gate card) ---- */
 .np-surface-elevated {
-  background: var(--panel); border: 1px solid var(--line);
+  background: var(--panel); border: 1px solid var(--line-strong);
   border-radius: var(--radius-elevated); padding: 30px 26px 22px;
   box-shadow: var(--shadow-lg);
 }
@@ -329,25 +461,25 @@ body {
   display: flex; align-items: center; justify-content: center;
   padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
   background: var(--scrim);
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
-  animation: npBackdropIn .22s ease both;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  animation: npBackdropIn .2s ease both;
 }
 .np-modal {
   position: relative;
   width: 100%; max-width: var(--w-narrow);
-  animation: npModalIn .26s cubic-bezier(.2, .7, .2, 1) both;
+  animation: npModalIn .24s cubic-bezier(.2, .7, .2, 1) both;
 }
 .np-modal-close { position: absolute; top: 12px; right: 12px; }
 .np-modal-spark {
   width: 46px; height: 46px; margin: 0 auto 14px;
   display: flex; align-items: center; justify-content: center;
-  border-radius: 50%; color: var(--math);
-  background: var(--math-soft); border: 1px solid rgba(242, 180, 65, .35);
+  border-radius: 50%; color: var(--text);
+  background: var(--tint-2); border: 1px solid var(--line-strong);
 }
 .np-modal-later { display: block; margin: 12px auto 0; }
 @keyframes npBackdropIn { from { opacity: 0; } to { opacity: 1; } }
-@keyframes npModalIn { from { opacity: 0; transform: translateY(12px) scale(.97); } to { opacity: 1; transform: none; } }
+@keyframes npModalIn { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
 
 /* ---- clickable weak-concept tags + Learn tab ---- */
 .np-weaktag-btn {
@@ -372,18 +504,12 @@ body {
 }
 .np-concepttag:hover { border-color: var(--line-strong); background: var(--tint-2); }
 .np-concepttag.active { background: var(--tint-2); font-weight: 600; }
-/* Display-only curriculum chip (the Learn tab lists the fixed concept database; these
-   are NOT clickable/generated) — keep the chip look but drop the interactive cues. */
 .np-concepttag--static { cursor: default; }
 .np-concepttag--static:hover { border-color: var(--line); background: var(--tint-1); }
 
-/* Per-concept MASTERY coloring (RANKS_PLAN §12.1): green mastered / yellow in
-   progress / red struggling; grey (untouched) is the base chip. Each state gets a
-   DISTINCT leading glyph (✓ / … / !), not just a recolored dot — hue alone fails
-   WCAG 1.4.1 for sighted colorblind users on touch (title is hover-only and
-   aria-label is SR-only; gold vs coral is the classic deutan confusion pair).
-   The glyph is decorative (the accessible name carries the state). Valence
-   colors follow the eyebrow convention: good = teal, improve = gold, danger. */
+/* Per-concept MASTERY coloring — muted valence accents; each state keeps a
+   DISTINCT leading glyph (✓ / … / !) so hue alone never carries the meaning
+   (WCAG 1.4.1). */
 .np-concepttag--green,
 .np-concepttag--yellow,
 .np-concepttag--red { gap: 7px; }
@@ -398,8 +524,6 @@ body {
 .np-concepttag--green  { border-color: var(--phys);   color: var(--phys);   background: var(--phys-soft); }
 .np-concepttag--yellow { border-color: var(--math);   color: var(--math);   background: var(--math-soft); }
 .np-concepttag--red    { border-color: var(--danger-border); color: var(--danger); background: var(--danger-soft); }
-/* Keep the state tint on hover — the base .np-concepttag:hover would otherwise
-   swap colored chips back to the neutral line/tint. */
 .np-concepttag--green:hover  { border-color: var(--phys);   background: var(--phys-soft); }
 .np-concepttag--yellow:hover { border-color: var(--math);   background: var(--math-soft); }
 .np-concepttag--red:hover    { border-color: var(--danger); background: var(--danger-soft); }
@@ -415,7 +539,7 @@ body {
 .np-masterylegend--yellow::before { content: "…"; color: var(--math); }
 .np-masterylegend--red::before    { content: "!"; color: var(--danger); }
 
-/* Concept-page mastery status line + the red "build the foundations first" card. */
+/* Concept-page mastery status line + the "build the foundations first" card. */
 .np-masterystatus { font-size: 13.5px; margin: -4px 0 14px; color: var(--muted); }
 .np-masterystatus--green  { color: var(--phys); }
 .np-masterystatus--yellow { color: var(--math); }
@@ -424,14 +548,14 @@ body {
 
 .np-learnlist { list-style: none; padding: 0; margin: 4px 0 0; display: flex; flex-direction: column; gap: 9px; }
 .np-learnlist li {
-  position: relative; padding-left: 18px; font-size: 15px; line-height: 1.5; color: var(--text);
+  position: relative; padding-left: 18px; font-size: 14px; line-height: 1.55; color: var(--text);
 }
 .np-learnlist li::before {
-  content: ""; position: absolute; left: 2px; top: 9px;
+  content: ""; position: absolute; left: 2px; top: 8px;
   width: 6px; height: 6px; border-radius: 50%; background: var(--dot, var(--muted));
 }
 
-/* ---- keyboard focus visibility (a11y) ---- */
+/* ---- keyboard focus visibility (a11y) — monochrome ring ---- */
 .np-brand:focus-visible,
 .np-providerbtn:focus-visible,
 .np-btn:focus-visible,
@@ -439,10 +563,11 @@ body {
 .np-signinbtn:focus-visible,
 .np-tab:focus-visible,
 .np-iconbtn:focus-visible,
+.np-theme-btn:focus-visible,
 .np-weaktag-btn:focus-visible,
 .np-concepttag:focus-visible,
 .np-hub-search:focus-visible {
-  outline: 2px solid var(--math);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -452,12 +577,12 @@ body {
 .np-providerbtn {
   display: flex; align-items: center; gap: 12px;
   width: 100%; padding: 14px 16px;
-  border: 1px solid var(--line); border-radius: var(--radius-alert);
-  background: var(--panel2); color: var(--text);
-  font-family: var(--ui); font-size: 15px; font-weight: 600;
-  cursor: pointer; transition: border-color .2s ease, background .2s ease;
+  border: 1px solid var(--line); border-radius: var(--radius-card);
+  background: var(--tint-1); color: var(--text);
+  font-family: var(--ui); font-size: 14px; font-weight: 500;
+  cursor: pointer; transition: border-color .15s ease, background .15s ease;
 }
-.np-providerbtn:hover:not(:disabled) { border-color: var(--line-strong); background: var(--panel); }
+.np-providerbtn:hover:not(:disabled) { border-color: var(--line-strong); background: var(--tint-2); }
 .np-providerbtn:disabled { opacity: var(--disabled-opacity); cursor: not-allowed; }
 .np-soon {
   margin-left: auto; font-family: var(--mono); font-size: 11px;
@@ -465,144 +590,106 @@ body {
   border-radius: var(--radius-pill); padding: 2px 9px;
 }
 
-/* ---- "sign in to save" call-to-action (a gold-accent card) ---- */
+/* ---- "sign in to save" call-to-action ---- */
 .np-savecta {
   display: flex; align-items: center; justify-content: space-between;
-  gap: 16px; margin-bottom: 18px; border-color: rgba(242,180,65,.4);
+  gap: 16px; margin-bottom: 18px; border-color: var(--line-strong);
 }
-.np-savetitle { font-weight: 600; }
+.np-savetitle { font-weight: 600; font-size: 14px; }
 .np-savedesc { font-size: 13px; color: var(--muted); margin-top: 2px; }
 
 /* ---- profile / dashboard identity (avatar + name + email) ---- */
 .np-avatar { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; border: 1px solid var(--line); flex: 0 0 auto; }
 .np-avatarfallback { display: flex; align-items: center; justify-content: center; background: var(--tint-2); font-weight: 700; font-size: 20px; }
-.np-profilename { font-size: 18px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.np-profilename { font-size: 16px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .np-profileemail { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* ---- merged Dashboard (bento grid) ----
-   Wide, space-efficient grid that fits all the always-visible stats on one
-   1920×1080 screen with no page scroll. The view widens the centered column
-   (.np-main--wide / .np-nav--wide, applied only on the dashboard view) so the
-   12-col grid has room; trend charts + answer review live in slide-over drawers.
-   At ≥1024px the whole view becomes a viewport-tall app frame (see the height-lock
-   block below): the action bar is pinned and each panel scrolls INSIDE its card so
-   nothing pushes the page. Below 1024px it reverts to a single column + page scroll. */
-/* The wide modifier is applied to ALL FOUR chrome bands on the Dashboard (top · nav ·
-   main · foot) so the brand bar + footer widen with the bento grid instead of staying
-   pinned at the 900px column — no relative shift on Practice↔Dashboard. */
+/* =============================================================================
+   Merged Dashboard (bento grid)
+   ========================================================================== */
 .np-top--wide, .np-main--wide, .np-nav--wide, .np-foot--wide { max-width: var(--w-wide); }
 
-/* Dashboard page header (title + lede) — every tab opens with the same title+lede
-   pattern. Kept compact (tight margins, lede capped wide) so it costs little of the
-   no-scroll height budget; the bento grid below absorbs the rest and panels scroll
-   internally (see the ≥1024 height-lock). */
 .np-dash-pagehead { margin-bottom: 16px; }
 .np-dash-pagehead .np-h2 { margin-bottom: 2px; }
 .np-dash-pagehead .np-lede { margin-bottom: 0; max-width: 70ch; }
 
 .np-dash { display: grid; gap: 14px; grid-template-columns: repeat(12, 1fr); align-items: start; }
-/* Identity: a slim horizontal bar (compact avatar + tight name/email + rank chip +
-   sign out) so the top band stays short and the panels below get the room. */
 .np-dash-identity { grid-column: span 8; display: flex; align-items: center; gap: 12px; padding: 10px 16px; }
 .np-dash-identity .np-avatar { width: 40px; height: 40px; }
-.np-dash-identity .np-profilename { font-size: 15px; line-height: 1.25; }
+.np-dash-identity .np-profilename { font-size: 14px; line-height: 1.25; }
 .np-dash-identity .np-profileemail { font-size: 12px; line-height: 1.25; }
-.np-dash-rankchip { font-family: var(--mono); font-size: 12px; letter-spacing: .3px; color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-pill); padding: 4px 12px; white-space: nowrap; background: var(--tint-1); }
-/* KPI cluster: compact label + number cards (no descriptive sub-line). */
+.np-dash-rankchip { font-family: var(--mono); font-size: 12px; letter-spacing: .02em; color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-pill); padding: 4px 12px; white-space: nowrap; background: var(--tint-1); }
 .np-dash-kpis { grid-column: span 4; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .np-dash-kpis .np-statcard { padding: 10px 14px; gap: 2px; justify-content: center; }
-.np-dash-kpis .np-statnum { font-size: 23px; }
+.np-dash-kpis .np-statnum { font-size: 22px; }
 .np-dash-radar { grid-column: span 5; }
 .np-dash-mid { grid-column: span 3; display: flex; flex-direction: column; gap: 14px; }
 .np-dash-lead { grid-column: span 4; }
 .np-dash-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 2px; }
-/* Dashboard action buttons use the canonical look (.np-secondary / .np-danger, added in
-   the markup); this class only carries the dashboard-specific comfortable touch height. */
 .np-dash-actbtn { min-height: 42px; }
 .np-dash-panel { padding: var(--pad-card-compact); }
 .np-dash-subrow { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .np-dash-subrow:last-child { margin-bottom: 0; }
-.np-dash-sublabel { width: 84px; font-size: 14px; }
-/* ---- §7 breadth gate (by-subject): gated band chip + binding-coverage line ---- */
+.np-dash-sublabel { width: 84px; font-size: 13.5px; }
 .np-dash-subwrap { margin-bottom: 12px; }
 .np-dash-subwrap:last-child { margin-bottom: 0; }
 .np-dash-subwrap .np-dash-subrow { margin-bottom: 4px; }
 .np-dash-subgate { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-left: 26px; }
-.np-dash-subband { font-family: var(--ui); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; color: var(--subject, var(--text)); border: 1px solid var(--line-strong); border-radius: var(--radius-pill); padding: 2px 9px; white-space: nowrap; }
+.np-dash-subband { font-family: var(--ui); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--subject, var(--text)); border: 1px solid var(--line-strong); border-radius: var(--radius-pill); padding: 2px 9px; white-space: nowrap; }
 .np-dash-subgatetext { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); line-height: 1.4; }
 .np-dash-focus { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 6px; }
 .np-dash-focusrow { display: flex; align-items: center; gap: 8px; }
-/* Panel header / body split. At base width these are plain blocks (the body only
-   becomes a scroll container under the ≥1024px height-lock below). */
 .np-dash-cardhead { margin-bottom: 10px; }
 
-/* ---- dashboard slide-over drawers (trends + answer review) ----
-   Portaled to <body> (outside the inert background); ARIA dialog with Escape,
-   focus-trap, scroll-lock, focus-restore. */
+/* ---- dashboard slide-over drawers (trends + answer review) ---- */
 .np-drawer-backdrop {
   position: fixed; inset: 0; z-index: 110;
   display: flex; justify-content: flex-end;
   background: var(--scrim);
-  backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
-  animation: npBackdropIn .22s ease both;
+  backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  animation: npBackdropIn .2s ease both;
 }
 .np-drawer {
   position: relative; height: 100%; width: min(760px, 94vw); margin-left: auto;
-  background: var(--panel); border-left: 1px solid var(--line);
-  box-shadow: -24px 0 60px rgba(0, 0, 0, .5);
+  background: var(--panel); border-left: 1px solid var(--line-strong);
+  box-shadow: var(--shadow-lg);
   display: flex; flex-direction: column;
-  animation: npDrawerIn .28s cubic-bezier(.2, .7, .2, 1) both;
+  animation: npDrawerIn .26s cubic-bezier(.2, .7, .2, 1) both;
 }
 .np-drawer-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 20px; padding-top: max(18px, env(safe-area-inset-top)); border-bottom: 1px solid var(--line); flex: 0 0 auto; }
 .np-drawer-close { color: var(--muted); }
 .np-drawer-body { padding: 18px 20px 28px; padding-bottom: max(28px, env(safe-area-inset-bottom)); overflow-y: auto; flex: 1 1 auto; }
 @keyframes npDrawerIn { from { transform: translateX(100%); } to { transform: none; } }
 
-/* ---- dashboard guest gate (blurred preview + sign-in prompt) ----
-   Scoped to the dashboard body (NOT a full-screen modal) so the nav stays usable
-   for a guest who'd rather keep exploring. */
+/* ---- dashboard guest gate (blurred preview + sign-in prompt) ---- */
 .np-dash-gatewrap { position: relative; min-height: 440px; }
 .np-dash-gateblur { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; filter: blur(5px); opacity: var(--disabled-opacity); pointer-events: none; user-select: none; }
-/* The surface recipe comes from .np-surface-elevated (added in the markup); this only
-   positions the card centered over the blurred preview. */
 .np-dash-gatecard {
   position: absolute; inset: 0; margin: auto;
   width: 100%; max-width: var(--w-narrow); height: max-content;
 }
 
-/* ≥1024px: the Dashboard becomes a VIEWPORT-TALL app frame so the whole grid —
-   including the action bar — fits one screen with NO page scroll; any panel whose
-   content overflows scrolls INSIDE its own card. A flex chain (shell → main → frame
-   → grid) passes the viewport height down, and `min-height: 0` at every level
-   defeats the default min-height:auto blowout that would otherwise re-introduce a
-   page scrollbar. (Pure CSS — `1fr` measures the header/nav chrome for us; no JS.) */
+/* ≥1024px: the Dashboard becomes a VIEWPORT-TALL app frame (no page scroll);
+   panels scroll INSIDE their cards. The sidebar carries the chrome, so the
+   frame only has to budget the page header + grid. */
 @media (min-width: 1024px) {
   .np-shell--dash {
     height: 100vh;            /* legacy fallback */
-    height: 100svh;          /* fits on first paint, immune to mobile toolbar reflow */
+    height: 100svh;           /* fits on first paint, immune to mobile toolbar reflow */
     display: flex; flex-direction: column; overflow: hidden;
-    padding-bottom: 24px;    /* reclaim the 60px bottom pad for the no-scroll budget */
+    padding-bottom: 24px;     /* reclaim the bottom pad for the no-scroll budget */
   }
-  .np-shell--dash > .np-top,
-  .np-shell--dash > .np-nav { flex: 0 0 auto; }
-  /* The footer is part of the chrome on scrolling tabs, but the height-locked Dashboard
-     is a no-scroll app frame (overflow:hidden) — so the prototype footer is intentionally
-     hidden here rather than clipped past the viewport. It returns below 1024px. */
   .np-shell--dash > .np-foot { display: none; }
   .np-shell--dash > .np-main { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
   .np-shell--dash > .np-main > .np-dash-frame { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-  /* the page header is a fixed band; the grid below it gets the remaining height.
-     Pin the title smaller here (vs the full clamp other tabs use) to reclaim the
-     no-scroll height budget so the bento panels aren't crowded on ~1080p laptops. */
   .np-dash-frame > .np-dash-pagehead { flex: 0 0 auto; margin-bottom: 10px; }
-  .np-dash-pagehead .np-h2 { font-size: 24px; }
-  .np-dash-pagehead .np-lede { font-size: 15px; }
+  .np-dash-pagehead .np-h2 { font-size: 22px; }
+  .np-dash-pagehead .np-lede { font-size: 14px; }
 
-  /* the grid fills the remaining height as a 3-row frame: identity+KPIs · panels · actions */
   .np-dash-frame > .np-dash {
     flex: 1 1 auto; min-height: 0; gap: 12px;
     grid-template-rows: auto 1fr auto;
-    align-items: stretch;       /* let the row-2 cards fill the 1fr track */
+    align-items: stretch;
     overflow: hidden;
   }
   .np-dash-frame .np-dash-identity { grid-row: 1; }
@@ -612,14 +699,12 @@ body {
   .np-dash-frame .np-dash-lead     { grid-row: 2; min-height: 0; }
   .np-dash-frame .np-dash-actions  { grid-row: 3; }
 
-  /* every scrolling card is a flex column: fixed head + one overflow-y body */
   .np-dash-frame .np-dash-radar,
   .np-dash-frame .np-dash-mid > .np-card,
   .np-dash-frame .np-dash-lead > .np-card {
     display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 16px;
   }
   .np-dash-frame .np-dash-lead { display: flex; flex-direction: column; }
-  /* the mid stack: By subject keeps its natural height, Why-rank-moved fills + scrolls */
   .np-dash-frame .np-dash-mid > .np-card:first-child { flex: 0 0 auto; }
   .np-dash-frame .np-dash-mid > .np-card:last-child { flex: 1 1 0; }
 
@@ -627,34 +712,18 @@ body {
   .np-dash-frame .np-dash-cardbody {
     flex: 1 1 auto; min-height: 0;
     overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable;
-    scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, .18) transparent;
-    /* scroll-shadow fade affordance (the panel bg is #12161f) so "more below" reads */
-    background:
-      linear-gradient(#12161f 30%, rgba(18, 22, 31, 0)) center top,
-      linear-gradient(rgba(18, 22, 31, 0), #12161f 70%) center bottom,
-      radial-gradient(farthest-side at 50% 0, rgba(0, 0, 0, .4), transparent) center top,
-      radial-gradient(farthest-side at 50% 100%, rgba(0, 0, 0, .4), transparent) center bottom;
-    background-repeat: no-repeat;
-    background-size: 100% 28px, 100% 28px, 100% 10px, 100% 10px;
-    background-attachment: local, local, scroll, scroll;
+    scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent;
   }
-  .np-dash-frame .np-dash-cardbody:focus-visible { outline: 2px solid var(--math); outline-offset: -2px; border-radius: 8px; }
+  .np-dash-frame .np-dash-cardbody:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 8px; }
   .np-dash-frame .np-dash-cardbody::-webkit-scrollbar { width: 8px; }
-  .np-dash-frame .np-dash-cardbody::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .16); border-radius: 4px; }
+  .np-dash-frame .np-dash-cardbody::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 4px; }
 
-  /* the radar shrinks to fit and never forces the card taller than its 1fr track */
   .np-dash-frame .np-dash-radar .np-chart { max-height: 380px; }
 
-  /* (the slim top band is driven by the compact identity/KPI base rules above —
-     no descriptive sub-lines, so row 1 stays ~64px and the panels row gets the rest) */
-  /* pinned action bar: a clear divider + comfortable 44px touch targets */
   .np-dash-frame .np-dash-actions { padding-top: 12px; border-top: 1px solid var(--line); }
   .np-dash-frame .np-dash-actbtn { min-height: 44px; }
 }
 
-/* Dashboard collapses to a single column (and the page may scroll) below the
-   widescreen breakpoint — the no-scroll guarantee is a 1920×1080 desktop goal. The
-   height-lock above is min-width:1024 only, so below it the page scrolls normally. */
 @media (max-width: 1023.98px) {
   .np-dash { grid-template-columns: 1fr; }
   .np-dash-identity, .np-dash-kpis, .np-dash-radar, .np-dash-mid, .np-dash-lead, .np-dash-actions { grid-column: 1 / -1; }
@@ -667,11 +736,11 @@ body {
 /* ---- admin dashboard ---- */
 .np-admin-row { padding: var(--pad-card-compact); margin-bottom: 10px; }
 .np-admin-rowhead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.np-admin-rowhead strong { font-size: 15px; }
-.np-admin-badge { font-family: var(--mono); font-size: 11px; letter-spacing: .3px; padding: 2px 7px; border-radius: var(--radius-pill); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.np-admin-rowhead strong { font-size: 14px; }
+.np-admin-badge { font-family: var(--mono); font-size: 11px; letter-spacing: .02em; padding: 2px 7px; border-radius: var(--radius-pill); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
 .np-admin-neutral { color: var(--muted); }
-.np-admin-ok { color: var(--phys); border-color: rgba(91,214,196,.4); }
-.np-admin-warn { color: var(--math); border-color: rgba(242,180,65,.4); }
+.np-admin-ok { color: var(--phys); border-color: var(--success-border); }
+.np-admin-warn { color: var(--math); border-color: var(--math-soft); }
 .np-admin-danger { color: var(--danger); border-color: var(--danger-border); }
 .np-admin-meta { font-family: var(--mono); font-size: 12px; color: var(--muted); }
 .np-admin-preview { margin-top: 8px; font-size: 14px; color: var(--text); line-height: 1.5; opacity: .9; }
@@ -686,24 +755,36 @@ body {
 .np-hub-filters .np-chip { cursor: pointer; background: var(--tint-1); }
 .np-hub-filters .np-chip:hover { background: var(--tint-hover); }
 .np-hub-filters .np-chip.active { background: var(--tint-hover); border-color: var(--line-strong); }
-/* The search reuses .np-input (a textarea style: borderless, transparent, min-height
-   120px), so override those to render as a proper one-line input that matches the cards.
-   Focus uses the canonical gold :focus-visible ring (a11y block) plus this subtle fill. */
 /* font-size 16px (not 15) so iOS Safari doesn't zoom-on-focus into this input. */
-.np-hub-search { flex: 1; min-width: 200px; max-width: 340px; min-height: 0; padding: 11px 14px; border-radius: 10px; background: var(--tint-1); border: 1px solid var(--line-strong); font-size: 16px; line-height: 1.4; }
+.np-hub-search { flex: 1; min-width: 200px; max-width: 340px; min-height: 0; padding: 11px 14px; border-radius: var(--radius-btn); background: var(--tint-1); border: 1px solid var(--line-strong); font-size: 16px; line-height: 1.4; }
 .np-hub-search:focus { border-color: var(--line-strong); background: var(--tint-2); }
 .np-hub-topic { margin: 4px 0 14px; }
-.np-hub-topiclabel { font-family: var(--mono); font-size: 11px; letter-spacing: .5px; text-transform: uppercase; color: var(--muted); margin: 10px 0 7px; }
-/* Learn tab: the §7 breadth-gate progress counter beside each rank header. */
+.np-hub-topiclabel { font-family: var(--mono); font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); margin: 10px 0 7px; }
 .np-learncount { margin-left: 8px; color: var(--muted); font-weight: 400; opacity: .85; }
 .np-concepttag.np-hub-unapproved { border-style: dashed; color: var(--muted); font-style: italic; }
 
-/* ---- mobile touch-target comfort (kept LAST so these win over the base chip/summary
-   sizing on equal specificity — source order matters for single-class selectors) ----
-   The disclosure/reveal summaries ("How this score is computed", "Reveal the full
-   solution") were ~20px tall, below the WCAG 2.5.8 24px floor on touch; size them to a
-   comfortable 44px. On phones, the weak-concept / concept chips reach 44px too. */
+/* ---- the page shell (content column) ----
+   Safe-area aware: keeps side/bottom content clear of notches + the home
+   indicator (viewport-fit=cover is set in app/layout.js). */
+.np-shell {
+  padding: 28px clamp(16px, 4vw, 48px) 60px;
+  padding-left: max(clamp(16px, 4vw, 48px), env(safe-area-inset-left));
+  padding-right: max(clamp(16px, 4vw, 48px), env(safe-area-inset-right));
+  padding-bottom: max(60px, env(safe-area-inset-bottom));
+}
+
+/* ---- mobile touch-target comfort (kept LAST so these win over the base chip/
+   summary sizing on equal specificity) ---- */
 summary.np-cardicon { min-height: 44px; }
 @media (max-width: 480px) {
   .np-weaktag-btn, .np-concepttag { min-height: 44px; }
+}
+
+/* ---- reduced motion: collapse every animation/transition to an instant ---- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
 }

@@ -5,12 +5,15 @@ import { contributionBreakdown, RUBRIC_MAX } from "@/lib/scoring";
 
 // Typed-error taxonomy → badge label + color. Keys match the grader's error `type`
 // (lib/gradeInput.js normalizeErrors allow-list); unknown → reasoning.
+// Muted valence mapping: conceptual (serious) → danger; strategic/reasoning →
+// "improve" gold; slips/communication (minor) → neutral grey. Inline style
+// resolves the var() tokens, so both themes stay in lockstep.
 export const ERROR_TYPES = {
-  conceptual: { label: "Conceptual", color: "var(--chem)" },
+  conceptual: { label: "Conceptual", color: "var(--danger)" },
   strategic: { label: "Strategic", color: "var(--math)" },
   reasoning: { label: "Reasoning", color: "var(--math)" },
   "execution-slip": { label: "Slip", color: "var(--muted)" },
-  communication: { label: "Communication", color: "var(--phys)" },
+  communication: { label: "Communication", color: "var(--muted)" },
 };
 
 export const hasReasoningError = (errors) =>
