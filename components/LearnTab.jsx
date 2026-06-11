@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import { SUBJECTS, ORDER } from "@/lib/scoring";
 import { RANKS, RANK_LABELS, conceptsFor, isRankWip, WIP_RANKS_NOTE, rootsFor, crossRootsFor } from "@/lib/curriculum";
 import { conceptState, MASTERY_LABELS } from "@/lib/mastery";
+import { rankCoverage } from "@/lib/promotion";
 import { loadGuide } from "@/lib/guides";
 import { loadMastery } from "@/lib/store";
 import { SubjectGlyph } from "@/components/ui";
@@ -54,7 +55,7 @@ export default function LearnTab({ onPractice, busyConcept = null } = {}) {
       />
     );
   }
-  return <CurriculumList stateFor={stateFor} onOpen={setSelected} />;
+  return <CurriculumList stateFor={stateFor} mastery={mastery} onOpen={setSelected} />;
 }
 
 // One concept chip, colored by mastery state. A non-grey state is also conveyed in
@@ -96,7 +97,7 @@ function MasteryLegend() {
 }
 
 // ---- the curriculum listing (subject → rank → concept chips) ----
-function CurriculumList({ stateFor, onOpen }) {
+function CurriculumList({ stateFor, mastery, onOpen }) {
   return (
     <div className="fade-up">
       <h2 className="np-h2">Learn</h2>
@@ -117,7 +118,16 @@ function CurriculumList({ stateFor, onOpen }) {
 
             {RANKS.map((rank) => (
               <div key={rank} className="np-learngroup">
-                <div className="np-hub-topiclabel" style={{ color }}>{RANK_LABELS[rank]}</div>
+                <div className="np-hub-topiclabel" style={{ color }}>
+                  {RANK_LABELS[rank]}
+                  {/* §7 breadth-gate progress for this rank: green concepts / total —
+                      the count that must reach N/N before the rank above unlocks. */}
+                  {!isRankWip(subject, rank) && (
+                    <span className="np-learncount">
+                      {rankCoverage(mastery, subject, rank).mastered}/{conceptsFor(subject, rank).length} mastered
+                    </span>
+                  )}
+                </div>
                 {isRankWip(subject, rank) ? (
                   <p className="np-hint" style={{ margin: "2px 0 0", fontStyle: "italic" }}>{WIP_RANKS_NOTE}</p>
                 ) : (

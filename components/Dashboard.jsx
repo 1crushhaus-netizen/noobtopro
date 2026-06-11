@@ -11,6 +11,7 @@ import {
   RUBRIC_LABELS,
   lowestRubricDimensions,
 } from "@/lib/scoring";
+import { gatedRankFor } from "@/lib/promotion";
 import Icon from "@/components/Icon";
 import { LineChart, BarChart, RadarChart, MiniBar } from "@/components/charts";
 import Leaderboard from "@/components/Leaderboard";
@@ -166,24 +167,50 @@ function KpiStats({ scores, attempts }) {
   );
 }
 
-// Per-subject score + band + a mini-bar and a practice shortcut.
-function BySubject({ scores, onPractice }) {
-  // Always exactly three rows → never overflows, so it stays a plain (non-scroll)
-  // card (no cardbody/scrollbar-gutter).
+// Per-subject score + a mini-bar + practice shortcut, with the §7 BREADTH-GATED
+// band underneath: the chip shows the COVERAGE-gated rank (lib/promotion.js —
+// display-layer only, the score itself is never capped here; §11.3 is open) and
+// the line tracks the binding curriculum cell ("master these to advance").
+function BySubject({ scores, mastery, onPractice }) {
+  // Always exactly three rows (each with one gate line) → never overflows, so it
+  // stays a plain (non-scroll) card (no cardbody/scrollbar-gutter).
   return (
     <div className="np-card np-dash-panel">
       <div className="np-charttitle" style={{ marginBottom: 12 }}>By subject</div>
-      {ORDER.map((k) => (
-        <div key={k} className="np-dash-subrow">
-          <SubjectGlyph subject={k} width={16} />
-          <span className="np-dash-sublabel">{SUBJECTS[k].label}</span>
-          <MiniBar value={scores[k]?.score || 0} color={SUBJECTS[k].color} />
-          <span style={{ fontFamily: "var(--mono)", fontWeight: 700, width: 58, textAlign: "right" }}>
-            {scores[k]?.score || 0}<span style={{ color: "var(--muted)" }}>/100</span>
-          </span>
-          <button className="np-ghost" onClick={() => onPractice && onPractice(k)} style={{ whiteSpace: "nowrap" }}>Practice</button>
-        </div>
-      ))}
+      {ORDER.map((k) => {
+        const g = gatedRankFor(scores[k]?.score || 0, mastery, k);
+        return (
+          <div key={k} className="np-dash-subwrap">
+            <div className="np-dash-subrow">
+              <SubjectGlyph subject={k} width={16} />
+              <span className="np-dash-sublabel">{SUBJECTS[k].label}</span>
+              <MiniBar value={scores[k]?.score || 0} color={SUBJECTS[k].color} />
+              <span style={{ fontFamily: "var(--mono)", fontWeight: 700, width: 58, textAlign: "right" }}>
+                {scores[k]?.score || 0}<span style={{ color: "var(--muted)" }}>/100</span>
+              </span>
+              <button className="np-ghost" onClick={() => onPractice && onPractice(k)} style={{ whiteSpace: "nowrap" }}>Practice</button>
+            </div>
+            <div className="np-dash-subgate">
+              <span className="np-dash-subband" style={{ "--subject": SUBJECTS[k].color }}>{g.rank.name}</span>
+              {g.gated ? (
+                // The score qualifies for a higher band, but §7 holds the rank until
+                // the blocking curriculum is mastered (state in text, not color alone).
+                <span className="np-dash-subgatetext">
+                  <Icon name="lock" size={11} /> Score at {g.ungated.name} — master the{" "}
+                  {g.next.total - g.next.mastered} remaining {g.next.rankLabel} concept
+                  {g.next.total - g.next.mastered === 1 ? "" : "s"} in Learn to advance
+                </span>
+              ) : g.next ? (
+                <span className="np-dash-subgatetext">
+                  {g.next.complete
+                    ? `${g.next.rankLabel} curriculum complete — keep climbing`
+                    : `${g.next.rankLabel} curriculum: ${g.next.mastered}/${g.next.total} mastered`}
+                </span>
+              ) : null}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -283,6 +310,7 @@ export default function Dashboard({
   history = [],
   loadLeaderboard,
   loadReviews,
+  loadMastery,
   onStartDiagnostic,
   onPractice,
   onLearn,
@@ -296,6 +324,22 @@ export default function Dashboard({
   const [drawer, setDrawer] = useState(null);
   // ≥1024px (the panels scroll internally there) → mark the scroll regions focusable.
   const isWide = useIsWide();
+  // Per-concept mastery map for the §7 breadth gate (same injected-loader pattern
+  // as loadLeaderboard/loadReviews). Signed-in only (the guest gate fetches
+  // nothing); a load failure just renders ungated bands — nothing is lost.
+  const [mastery, setMastery] = useState({});
+  useEffect(() => {
+    if (!user || !loadMastery) return;
+    let alive = true;
+    loadMastery()
+      .then((res) => {
+        if (alive && res && res.mastery) setMastery(res.mastery);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [user, loadMastery]);
 
   // Make the page background inert while a drawer is open (proper modal focus
   // containment). The guest gate does NOT inert the page — it's scoped to the
@@ -394,7 +438,7 @@ export default function Dashboard({
         <KpiStats scores={scores} attempts={attempts} />
         <RadarPanel scores={scores} onPractice={onPractice} onLearn={onLearn} scrollRegion={isWide} />
         <div className="np-dash-mid">
-          <BySubject scores={scores} onPractice={onPractice} />
+          <BySubject scores={scores} mastery={mastery} onPractice={onPractice} />
           <RecentMoves history={history} scrollRegion={isWide} />
         </div>
         <div className="np-dash-lead">

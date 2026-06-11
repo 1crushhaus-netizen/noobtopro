@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import Dashboard from "@/components/Dashboard";
+import { conceptsFor } from "@/lib/curriculum";
 
 afterEach(cleanup);
 
@@ -70,6 +71,53 @@ describe("Dashboard — signed-in identity + KPIs + by-subject", () => {
     render(<Dashboard user={user} scores={scores} history={history} onPractice={() => {}} />);
     // rankFor(30) → "Foundational" band name in the identity chip (plus the KPI sub).
     expect(screen.getAllByText(/Foundational/i).length).toBeGreaterThan(0);
+  });
+});
+
+describe("Dashboard — §7 curriculum breadth gate (by-subject, display-layer)", () => {
+  // Every math elementary concept green (≥2 hits at ≥70 — lib/mastery.js).
+  function elementaryMathGreens() {
+    const subj = {};
+    for (const c of conceptsFor("math", "elementary")) {
+      subj[c.key] = { attempts: 2, greenHits: 2, lastQuality: 85, bestQuality: 90 };
+    }
+    return { math: subj };
+  }
+
+  it("with no mastery data, a scored subject is GATED: first-band chip + lock explanation; the score is untouched", () => {
+    render(<Dashboard user={user} scores={scores} history={history} onPractice={() => {}} />);
+    // math score 60 → depth says Advanced, but nothing is mastered → chip gated down.
+    expect(screen.getAllByText("Absolute beginner").length).toBeGreaterThan(0);
+    expect(screen.getByText(/Score at Advanced — master the 21 remaining Elementary concepts in Learn to advance/)).toBeTruthy();
+    // The score itself is NOT capped (§11.3 stays open — label gating only).
+    expect(screen.getAllByText("60").length).toBeGreaterThan(0);
+  });
+
+  it("loads mastery via the injected loader and UNGATES bands whose lower curricula are covered", async () => {
+    const loadMastery = vi.fn(async () => ({ mastery: elementaryMathGreens() }));
+    // math depth = Foundational; physics/chemistry at 0 so no OTHER subject is gated.
+    const s = {
+      math: { score: 30, weakConcepts: [], comment: "" },
+      physics: { score: 0, weakConcepts: [], comment: "" },
+      chemistry: { score: 0, weakConcepts: [], comment: "" },
+    };
+    render(<Dashboard user={user} scores={s} history={history} onPractice={() => {}} loadMastery={loadMastery} />);
+    await waitFor(() => expect(loadMastery).toHaveBeenCalledTimes(1));
+    // Elementary fully covered → Foundational holds ungated; the next gate is Middle's set.
+    await waitFor(() => expect(screen.getByText(/Middle curriculum: 0\/23 mastered/)).toBeTruthy());
+    expect(screen.queryByText(/Score at Foundational/)).toBeNull(); // no lock line for math
+  });
+
+  it("an ungated bottom-band subject shows its own rank's coverage progress (the nudge, not a lock)", () => {
+    render(<Dashboard user={user} scores={scores} history={history} onPractice={() => {}} />);
+    // chemistry score 0 → Absolute beginner, ungated → progress toward Foundational.
+    expect(screen.getByText(/Elementary curriculum: 0\/9 mastered/)).toBeTruthy();
+  });
+
+  it("the guest gate never calls loadMastery (no data fetches for guests)", () => {
+    const loadMastery = vi.fn();
+    render(<Dashboard user={null} scores={null} history={[]} loadMastery={loadMastery} onSignIn={() => {}} />);
+    expect(loadMastery).not.toHaveBeenCalled();
   });
 });
 

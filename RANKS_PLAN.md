@@ -113,9 +113,19 @@ Each answer is graded on **9 reasoning-chain axes, 0–4 each**. Aggregation is 
 
 ---
 
-## 7. Curriculum & mastery (the breadth gate)
+## 7. Curriculum & mastery (the breadth gate) — ✅ SHIPPED
 
 This is the layer that turns "an Elo number" into "objective, rank-defined understanding."
+
+> **Shipped (and FINAL in shape — the owner resolved §11.3/§11.5 on 2026-06-11):** the
+> coverage engine + gated display rank in `lib/promotion.js` (green-only `rankCoverage`
+> per subject×rank; `gatedRankFor` walking the score-derived band back to the highest
+> rank whose lower curricula are fully mastered — the FULL set, `RANK_COVERAGE_REQUIRED
+> = 1`, confirmed). Surfaced on the Dashboard's by-subject rows (gated band chip + lock
+> line + binding-cell nudge) and the Learn tab's rank headers (x/N mastered). Per the
+> §11.3 decision the SCORE is never capped — the rank label alone carries the gate; per
+> §11.5 there is no grandfathering; the overall identity chip stays score-derived (a
+> pure depth aggregate) with the by-subject rows carrying the gate.
 
 - **Curriculum:** a defined **concept set per `(subject, rank)`** — the concepts that
   *define* that rank's level (e.g. "Elementary math = {place value, basic fractions,
@@ -196,15 +206,17 @@ How is a concept marked mastered for a learner?
   explain; less granular.
 - Drives storage model, gaming-resistance, and how "coverage" is computed for the gate.
 
-### 11.3 Rating vs. the rank cap
+### 11.3 Rating vs. the rank cap — ✅ RESOLVED: Option B (owner decision, 2026-06-11)
 When a learner's *depth* (rating) would exceed their current rank but they haven't covered
 the curriculum:
 - **Option A — soft-cap the score at the rank ceiling** (e.g. hold at 139 until Middle's
   curriculum is complete, then release the accumulated rating into High). Clear "you're
   gated" signal; the number can plateau.
-- **Option B — uncapped rating, gated *displayed rank*:** the number rises past 139 but the
-  rank label stays "Middle (curriculum X% covered)" until coverage completes.
-- Affects what number the learner sees and how the "do the rest of the curriculum" nudge reads.
+- **Option B — uncapped rating, gated *displayed rank*** ✅ **CHOSEN:** the number keeps
+  rewarding every good attempt; the rank label stays gated with an explicit lock line
+  ("Score at <depth band> — master the N remaining <rank> concepts to advance") until
+  coverage completes. No rating-engine changes; shipped in `lib/promotion.js` + the
+  Dashboard by-subject rows (§7).
 
 ### 11.4 Adaptive diagnostic length / latency
 Each diagnostic step is a sequential graded round-trip (can't batch).
@@ -212,11 +224,13 @@ Each diagnostic step is a sequential graded round-trip (can't batch).
   (practice converges the rest). Interleaving subjects hides some latency; the cost/rate-limit
   guards apply. Decision: the step cap and the latency budget.
 
-### 11.5 (further) Existing-user migration & grandfathering
+### 11.5 (further) Existing-user migration & grandfathering — ✅ RESOLVED: no grandfathering (owner decision, 2026-06-11)
 The rating remaps cleanly (×3.5, scale-free), **but the new coverage gate is new data**:
 existing users have no per-concept mastery history. Options: grandfather everyone at their
 current rank (gate only *future* promotions), or require retroactive coverage (re-locks
-progress — likely too punitive). Recommendation: grandfather at current rank.
+progress — likely too punitive). **Decision: no grandfathering** — every account's rank
+label climbs from zero coverage (the score is untouched and the lock line explains why);
+chosen while the user base is still test accounts, the cheapest moment for the honest rule.
 
 ### 11.6 (further) Demotion / de-ranking
 Can a learner drop a rank if their rating falls below the band (e.g. a sustained regression)?
