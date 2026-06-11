@@ -1,8 +1,12 @@
-# noobtopro — Ranking System Redesign (Proposed Design)
+# noobtopro — Ranking System Redesign
 
-> **Status: PROPOSED — not yet implemented.** This documents the *target* Elo/ranking
-> system only. It supersedes the current 0–100 Glicko display + 5 fixed bands. The
-> open items in §11 must be resolved before this is a buildable spec.
+> **Status: PARTIALLY SHIPPED; every §11 open item is now RESOLVED (owner decisions,
+> 2026-06-11).** Shipped against the live 0–100 scale: per-concept mastery (§12.1), the
+> hand-authored prerequisite graphs + concept pages + written guides (§12.2–12.3), the
+> curriculum breadth gate (§7, Option-B label gating), the unified Glicko engine, and
+> reasoning-anchored full-range diagnostic seeding. The remaining BUILD items are the
+> §8 adaptive diagnostic (fully decided + specced — see §8/§11.4) and, still optional/
+> unscheduled, the 0–350 rescale (§2–§3 cosmetics; the engine is scale-free).
 
 ---
 
@@ -140,16 +144,25 @@ This is the layer that turns "an Elo number" into "objective, rank-defined under
 
 ---
 
-## 8. Adaptive diagnostic placement
+## 8. Adaptive diagnostic placement — ✅ DECIDED (owner, 2026-06-11; build pending)
 
-- **Branching:** start each subject near the middle (~High), grade, nudge a provisional
-  rating up/down, and pick the next question's rank from that — ~4–6 steps per subject,
-  interleaving the three subjects round-robin to hide grading latency.
-- **Final placement** = the **reasoning-anchored, difficulty-weighted aggregate** of the
-  answers given (full 0–350 range: a blank/idk test lands at the dock floor, a flawless one
-  near 350). This seeds the Glicko state at **full RD** so subsequent practice refines it.
-- This replaces today's fixed 9-question batch-graded diagnostic; the diagnostic becomes an
-  iterative, stateful sequence (like practice).
+The next build item. All shape decisions are made:
+
+- **Source = a CURATED per-(subject, band) bank** (the §11.4 decision): every step serves
+  a vetted reasoning item from an expanded diagnosticBank covering **all five bands —
+  including a PhD-band rung** (placement can land anywhere on the true range even while
+  the Doctorate practice tier stays WIP). Zero generation tokens; grading is the only
+  model call per step; placement stays standardized across users.
+- **Branching = simple ±1 band per step**, starting at the middle (intermediate band):
+  graded quality above the threshold → one band up, below → one band down. Deterministic
+  given the grades, explainable, and with 4 steps it reaches either extreme.
+- **Length = 4 steps per subject** (12 graded rounds), interleaving the three subjects
+  round-robin to hide grading latency.
+- **Final placement** = the existing **reasoning-anchored, difficulty-weighted aggregate**
+  of the answers given (the shipped full-range seeding math, unchanged), seeding Glicko
+  at full RD so practice refines it.
+- This replaces today's fixed 9-question batch-graded diagnostic; the diagnostic becomes
+  an iterative, stateful sequence (like practice).
 
 ---
 
@@ -177,12 +190,13 @@ This is the layer that turns "an Elo number" into "objective, rank-defined under
 
 ---
 
-## 11. Open items (must resolve before build)
+## 11. Open items — ✅ ALL RESOLVED (owner decisions, 2026-06-11)
 
-These four (plus three further considerations) are unresolved and materially change the
-size and behavior of the build.
+Every item below now carries its decision; nothing in this section blocks a build.
 
-### 11.1 Curriculum source — *curated vs. generated*
+### 11.1 Curriculum source — ✅ RESOLVED in practice: Option A (curated structure + generated drills)
+The shipped `lib/curriculum.js` (224 curated concepts × 5 ranks, standards-grounded) with
+Groq-generated practice questions IS Option A — the recommendation, now reality.
 Absolute difficulty + a defined concept set per rank strongly implies a **curated
 curriculum**: a human defines "Elementary math = these concepts, at these difficulties."
 - **What must be authored:** for each of 3 subjects × 5 ranks, the concept list, each
@@ -218,11 +232,11 @@ the curriculum:
   coverage completes. No rating-engine changes; shipped in `lib/promotion.js` + the
   Dashboard by-subject rows (§7).
 
-### 11.4 Adaptive diagnostic length / latency
+### 11.4 Adaptive diagnostic length / latency — ✅ RESOLVED (owner decision, 2026-06-11)
 Each diagnostic step is a sequential graded round-trip (can't batch).
-- Cap at ~4–6 steps/subject? Tighter (e.g. 3) = faster but less accurate first placement
-  (practice converges the rest). Interleaving subjects hides some latency; the cost/rate-limit
-  guards apply. Decision: the step cap and the latency budget.
+- **Decision: 4 steps per subject** (12 graded rounds, subjects interleaved round-robin),
+  served from a **curated all-five-band bank** (incl. a PhD rung) with **simple ±1-band
+  branching** from the middle. Full spec in §8.
 
 ### 11.5 (further) Existing-user migration & grandfathering — ✅ RESOLVED: no grandfathering (owner decision, 2026-06-11)
 The rating remaps cleanly (×3.5, scale-free), **but the new coverage gate is new data**:
@@ -232,18 +246,22 @@ progress — likely too punitive). **Decision: no grandfathering** — every acc
 label climbs from zero coverage (the score is untouched and the lock line explains why);
 chosen while the user base is still test accounts, the cheapest moment for the honest rule.
 
-### 11.6 (further) Demotion / de-ranking
+### 11.6 (further) Demotion / de-ranking — ✅ RESOLVED (owner decision, 2026-06-11)
 Can a learner drop a rank if their rating falls below the band (e.g. a sustained regression)?
-If so, does dropping a rank re-lock the lower curriculum? Recommendation: allow rating to
-fall within bands, but do not strip *covered* curriculum mastery (coverage is monotonic;
-only the live rating moves). Needs an explicit call.
+- **Decision: the label tracks the score freely in BOTH directions** (no sticky floor, no
+  hysteresis, no stored rank state) — consistent with §11.3 Option B's 'the label tells the
+  truth'. **Covered curriculum mastery is never stripped** (green is sticky; coverage is
+  monotonic), so re-promotion after a regression only requires the score to recover — the
+  breadth stays proven. This is the shipped behavior; it is now policy, not an accident.
 
-### 11.7 (further) Grader objectivity ceiling
+### 11.7 (further) Grader objectivity ceiling — ✅ RESOLVED (owner decision, 2026-06-11)
 "Extremely objective" is bounded by LLM-as-judge. Beyond what exists (compute-first grading,
 temp 0, anti-gaming rules, final-answer-as-diagnostic), optional hardening: deterministic /
 symbolic checks where the domain allows (numeric answers + units), multi-sample grader
-consensus, and tight per-rank rubric anchors. Decision: how far to invest here, given the
-whole anti-gaming guarantee leans on grader robustness.
+consensus, and tight per-rank rubric anchors.
+- **Decision: the current stack is enough for now** — accept the LLM-judge ceiling and
+  revisit with real-user evidence (the live-model ordering eval in
+  `scripts/eval-grading-ordering.mjs` remains the regression harness for this guarantee).
 
 ---
 
