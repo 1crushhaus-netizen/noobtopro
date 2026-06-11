@@ -149,7 +149,9 @@ function KpiStats({ scores, attempts }) {
     <div className="np-dash-kpis">
       <div className="np-card np-statcard">
         <span className="np-eyebrow np-eyebrow--xs">Doctorate index</span>
-        <span className="np-statnum" style={{ color: "var(--math)" }}>
+        {/* Neutral ink like its siblings — the KPI is not a subject or a valence,
+            so it gets no chromatic accent under the greyscale system. */}
+        <span className="np-statnum">
           {phdIndex(scores)}<span style={{ color: "var(--muted)", fontSize: 15 }}> / 350</span>
         </span>
       </div>
@@ -468,14 +470,14 @@ export default function Dashboard({
           <div className="np-charttitle">Total points over time</div>
           <div className="np-chartsub">From your starting scores through every graded attempt.</div>
           {linePoints.length >= 2 ? (
-            <LineChart values={linePoints} yMax={1050} color={SUBJECTS.math.color} />
+            <LineChart values={linePoints} yMax={1050} />
           ) : (
             <p className="np-statsub">Answer a practice problem to start the trend line.</p>
           )}
         </div>
         <div className="np-card np-chartcard">
           <div className="np-charttitle">Points gained and lost</div>
-          <div className="np-chartsub">Each bar is one graded attempt — green when your reasoning earned points, coral when it cost them.</div>
+          <div className="np-chartsub">Each bar is one graded attempt — above the line when your reasoning earned points, below it when it cost them.</div>
           {barItems.length >= 1 ? (
             <BarChart items={barItems} />
           ) : (
