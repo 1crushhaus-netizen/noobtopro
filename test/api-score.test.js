@@ -125,6 +125,50 @@ const DIAG_GRADE = {
   comment: "Solid attempt.",
 };
 
+// ---- numeric verifier fixtures (lib/numericVerify.js) -----------------------
+// A grade whose `solve.check` PROVES the grader's own finalAnswer wrong
+// (100/32 = 3.125, not 31.25) while the learner's stated answer matches the
+// machine value — the exact failure mode the verifier exists to catch.
+const VERIFY_BAD = {
+  rubric: mkRubric(3, { computation: 1 }),
+  solve: { principle: "p", steps: ["s1"], finalAnswer: "31.25 m", units: "m", check: "(100 / 32) m" },
+  errors: [{ type: "execution-slip", step: "last line", severity: "minor", what: "decimal slip", feedbackMode: "point", message: "m", socraticPrompt: "" }],
+  learnerAnswer: "3.125 m",
+  finalAnswerMatches: false,
+  strengths: ["s"],
+  improvements: ["i"],
+  workedSolution: "ws",
+  correctnessNote: "c",
+  socraticHint: "h",
+  microLesson: "ml",
+  weakConcepts: [],
+};
+// What an honest corrective re-grade returns: arithmetic fixed, check consistent.
+const VERIFY_FIXED = {
+  ...VERIFY_BAD,
+  rubric: mkRubric(3, { computation: 4 }),
+  solve: { ...VERIFY_BAD.solve, finalAnswer: "3.125 m" },
+  errors: [],
+  finalAnswerMatches: true,
+};
+
+// Stub Groq to return payloads IN SEQUENCE (clamped to the last) — the verifier's
+// corrective re-grade is a second upstream call with a different answer.
+function mockGroqSeq(payloads) {
+  let n = 0;
+  const fetchMock = vi.fn(async () => {
+    const payload = payloads[Math.min(n, payloads.length - 1)];
+    n += 1;
+    return {
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify(payload) } }], usage: {} }),
+      text: async () => "",
+    };
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
 // The score /api/score computes for one practice attempt, using the REAL functions: the
 // per-attempt headline is the TRANSPARENT weighted mean of the rubric (scoreFromRubric, the
 // raw outcome), and the subject score is the unified Glicko-2 derivation (updateAxisRatings,
@@ -383,6 +427,85 @@ describe("POST /api/score practice — server-authoritative Glicko-2 score", () 
   });
 });
 
+// ---- numeric verifier on the practice path ----------------------------------
+describe("POST /api/score practice — numeric verifier (sandboxed arithmetic check)", () => {
+  const signedIn = () => {
+    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
+    const admin = fakeAdmin({ scoresRows: [{ subject: "math", score: 140, weak_concepts: [], comment: "", rubric: null, glicko: null }] });
+    storage.getAdmin.mockReturnValue(admin.sb);
+    return admin;
+  };
+
+  it("confirms a self-consistent grade and corrects a wrong learner flag WITHOUT a second Groq call", async () => {
+    const { calls } = signedIn();
+    // The grader's arithmetic checks out ((120-40)/16 = 5) and the learner matched
+    // it — but the grader misflagged the match and docked computation anyway.
+    const misflagged = {
+      ...VERIFY_BAD,
+      solve: { principle: "p", steps: ["s1"], finalAnswer: "5 m", units: "m", check: "((120 - 40) / 16) m" },
+      learnerAnswer: "5 m",
+    };
+    const fetchMock = mockGroqSeq([misflagged]);
+    const res = await POST(req({ kind: "practice", token: tok(), reasoning: REASONING }, { authHeader: true }));
+    expect(res.status).toBe(200);
+    const j = await res.json();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(j.verification).toEqual({ status: "confirmed", value: "5 m", changed: true });
+    expect(j.finalAnswerMatches).toBe(true);
+    expect(j.rubric.computation).toBe(4); // raise-only restore
+    expect(j.errors).toEqual([]); // the refuted final-number execution-slip is dropped
+    expect(j.reasoningScore).toBe(scoreFromRubric(normalizeRubric(mkRubric(3, { computation: 4 }))));
+    // The verdict rides the persisted attempt review.
+    const save = calls.rpc.find((c) => c.fn === "save_progress_for");
+    expect(save.args.p_review.feedback.verification.status).toBe("confirmed");
+  });
+
+  it("re-grades ONCE on a proven-wrong solve, injecting the server-verified value into the system prompt", async () => {
+    signedIn();
+    const fetchMock = mockGroqSeq([VERIFY_BAD, VERIFY_FIXED]);
+    const res = await POST(req({ kind: "practice", token: tok(), reasoning: REASONING }, { authHeader: true }));
+    expect(res.status).toBe(200);
+    const j = await res.json();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const system2 = JSON.parse(fetchMock.mock.calls[1][1].body).messages.find((m) => m.role === "system").content;
+    expect(system2).toContain("SERVER ARITHMETIC CHECK");
+    expect(system2).toContain("3.125 m");
+    expect(j.verification.status).toBe("regraded");
+    expect(j.finalAnswerMatches).toBe(true);
+    expect(j.rubric.computation).toBe(4);
+    expect(j.errors).toEqual([]);
+    // The CORRECTED grade is what scores and persists.
+    expect(j.reasoningScore).toBe(scoreFromRubric(normalizeRubric(VERIFY_FIXED.rubric)));
+  });
+
+  it("falls back to FIELD-LEVEL correction when the global Groq budget denies the re-grade (a successful grade is never 429'd)", async () => {
+    signedIn();
+    process.env.GLOBAL_GROQ_BUDGET_PER_MIN = "1"; // the primary grade consumes the whole window
+    const fetchMock = mockGroqSeq([VERIFY_BAD, VERIFY_FIXED]);
+    const res = await POST(req({ kind: "practice", token: tok(), reasoning: REASONING }, { authHeader: true }));
+    expect(res.status).toBe(200);
+    const j = await res.json();
+    expect(fetchMock).toHaveBeenCalledTimes(1); // the re-grade never fired
+    expect(j.verification.status).toBe("corrected");
+    // The learner's answer matches the machine value: flag + computation + slip fixed in place.
+    expect(j.finalAnswerMatches).toBe(true);
+    expect(j.rubric.computation).toBe(4);
+    expect(j.errors).toEqual([]);
+  });
+
+  it("NEVER re-fires the expensive vision path: an image grade falls back to field-level correction", async () => {
+    signedIn();
+    const PNG = { mime: "image/png", data: "iVBORw0KGgo=" };
+    const fetchMock = mockGroqSeq([VERIFY_BAD, VERIFY_FIXED]);
+    const res = await POST(req({ kind: "practice", token: tok(), reasoning: REASONING, image: PNG }, { authHeader: true }));
+    expect(res.status).toBe(200);
+    const j = await res.json();
+    expect(fetchMock).toHaveBeenCalledTimes(1); // exactly one (vision) upstream call
+    expect(j.verification.status).toBe("corrected");
+    expect(j.finalAnswerMatches).toBe(true);
+  });
+});
+
 // ---- diagnostic: auth-optional batch baseline ------------------------------
 // ---- adaptive diagnostic helpers (RANKS_PLAN §8) -----------------------------
 
@@ -507,6 +630,39 @@ describe("POST /api/score diagnostic — adaptive STEP (signed ±1-band walk)", 
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/restart the diagnostic/i);
     expect(failFetch).not.toHaveBeenCalled();
+  });
+
+  it("numeric verifier: a proven-wrong diagnostic grade re-grades once and the CORRECTED rubric feeds the walk", async () => {
+    const DIAG_BAD = {
+      subject: "math",
+      rubric: mkRubric(3, { computation: 0 }),
+      solve: { principle: "p", steps: ["s"], finalAnswer: "31.25 m", units: "m", check: "(100 / 32) m" },
+      errors: [],
+      learnerAnswer: "3.125 m",
+      finalAnswerMatches: false,
+      weakConcepts: ["w"],
+      comment: "c",
+    };
+    const DIAG_FIXED = {
+      ...DIAG_BAD,
+      rubric: mkRubric(3, { computation: 4 }),
+      solve: { ...DIAG_BAD.solve, finalAnswer: "3.125 m" },
+      finalAnswerMatches: true,
+    };
+    const fetchMock = mockGroqSeq([DIAG_BAD, DIAG_FIXED]);
+    const res = await POST(req({ kind: "diagnostic", token: stepTok({}), reasoning: REASONING }));
+    expect(res.status).toBe(200);
+    const j = await res.json();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const system2 = JSON.parse(fetchMock.mock.calls[1][1].body).messages.find((m) => m.role === "system").content;
+    expect(system2).toContain("SERVER ARITHMETIC CHECK");
+    // The corrected rubric is the step's quality — it routes the ±1-band walk and
+    // rides the signed chain.
+    const quality = scoreFromRubric(normalizeRubric(DIAG_FIXED.rubric));
+    expect(j.graded.reasoningScore).toBe(quality);
+    const v = verifyDiagToken(j.next.token);
+    expect(v.ok).toBe(true);
+    expect(v.state.transcript[0].s).toBe(quality);
   });
 
   it("image-bearing steps charge the :img budget (the multimodal path can't bypass the cap)", async () => {

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { POST } from "@/app/api/grade/route";
 import { _resetRateLimits } from "@/lib/rateLimit";
+import { scoreFromRubric, normalizeRubric } from "@/lib/scoring";
 
 // Substantive, multi-word reasoning the deterministic pre-grade dock lets through to
 // the (mocked) grader. Short/"idk"/single-word answers are docked with no Groq call.
@@ -330,6 +331,78 @@ describe("POST /api/grade — model output is normalized", () => {
     // below 50k chars (cap is 12k) so the prompt can't blow past the context window.
     const sentBody = fetchMock.mock.calls[0][1].body;
     expect(sentBody.length).toBeLessThan(20_000);
+  });
+});
+
+describe("POST /api/grade — numeric verifier (sandboxed arithmetic check)", () => {
+  // Sequenced Groq stub: the verifier's corrective re-grade is a second upstream
+  // call that returns a DIFFERENT (fixed) grade.
+  function mockGroqSeq(payloads) {
+    let n = 0;
+    const fetchMock = vi.fn(async () => {
+      const payload = payloads[Math.min(n, payloads.length - 1)];
+      n += 1;
+      return {
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: JSON.stringify(payload) } }] }),
+        text: async () => "",
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+  // The grader's check PROVES its stated finalAnswer wrong (100/32 = 3.125), while
+  // the learner's stated answer matches the machine value.
+  const VERIFY_BAD = {
+    rubric: { ...mkRubric(3), computation: 1 },
+    solve: { principle: "p", steps: ["s1"], finalAnswer: "31.25 m", units: "m", check: "(100 / 32) m" },
+    errors: [{ type: "execution-slip", step: "last", severity: "minor", what: "w", feedbackMode: "point", message: "m", socraticPrompt: "" }],
+    learnerAnswer: "3.125 m",
+    finalAnswerMatches: false,
+    correctnessNote: "n",
+    socraticHint: "h",
+    microLesson: "ml",
+    weakConcepts: [],
+  };
+  const VERIFY_FIXED = {
+    ...VERIFY_BAD,
+    rubric: { ...mkRubric(3), computation: 4 },
+    solve: { ...VERIFY_BAD.solve, finalAnswer: "3.125 m" },
+    errors: [],
+    finalAnswerMatches: true,
+  };
+
+  it("confirms a self-consistent grade and corrects a wrong learner flag in place (one Groq call)", async () => {
+    const misflagged = {
+      ...VERIFY_BAD,
+      solve: { principle: "p", steps: ["s1"], finalAnswer: "5 m", units: "m", check: "((120 - 40) / 16) m" },
+      learnerAnswer: "5 m",
+    };
+    const fetchMock = mockGroqSeq([misflagged]);
+    const res = await POST(req({ kind: "practice", subject: "math", question: "Q", score: 50, reasoning: REASONING }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(json.verification).toEqual({ status: "confirmed", value: "5 m", changed: true });
+    expect(json.finalAnswerMatches).toBe(true);
+    expect(json.rubric.computation).toBe(4); // raise-only restore
+    expect(json.errors).toEqual([]); // refuted execution-slip dropped
+    expect(json.reasoningScore).toBe(scoreFromRubric(normalizeRubric({ ...mkRubric(3), computation: 4 })));
+  });
+
+  it("re-grades a proven-wrong solve ONCE with the verified value as server context, and returns the corrected grade", async () => {
+    const fetchMock = mockGroqSeq([VERIFY_BAD, VERIFY_FIXED]);
+    const res = await POST(req({ kind: "practice", subject: "math", question: "Q", score: 50, reasoning: REASONING }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const system2 = JSON.parse(fetchMock.mock.calls[1][1].body).messages.find((m) => m.role === "system").content;
+    expect(system2).toContain("SERVER ARITHMETIC CHECK");
+    expect(system2).toContain("3.125 m");
+    expect(json.verification.status).toBe("regraded");
+    expect(json.finalAnswerMatches).toBe(true);
+    expect(json.rubric.computation).toBe(4);
+    expect(json.reasoningScore).toBe(scoreFromRubric(normalizeRubric(VERIFY_FIXED.rubric)));
   });
 });
 

@@ -6,12 +6,14 @@ import { checkRateLimit, clientKey, chargeGlobalGroq } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType, readJsonLimited, MAX_BODY_BYTES_IMAGE } from "@/lib/requestGuard";
 import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
 import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, normalizeFeedbackList, capSolution, normalizeErrors, normalizeSolve, reasoningSurfaceContext } from "@/lib/gradeInput";
+import { withNumericVerification, makeRegrade } from "@/lib/numericVerify";
 
 export const dynamic = "force-dynamic";
 // Bound a hung request (audit P2-10): the Groq fetch has a 30s abort, and at most
-// TWO sequential upstream calls can run (primary + retry/fallback) — 90s leaves real
-// headroom over that 60s worst case plus handler overhead.
-export const maxDuration = 90;
+// THREE sequential upstream calls can run (primary + retry/fallback + the rare
+// numeric-verifier corrective re-grade) — 120s leaves real headroom over that
+// worst case plus handler overhead.
+export const maxDuration = 120;
 
 // (The old hub AUTO-GROW — registering weak concepts as pending catalog stubs —
 // was RETIRED by owner decision 2026-06-11; see the note in /api/score. Weak
@@ -136,9 +138,11 @@ export async function POST(req) {
           weakConcepts: dock.weakConcepts,
           comment: dock.comment,
           docked: true,
+          // No grade ran, so there is nothing to verify — same shape as /api/score.
+          verification: { status: "skipped", value: null, changed: false },
         });
       }
-      const data = await groqJSON({
+      const gradeArgs = {
         system: DIAG_GRADE_SYS,
         user:
           `Subject: ${subject}\n` +
@@ -150,14 +154,26 @@ export async function POST(req) {
         image: img.image,
         imageRequired: imageOnly, // audit P1-3: never text-grade the placeholder for an image-only answer
         grade: true, // route to the cheaper grading model
-      });
+      };
+      const data = await groqJSON(gradeArgs);
       // Grader-output gate (audit P2-1): a parseable response WITHOUT a usable rubric is
       // an upstream failure — fail retryably instead of zero-filling a genuine attempt.
       if (!data || typeof data !== "object" || !data.rubric || typeof data.rubric !== "object") {
         throw new Error("grader returned no usable rubric");
       }
-      const rubric = normalizeRubric(data.rubric);
-      const weakConcepts = normalizeWeakConcepts(data.weakConcepts);
+      // NUMERIC VERIFICATION (lib/numericVerify.js): sandbox-recompute the grader's
+      // own arithmetic; a proven-wrong grade re-grades once via the shared
+      // budget-charged makeRegrade (vision never re-fired; every failure falls open).
+      const { data: graded, verification } = await withNumericVerification(data, {
+        regrade: makeRegrade({
+          image: img.image,
+          system: DIAG_GRADE_SYS,
+          charge: chargeGlobalGroq,
+          call: (system) => groqJSON({ ...gradeArgs, system }),
+        }),
+      });
+      const rubric = normalizeRubric(graded.rubric);
+      const weakConcepts = normalizeWeakConcepts(graded.weakConcepts);
       // EXPLICIT response (audit P2-2): never spread raw model JSON to the client — a
       // model-emitted `error` key made the client discard a successful grade, and an
       // object-typed note field crashed the feedback panel as a React child.
@@ -167,11 +183,12 @@ export async function POST(req) {
         // longer emits a score, so there's nothing to reconcile (path-independent).
         score: scoreFromRubric(rubric),
         rubric,
-        solve: normalizeSolve(data.solve),
-        errors: normalizeErrors(data.errors),
-        finalAnswerMatches: data.finalAnswerMatches === true,
+        solve: normalizeSolve(graded.solve),
+        errors: normalizeErrors(graded.errors),
+        finalAnswerMatches: graded.finalAnswerMatches === true,
+        verification,
         weakConcepts,
-        comment: typeof data.comment === "string" ? data.comment.slice(0, 2000) : "",
+        comment: typeof graded.comment === "string" ? graded.comment.slice(0, 2000) : "",
       });
     }
 
@@ -191,11 +208,13 @@ export async function POST(req) {
         solve: null,
         errors: [],
         finalAnswerMatches: false,
+        // No grade ran, so there is nothing to verify — same shape as /api/score.
+        verification: { status: "skipped", value: null, changed: false },
         docked: true,
       });
     }
     const safeScore = clampSubjectScore(score) ?? 0;
-    const data = await groqJSON({
+    const gradeArgs = {
       system: PRACTICE_GRADE_SYS,
       user:
         `Subject: ${subject}\n` +
@@ -210,33 +229,46 @@ export async function POST(req) {
       imageRequired: imageOnly, // audit P1-3: never text-grade the placeholder for an image-only answer
       grade: true, // route to the cheaper grading model
       maxTokens: 3000, // room for the grader's solve block + strengths/improvements + typed errors + worked solution
-    });
+    };
+    const data = await groqJSON(gradeArgs);
     // Grader-output gate (audit P2-1): a parseable response WITHOUT a usable rubric is
     // an upstream failure — fail retryably instead of zero-filling a genuine attempt
     // (the all-zero "grade" silently corrupted the guest's local rating).
     if (!data || typeof data !== "object" || !data.rubric || typeof data.rubric !== "object") {
       throw new Error("grader returned no usable rubric");
     }
+    // NUMERIC VERIFICATION (lib/numericVerify.js): sandbox-recompute the grader's
+    // own arithmetic; a proven-wrong grade re-grades once via the shared
+    // budget-charged makeRegrade (vision never re-fired; every failure falls open).
+    const { data: graded, verification } = await withNumericVerification(data, {
+      regrade: makeRegrade({
+        image: img.image,
+        system: PRACTICE_GRADE_SYS,
+        charge: chargeGlobalGroq,
+        call: (system) => groqJSON({ ...gradeArgs, system }),
+      }),
+    });
     // Normalize EVERY field the UI renders — and build an EXPLICIT response (audit
     // P2-2): the old `...data` spread passed un-normalized model output to the client
     // (an object-typed socraticHint crashed the app as a React child; a model-emitted
     // `error` key made the client discard a successful, Groq-billed grade).
-    const rubric = normalizeRubric(data.rubric);
-    const weakConcepts = normalizeWeakConcepts(data.weakConcepts);
+    const rubric = normalizeRubric(graded.rubric);
+    const weakConcepts = normalizeWeakConcepts(graded.weakConcepts);
     const reasoningScore = scoreFromRubric(rubric); // transparent weighted mean of the axes
     return NextResponse.json({
       reasoningScore,
       newScoreSuggestion: reasoningScore, // the guest's local Glicko target = the same axis-derived score
       rubric,
-      solve: normalizeSolve(data.solve),
-      errors: normalizeErrors(data.errors),
-      finalAnswerMatches: data.finalAnswerMatches === true,
-      strengths: normalizeFeedbackList(data.strengths),
-      improvements: normalizeFeedbackList(data.improvements),
-      workedSolution: capSolution(data.workedSolution),
-      correctnessNote: typeof data.correctnessNote === "string" ? data.correctnessNote.slice(0, 2000) : "",
-      socraticHint: typeof data.socraticHint === "string" ? data.socraticHint.slice(0, 2000) : "",
-      microLesson: typeof data.microLesson === "string" ? data.microLesson.slice(0, 2000) : "",
+      solve: normalizeSolve(graded.solve),
+      errors: normalizeErrors(graded.errors),
+      finalAnswerMatches: graded.finalAnswerMatches === true,
+      verification,
+      strengths: normalizeFeedbackList(graded.strengths),
+      improvements: normalizeFeedbackList(graded.improvements),
+      workedSolution: capSolution(graded.workedSolution),
+      correctnessNote: typeof graded.correctnessNote === "string" ? graded.correctnessNote.slice(0, 2000) : "",
+      socraticHint: typeof graded.socraticHint === "string" ? graded.socraticHint.slice(0, 2000) : "",
+      microLesson: typeof graded.microLesson === "string" ? graded.microLesson.slice(0, 2000) : "",
       weakConcepts,
     });
   } catch (e) {
