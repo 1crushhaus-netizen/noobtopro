@@ -22,10 +22,10 @@ vi.mock("@/lib/supabaseAdmin", () => ({ getSupabaseAdmin: () => storage.getAdmin
 vi.mock("@/lib/abuseDetection", () => ({ reportInjection: vi.fn(), reportRateLimit: vi.fn() }));
 
 import { POST } from "@/app/api/score/route";
-import { signQuestion } from "@/lib/questionToken";
+import { signQuestion, signDiagState, verifyDiagToken } from "@/lib/questionToken";
 import { _resetRateLimits } from "@/lib/rateLimit";
-import { updateAxisRatings, scoreFromRubric, defaultDifficultyForBand, normalizeRubric } from "@/lib/scoring";
-import { diagnosticSurfaceFor } from "@/lib/diagnosticBank";
+import { ORDER, updateAxisRatings, scoreFromRubric, defaultDifficultyForBand, normalizeRubric, diagnosticPathScore } from "@/lib/scoring";
+import { diagnosticItemById, DIAG_STEPS_PER_SUBJECT } from "@/lib/diagnosticBank";
 
 // Complete 9-axis rubric helper (the grader emits these; the server derives the headline).
 const mkRubric = (v, over = {}) => ({
@@ -384,52 +384,175 @@ describe("POST /api/score practice — server-authoritative Glicko-2 score", () 
 });
 
 // ---- diagnostic: auth-optional batch baseline ------------------------------
-describe("POST /api/score diagnostic", () => {
-  const answers = [
-    // No `question` field: the route grades the BANK's text by (subject, difficulty);
-    // a client-echoed question is only checked for serve/submit consistency.
-    { subject: "math", difficulty: "beginner", reasoning: "Adding the two fractions over a common denominator of twelve gives seven twelfths." },
-    { subject: "math", difficulty: "advanced", reasoning: "Differentiating with the chain rule and setting the result to zero locates the maximum." },
-  ];
+// ---- adaptive diagnostic helpers (RANKS_PLAN §8) -----------------------------
 
-  it("GUEST (no token): grades + aggregates server-side, returns scores WITHOUT persisting", async () => {
-    const fetchMock = mockGroq(DIAG_GRADE);
-    const res = await POST(req({ kind: "diagnostic", answers })); // no auth header
+// A signed mid-run step state, the way /api/generate mints the start (REAL lib —
+// the secret is set in beforeEach), with overridable fields for tamper tests.
+function stepTok(state = {}) {
+  const subject = state.subject || "math";
+  const itemId = state.itemId || `${subject}:intermediate:1`;
+  return signDiagState({ subject, step: 1, itemId, asked: [itemId], transcript: [], ...state });
+}
+
+// Drive ONE subject's full walk through the route (Groq mocked per test),
+// returning the finalToken. `reasonings[i]` is step i's answer (default strong).
+async function runSubjectWalk(subject, { reasonings = [], authHeader = false } = {}) {
+  let token = stepTok({ subject });
+  for (let i = 0; i < DIAG_STEPS_PER_SUBJECT; i++) {
+    const reasoning = reasonings[i] !== undefined ? reasonings[i] : REASONING;
+    const res = await POST(req({ kind: "diagnostic", token, reasoning }, { authHeader }));
     expect(res.status).toBe(200);
-    expect(auth.requireUser).not.toHaveBeenCalled();
+    const j = await res.json();
+    if (i < DIAG_STEPS_PER_SUBJECT - 1) {
+      token = j.next.token;
+    } else {
+      expect(j.subjectComplete).toBe(true);
+      return j.finalToken;
+    }
+  }
+}
+
+describe("POST /api/score diagnostic — adaptive STEP (signed ±1-band walk)", () => {
+  it("grades the BANK item named by the SIGNED token (question + trap from the bank, nothing from the body)", async () => {
+    const fetchMock = mockGroq(DIAG_GRADE);
+    const item = diagnosticItemById("math:intermediate:1"); // a TRAP item in the bank
+    expect(item.reasoningSurface).toBe("trap");
+    const res = await POST(req({ kind: "diagnostic", token: stepTok({}), reasoning: REASONING, question: "substituted easy question", trap: "SPOOF-xyzzy" }));
+    expect(res.status).toBe(200);
+    const userMsg = JSON.parse(fetchMock.mock.calls[0][1].body).messages.find((m) => m.role === "user").content;
+    expect(userMsg).toContain(item.question.slice(0, 40)); // the bank's text is graded
+    expect(userMsg).toContain(`Reasoning surface: ${item.reasoningSurface}`);
+    expect(userMsg).toContain(item.trap); // the BANK's trap reaches the grader
+    expect(userMsg).not.toContain("substituted easy question");
+    expect(userMsg).not.toContain("SPOOF-xyzzy");
+  });
+
+  it("walks UP on a strong grade: next item is one band higher, the chain extends by the graded entry", async () => {
+    mockGroq(DIAG_GRADE); // rubric of 3s → quality ≥ the up-threshold
+    const res = await POST(req({ kind: "diagnostic", token: stepTok({}), reasoning: REASONING }));
+    const j = await res.json();
+    const quality = scoreFromRubric(normalizeRubric(DIAG_GRADE.rubric));
+    expect(j.graded).toEqual({ subject: "math", difficulty: "intermediate", reasoningScore: quality });
+    expect(j.next.difficulty).toBe("advanced");
+    expect(j.next.stepNo).toBe(2);
+    const v = verifyDiagToken(j.next.token);
+    expect(v.ok).toBe(true);
+    expect(v.state.step).toBe(2);
+    expect(v.state.itemId.startsWith("math:advanced:")).toBe(true);
+    expect(v.state.asked).toEqual(["math:intermediate:1", v.state.itemId]);
+    expect(v.state.transcript).toHaveLength(1);
+    expect(v.state.transcript[0]).toMatchObject({ i: "math:intermediate:1", d: "intermediate", s: quality });
+  });
+
+  it("DOCKS a blank step with no Groq call and walks DOWN a band", async () => {
+    const failFetch = vi.fn(() => { throw new Error("a docked step must not call Groq"); });
+    vi.stubGlobal("fetch", failFetch);
+    const res = await POST(req({ kind: "diagnostic", token: stepTok({}), reasoning: "   " }));
+    expect(res.status).toBe(200);
+    const j = await res.json();
+    expect(failFetch).not.toHaveBeenCalled();
+    expect(j.graded.reasoningScore).toBeLessThan(10); // the dock floor
+    expect(j.next.difficulty).toBe("foundational"); // intermediate − 1
+  });
+
+  it("the final step returns subjectComplete + a verifiable done-token carrying the whole walk", async () => {
+    mockGroq(DIAG_GRADE);
+    const finalToken = await runSubjectWalk("math");
+    const v = verifyDiagToken(finalToken);
+    expect(v.ok).toBe(true);
+    expect(v.state.done).toBe(true);
+    expect(v.state.subject).toBe("math");
+    expect(v.state.transcript).toHaveLength(DIAG_STEPS_PER_SUBJECT);
+    // Strong grades from the middle: intermediate → advanced → phd → phd (clamped).
+    expect(v.state.transcript.map((e) => e.d)).toEqual(["intermediate", "advanced", "phd", "phd"]);
+  });
+
+  it("rejects tampered/foreign tokens: a practice token, a forged signature, and a signed-but-unknown item", async () => {
+    const failFetch = vi.fn(() => { throw new Error("must not grade an unverified step"); });
+    vi.stubGlobal("fetch", failFetch);
+    // A PRACTICE question token is not a diag step (kind separation).
+    expect((await POST(req({ kind: "diagnostic", token: tok(), reasoning: REASONING }))).status).toBe(401);
+    // A flipped signature fails the MAC.
+    const t = stepTok({});
+    expect((await POST(req({ kind: "diagnostic", token: t.slice(0, -4) + "AAAA", reasoning: REASONING }))).status).toBe(401);
+    // A validly-signed state naming a non-bank item fails closed.
+    expect((await POST(req({ kind: "diagnostic", token: stepTok({ itemId: "math:intermediate:99", asked: ["math:intermediate:99"] }), reasoning: REASONING }))).status).toBe(400);
+    // A done-token can't be replayed as a step.
+    const done = signDiagState({ subject: "math", done: true, transcript: [] });
+    expect((await POST(req({ kind: "diagnostic", token: done, reasoning: REASONING }))).status).toBe(400);
+    expect(failFetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects an INVALID auth header rather than silently downgrading to guest", async () => {
+    auth.requireUser.mockResolvedValue({ error: "Invalid or expired session.", status: 401 });
+    const failFetch = vi.fn(() => { throw new Error("must not grade with a bad token"); });
+    vi.stubGlobal("fetch", failFetch);
+    const res = await POST(req({ kind: "diagnostic", token: stepTok({}), reasoning: REASONING }, { authHeader: true }));
+    expect(res.status).toBe(401);
+    expect(failFetch).not.toHaveBeenCalled();
+  });
+
+  it("a grader failure is a retryable 500 and the SAME token still works on the retry", async () => {
+    mockGroq({ comment: "no rubric here" }); // grader returned no usable rubric
+    const token = stepTok({});
+    expect((await POST(req({ kind: "diagnostic", token, reasoning: REASONING }))).status).toBe(500);
+    mockGroq(DIAG_GRADE);
+    expect((await POST(req({ kind: "diagnostic", token, reasoning: REASONING }))).status).toBe(200);
+  });
+
+  it("a stale (pre-adaptive) batch payload gets the retryable restart error, never a grade", async () => {
+    const failFetch = vi.fn(() => { throw new Error("must not grade the legacy shape"); });
+    vi.stubGlobal("fetch", failFetch);
+    const res = await POST(req({ kind: "diagnostic", answers: [{ subject: "math", difficulty: "beginner", reasoning: REASONING }] }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/restart the diagnostic/i);
+    expect(failFetch).not.toHaveBeenCalled();
+  });
+
+  it("image-bearing steps charge the :img budget (the multimodal path can't bypass the cap)", async () => {
+    const PNG = { mime: "image/png", data: "iVBORw0KGgo=" };
+    mockGroq(DIAG_GRADE);
+    for (let i = 0; i < 10; i++) {
+      const res = await POST(req({ kind: "diagnostic", token: stepTok({}), reasoning: REASONING, image: PNG }));
+      expect(res.status).toBe(200); // tokens 1..10 of the :img budget
+    }
+    const over = await POST(req({ kind: "diagnostic", token: stepTok({}), reasoning: REASONING, image: PNG }));
+    expect(over.status).toBe(429);
+  });
+});
+
+describe("POST /api/score diagnostic — FINALIZE (aggregate the signed walks)", () => {
+  it("GUEST: verifies the three done-tokens and returns the path-weighted baseline WITHOUT persisting (zero Groq on finalize)", async () => {
+    mockGroq(DIAG_GRADE);
+    const tokens = [];
+    for (const s of ORDER) tokens.push(await runSubjectWalk(s));
+    const failFetch = vi.fn(() => { throw new Error("finalize must not call Groq"); });
+    vi.stubGlobal("fetch", failFetch);
+    const res = await POST(req({ kind: "diagnostic", tokens }));
+    expect(res.status).toBe(200);
+    expect(failFetch).not.toHaveBeenCalled();
     const j = await res.json();
     expect(j.persisted).toBe(false);
     expect(j.attempt).toBe(null);
-    expect(j.scores.math.score).toBeGreaterThan(0);
-    expect(Object.keys(j.scores.math.rubric)).toHaveLength(9); // per-subject 9-axis rubric profile
-    expect(fetchMock).toHaveBeenCalledTimes(2); // one grade per answer (2 tiers)
+    for (const s of ORDER) {
+      expect(j.scores[s].score).toBeGreaterThan(0);
+      expect(Object.keys(j.scores[s].rubric)).toHaveLength(9);
+    }
+    // The seed target is the REAL path-weighted aggregate over the walked bands.
+    const quality = scoreFromRubric(normalizeRubric(DIAG_GRADE.rubric));
+    const walked = ["intermediate", "advanced", "phd", "phd"].map((d) => ({ difficulty: d, reasoningScore: quality }));
+    expect(j.scores.math.score).toBe(diagnosticPathScore(walked));
+    expect(j.masteryUpdates).toHaveLength(ORDER.length * DIAG_STEPS_PER_SUBJECT);
   });
 
-  it("derives the diagnostic reasoning-surface from the BANK, IGNORING a client-supplied spoof", async () => {
-    const fetchMock = mockGroq(DIAG_GRADE);
-    const spoof = "SPOOFED-naive-path-xyzzy";
-    // math:intermediate is a TRAP slot in the curated bank; the client tries to override its trap.
-    const res = await POST(
-      req({
-        kind: "diagnostic",
-        answers: [{ subject: "math", difficulty: "intermediate", reasoning: REASONING, reasoningSurface: "trap", trap: spoof }],
-      })
-    );
-    expect(res.status).toBe(200);
-    const userMsg = JSON.parse(fetchMock.mock.calls[0][1].body).messages.find((m) => m.role === "user").content;
-    const bank = diagnosticSurfaceFor("math", "intermediate");
-    expect(bank.reasoningSurface).toBe("trap"); // sanity: this slot really is a trap in the bank
-    expect(userMsg).toContain(`Reasoning surface: ${bank.reasoningSurface}`);
-    expect(userMsg).toContain(bank.trap); // the BANK's trap reaches the grader
-    expect(userMsg).not.toContain(spoof); // the client's spoofed trap is ignored
-  });
-
-  it("SIGNED-IN: persists the baseline for the verified uid and returns the baseline attempt", async () => {
+  it("SIGNED-IN: persists the baseline for the verified uid (save first, mastery bump after)", async () => {
     auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
     const { sb, calls } = fakeAdmin();
     storage.getAdmin.mockReturnValue(sb);
     mockGroq(DIAG_GRADE);
-    const res = await POST(req({ kind: "diagnostic", answers }, { authHeader: true }));
+    const tokens = [];
+    for (const s of ORDER) tokens.push(await runSubjectWalk(s, { authHeader: true }));
+    const res = await POST(req({ kind: "diagnostic", tokens }, { authHeader: true }));
     expect(res.status).toBe(200);
     const j = await res.json();
     expect(j.persisted).toBe(true);
@@ -437,84 +560,34 @@ describe("POST /api/score diagnostic", () => {
     const save = calls.rpc.find((c) => c.fn === "save_progress_for");
     expect(save.args.p_user).toBe("u1");
     expect(save.args.p_attempt.type).toBe("baseline");
+    expect(save.args.p_scores).toHaveLength(ORDER.length);
     expect(save.args.p_scores[0].rubric).toBeTruthy();
+    const saveIdx = calls.rpc.findIndex((c) => c.fn === "save_progress_for");
+    const bumpIdx = calls.rpc.findIndex((c) => c.fn === "bump_concept_mastery");
+    expect(bumpIdx).toBeGreaterThan(saveIdx);
   });
 
-  it("DOCKS a blank diagnostic answer with no Groq call but still grades the substantive one", async () => {
-    const mixed = [
-      { subject: "math", difficulty: "beginner", reasoning: "   " }, // blank -> docked
-      answers[1], // substantive -> graded
-    ];
-    const fetchMock = mockGroq(DIAG_GRADE);
-    const res = await POST(req({ kind: "diagnostic", answers: mixed }));
-    expect(res.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledTimes(1); // only the substantive answer hit Groq
-    const j = await res.json();
-    expect(j.scores.math.score).toBeGreaterThan(0);
-  });
-
-  it("rejects an INVALID token rather than silently downgrading to guest", async () => {
-    auth.requireUser.mockResolvedValue({ error: "Invalid or expired session.", status: 401 });
-    const failFetch = vi.fn(() => { throw new Error("must not grade with a bad token"); });
-    vi.stubGlobal("fetch", failFetch);
-    const res = await POST(req({ kind: "diagnostic", answers }, { authHeader: true }));
-    expect(res.status).toBe(401);
-    expect(failFetch).not.toHaveBeenCalled();
-  });
-
-  it("DEDUPES repeated subject:difficulty slots so the Groq fan-out can't be multiplied", async () => {
-    const dupe = [answers[0], answers[0], answers[0], answers[1]];
-    const fetchMock = mockGroq(DIAG_GRADE);
-    const res = await POST(req({ kind: "diagnostic", answers: dupe }));
-    expect(res.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledTimes(2); // 2 distinct slots, not 4
-  });
-
-  it("rejects more answers than the diagnostic size (>9) with 400", async () => {
-    const many = Array.from({ length: 10 }, (_, i) => ({ subject: "math", question: `Q${i}`, difficulty: "beginner", reasoning: REASONING }));
-    expect((await POST(req({ kind: "diagnostic", answers: many }))).status).toBe(400);
-  });
-
-  it("rejects an empty / non-array answers with 400", async () => {
-    expect((await POST(req({ kind: "diagnostic", answers: [] }))).status).toBe(400);
-    expect((await POST(req({ kind: "diagnostic" }))).status).toBe(400);
-  });
-
-  it("is resilient (allSettled): one failed grade doesn't sink the set", async () => {
-    // First grade hard-fails (500, not retryable); the other succeeds → still 200.
-    const fetchMock = mockGroq(DIAG_GRADE, { failFirstN: 1, failStatus: 500 });
-    const res = await POST(req({ kind: "diagnostic", answers }));
-    expect(res.status).toBe(200);
-    const j = await res.json();
-    expect(j.scores.math.score).toBeGreaterThan(0);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-
-  it("returns a retryable 503 when EVERY grade fails (no all-zero baseline persisted)", async () => {
-    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
-    const { sb, calls } = fakeAdmin();
-    storage.getAdmin.mockReturnValue(sb);
-    mockGroq(DIAG_GRADE, { failFirstN: 99, failStatus: 500 });
-    const res = await POST(req({ kind: "diagnostic", answers }, { authHeader: true }));
-    expect(res.status).toBe(503);
-    expect(calls.rpc.find((c) => c.fn === "save_progress_for")).toBeFalsy(); // nothing persisted
-  });
-
-  it("CHARGES the :img budget for diagnostic vision grades — they can't bypass the image cap", async () => {
-    // base64 of the PNG magic signature (89 50 4E 47 ...), a valid image to normalizeImage.
-    const PNG = { mime: "image/png", data: "iVBORw0KGgo=" };
-    const sixImages = [];
-    for (const s of ["math", "physics", "chemistry"]) {
-      for (const d of ["beginner", "advanced"]) {
-        sixImages.push({ subject: s, difficulty: d, reasoning: REASONING, image: PNG });
-      }
-    }
+  it("fails closed (400 restart) on: a missing subject, a duplicated subject, a mid-run token, or an unknown transcript item", async () => {
     mockGroq(DIAG_GRADE);
-    // First diagnostic: 6 image grades consume 6 of the 10-token :img budget → ok.
-    expect((await POST(req({ kind: "diagnostic", answers: sixImages }))).status).toBe(200);
-    // Second diagnostic: only 4 :img tokens remain but it needs 6, so the fan-out is
-    // rejected (before this fix the diagnostic never touched :img and this returned 200).
-    expect((await POST(req({ kind: "diagnostic", answers: sixImages }))).status).toBe(429);
+    const m = await runSubjectWalk("math");
+    const p = await runSubjectWalk("physics");
+    const c = await runSubjectWalk("chemistry");
+    // Two tokens (missing chemistry).
+    expect((await POST(req({ kind: "diagnostic", tokens: [m, p] }))).status).toBe(400);
+    // Duplicate math instead of chemistry.
+    expect((await POST(req({ kind: "diagnostic", tokens: [m, p, m] }))).status).toBe(400);
+    // A mid-run step token isn't a completed walk.
+    expect((await POST(req({ kind: "diagnostic", tokens: [m, p, stepTok({ subject: "chemistry", itemId: "chemistry:intermediate:1" })] }))).status).toBe(400);
+    // A signed transcript naming an item no longer in the bank (a mid-sitting bank
+    // edit/deploy) fails closed into a free restart.
+    const ghost = signDiagState({
+      subject: "chemistry",
+      done: true,
+      transcript: Array.from({ length: DIAG_STEPS_PER_SUBJECT }, () => ({ i: "chemistry:intermediate:99", d: "intermediate", s: 80, r: {}, w: [], c: "" })),
+    });
+    expect((await POST(req({ kind: "diagnostic", tokens: [m, p, ghost] }))).status).toBe(400);
+    // The intact set still finalizes (the failures above consumed nothing).
+    expect((await POST(req({ kind: "diagnostic", tokens: [m, p, c] }))).status).toBe(200);
   });
 });
 
@@ -580,46 +653,49 @@ describe("POST /api/score — per-concept mastery counters", () => {
     expect(failFetch).not.toHaveBeenCalled();
   });
 
-  it("diagnostic masteryUpdates are derived SERVER-SIDE from the bank — a client conceptKey is ignored", async () => {
+  it("diagnostic masteryUpdates carry the BANK's concept tags for the walked items (incl. a docked skip → red signal)", async () => {
     mockGroq(DIAG_GRADE);
-    const res = await POST(req({
-      kind: "diagnostic",
-      answers: [
-        // Forged conceptKey on the wire — must be ignored in favor of the bank's tag.
-        { subject: "math", difficulty: "beginner", reasoning: REASONING, conceptKey: "stoichiometry_adv" },
-        { subject: "math", difficulty: "intermediate", reasoning: REASONING },
-        { subject: "math", difficulty: "advanced", reasoning: "" }, // skipped → docked
-      ],
-    }));
+    // Math: skip the FIRST step (docked, walks down), then answer strongly.
+    // Walk: intermediate(dock) → foundational → intermediate → advanced.
+    const m = await runSubjectWalk("math", { reasonings: ["   ", REASONING, REASONING, REASONING] });
+    const p = await runSubjectWalk("physics");
+    const c = await runSubjectWalk("chemistry");
+    const res = await POST(req({ kind: "diagnostic", tokens: [m, p, c] }));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.persisted).toBe(false);
 
     const gradedQuality = scoreFromRubric(normalizeRubric(DIAG_GRADE.rubric));
-    const bySlot = Object.fromEntries(body.masteryUpdates.map((u) => [u.conceptKey, u]));
-    // The bank's tags (lib/diagnosticBank.js), never the request's.
-    expect(Object.keys(bySlot).sort()).toEqual(["rational_expressions", "ratios_unit_rates", "sequences_series_hs"]);
-    expect(bySlot.ratios_unit_rates).toEqual({ subject: "math", conceptKey: "ratios_unit_rates", quality: gradedQuality });
-    expect(bySlot.rational_expressions.quality).toBe(gradedQuality);
-    expect(bySlot.sequences_series_hs.quality).toBeLessThan(10); // the docked skip → red signal
+    const math = body.masteryUpdates.filter((u) => u.subject === "math");
+    expect(math).toHaveLength(DIAG_STEPS_PER_SUBJECT);
+    // Step 1 = the docked skip on math:intermediate:1 — colors the BANK's concept red.
+    expect(math[0].conceptKey).toBe(diagnosticItemById("math:intermediate:1").conceptKey);
+    expect(math[0].quality).toBeLessThan(10);
+    // The rest carry the graded quality and the walked items' bank tags.
+    for (const u of math.slice(1)) {
+      expect(u.quality).toBe(gradedQuality);
+      expect(typeof u.conceptKey).toBe("string");
+    }
   });
 
-  it("a signed-in diagnostic persists the mastery counters via bump_concept_mastery (snake_case entries)", async () => {
+  it("a signed-in diagnostic finalize persists the mastery counters via bump_concept_mastery (snake_case entries)", async () => {
     auth.requireUser.mockResolvedValue({ user: { id: "u9" } });
     const { sb, calls } = fakeAdmin();
     storage.getAdmin.mockReturnValue(sb);
     mockGroq(DIAG_GRADE);
-    const res = await POST(req({
-      kind: "diagnostic",
-      answers: [{ subject: "math", difficulty: "beginner", reasoning: REASONING }],
-    }, { authHeader: true }));
+    const tokens = [];
+    for (const s of ORDER) tokens.push(await runSubjectWalk(s, { authHeader: true }));
+    const res = await POST(req({ kind: "diagnostic", tokens }, { authHeader: true }));
     expect(res.status).toBe(200);
     const bump = calls.rpc.find((c) => c.fn === "bump_concept_mastery");
     expect(bump).toBeTruthy();
     expect(bump.args.p_user).toBe("u9");
-    expect(bump.args.p_entries).toEqual([
-      { subject: "math", concept_key: "ratios_unit_rates", quality: scoreFromRubric(normalizeRubric(DIAG_GRADE.rubric)) },
-    ]);
+    expect(bump.args.p_entries).toHaveLength(ORDER.length * DIAG_STEPS_PER_SUBJECT);
+    expect(bump.args.p_entries[0]).toEqual({
+      subject: "math",
+      concept_key: diagnosticItemById("math:intermediate:1").conceptKey,
+      quality: scoreFromRubric(normalizeRubric(DIAG_GRADE.rubric)),
+    });
     // And the save still happened first (mastery rides AFTER the authoritative write).
     const saveIdx = calls.rpc.findIndex((c) => c.fn === "save_progress_for");
     const bumpIdx = calls.rpc.findIndex((c) => c.fn === "bump_concept_mastery");
@@ -792,44 +868,18 @@ describe("POST /api/score practice — server-issued question tokens (audit P1-1
   });
 });
 
-describe("POST /api/score diagnostic — bank-derived questions + global budget", () => {
-  it("grades the BANK's question text for the slot — a substituted easy question is ignored", async () => {
-    const fetchMock = mockGroq(DIAG_GRADE);
-    const res = await POST(req({
-      kind: "diagnostic",
-      answers: [{ subject: "math", difficulty: "beginner", reasoning: REASONING }],
-    }));
-    expect(res.status).toBe(200);
-    const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
-    const userMsg = sent.messages.find((m) => m.role === "user").content;
-    expect(userMsg).toContain("recipe uses 3 cups of flour"); // the curated bank's math/beginner question
-    expect(userMsg).not.toContain("substituted");
-  });
-
-  it("answers without a question field still grade (the bank supplies the text)", async () => {
-    mockGroq(DIAG_GRADE);
-    const res = await POST(req({
-      kind: "diagnostic",
-      answers: [{ subject: "math", difficulty: "beginner", reasoning: REASONING }],
-    }));
-    expect(res.status).toBe(200);
-    expect((await res.json()).scores.math).toBeTruthy();
-  });
-
-  it("the GLOBAL Groq budget bounds platform-wide spend: once exhausted, live grades 429 (audit P2-3)", async () => {
+describe("POST /api/score diagnostic — global budget", () => {
+  it("the GLOBAL Groq budget bounds platform-wide spend: once exhausted, live step grades 429 (audit P2-3)", async () => {
     process.env.GLOBAL_GROQ_BUDGET_PER_MIN = "1";
     try {
       mockGroq(DIAG_GRADE);
-      // First request consumes the global window…
-      expect((await POST(req({
-        kind: "diagnostic",
-        answers: [{ subject: "math", difficulty: "beginner", reasoning: REASONING }],
-      }))).status).toBe(200);
+      // First step consumes the global window…
+      expect((await POST(req({ kind: "diagnostic", token: stepTok({}), reasoning: REASONING }))).status).toBe(200);
       // …second (different IP — per-IP caps don't save it) is globally rejected.
       const r2 = new Request("http://test.local/api/score", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-real-ip": "203.0.113.99" },
-        body: JSON.stringify({ kind: "diagnostic", answers: [{ subject: "physics", difficulty: "beginner", reasoning: REASONING }] }),
+        body: JSON.stringify({ kind: "diagnostic", token: stepTok({ subject: "physics" }), reasoning: REASONING }),
       });
       const res2 = await POST(r2);
       expect(res2.status).toBe(429);
@@ -873,27 +923,10 @@ describe("POST /api/score — review-round hardening", () => {
     expect(calls.rpc.find((c) => c.fn === "save_progress_for").args.p_attempt.band).toBe("phd");
   });
 
-  it("diagnostic: a client-echoed question that MISMATCHES the bank's slot text is a retryable 409 (serve/submit consistency)", async () => {
-    const failFetch = vi.fn(() => { throw new Error("must not grade a mismatched diagnostic"); });
-    vi.stubGlobal("fetch", failFetch);
-    const res = await POST(req({
-      kind: "diagnostic",
-      answers: [{ subject: "math", question: "a DIFFERENT question than was served", difficulty: "beginner", reasoning: REASONING }],
-    }));
-    expect(res.status).toBe(409);
-    expect((await res.json()).error).toMatch(/restart the diagnostic/i);
-    expect(failFetch).not.toHaveBeenCalled();
-  });
-
-  it("diagnostic: an echoed question MATCHING the bank text passes the consistency check", async () => {
-    mockGroq(DIAG_GRADE);
-    const bankText = (await import("@/lib/diagnosticBank")).diagnosticQuestionFor("math", "beginner");
-    const res = await POST(req({
-      kind: "diagnostic",
-      answers: [{ subject: "math", question: bankText, difficulty: "beginner", reasoning: REASONING }],
-    }));
-    expect(res.status).toBe(200);
-  });
+  // (The old diagnostic serve/submit echo-consistency 409 is gone by construction:
+  // the step token SIGNS the served item id, and finalize re-resolves every
+  // transcript entry against the bank — a mid-sitting bank edit fails closed into
+  // the 400 restart covered in the finalize suite.)
 
   it("a REPLAYED jti is caught by the cheap pre-grade check — 409 with NO Groq call and NO budget burn", async () => {
     auth.requireUser.mockResolvedValue({ user: { id: "u1" } });

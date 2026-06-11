@@ -105,3 +105,54 @@ describe("signQuestion / verifyQuestionToken", () => {
     expect(verifyQuestionToken(t).ok).toBe(true);
   });
 });
+
+// ---- diagnostic step tokens (adaptive placement, RANKS_PLAN §8) -------------
+import { signDiagState, verifyDiagToken } from "@/lib/questionToken";
+
+describe("diagnostic step tokens (signDiagState / verifyDiagToken)", () => {
+  beforeEach(() => {
+    process.env.QUESTION_TOKEN_SECRET = "diag-test-secret";
+  });
+  afterEach(() => {
+    delete process.env.QUESTION_TOKEN_SECRET;
+  });
+
+  it("round-trips a STRUCTURED walk state (arrays/numbers survive, unlike the string-only practice payload)", () => {
+    const state = { subject: "math", step: 2, itemId: "math:advanced:1", asked: ["math:intermediate:1", "math:advanced:1"], transcript: [{ i: "math:intermediate:1", d: "intermediate", s: 72, r: { logic: 3 }, w: ["x"], c: "ok" }] };
+    const v = verifyDiagToken(signDiagState(state));
+    expect(v.ok).toBe(true);
+    expect(v.state).toMatchObject(state);
+    expect(typeof v.state.jti).toBe("string");
+    expect(v.state.exp).toBeGreaterThan(Date.now());
+  });
+
+  it("enforces KIND separation both ways (a practice token is not a diag token and vice versa)", () => {
+    const practice = signQuestion(Q);
+    expect(verifyDiagToken(practice).ok).toBe(false);
+    const diag = signDiagState({ subject: "math", step: 1, itemId: "math:intermediate:1", asked: [], transcript: [] });
+    expect(verifyQuestionToken(diag).ok).toBe(false); // k:"diag" payloads are rejected
+    expect(verifyDiagToken(diag).ok).toBe(true);
+  });
+
+  it("rejects tampered payloads/signatures and expired states; fails closed without a key", () => {
+    const t = signDiagState({ subject: "math", step: 1, itemId: "math:intermediate:1", asked: [], transcript: [] });
+    expect(verifyDiagToken(t.slice(0, -3) + "AAA").ok).toBe(false); // flipped MAC
+    const [body] = t.split(".");
+    const forged = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(body, "base64url").toString()), step: 4 })).toString("base64url");
+    expect(verifyDiagToken(`${forged}.${t.split(".")[1]}`).ok).toBe(false); // edited body, stale MAC
+    vi.useFakeTimers();
+    try {
+      const fresh = signDiagState({ subject: "math", step: 1, itemId: "x", asked: [], transcript: [] });
+      vi.advanceTimersByTime(TOKEN_TTL_MS + 1000);
+      const v = verifyDiagToken(fresh);
+      expect(v.ok).toBe(false);
+      expect(v.error).toMatch(/expired/i);
+    } finally {
+      vi.useRealTimers();
+    }
+    delete process.env.QUESTION_TOKEN_SECRET;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    expect(signDiagState({ subject: "math" })).toBeNull();
+    expect(verifyDiagToken(t).ok).toBe(false);
+  });
+});

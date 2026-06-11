@@ -8,7 +8,6 @@ import {
   band,
   totalPoints,
   phdIndex,
-  DIAGNOSTIC_DIFFICULTIES,
   DIFFICULTY_LABELS,
   updateAxisRatings,
   repeatFactorFromHistory,
@@ -159,7 +158,9 @@ const loadLeaderboard = () => authApi("/api/leaderboard", {});
 
 // Stable per-question key for the 2-tier diagnostic (each subject has an
 // easy + a hard question), so the answers map can hold all 6 answers.
-const qid = (q) => (q ? `${q.subject}:${q.difficulty}` : "");
+// Key for one adaptive-diagnostic step entry (subject + step number — the band can
+// repeat across a ±1 walk, so it can't key anything).
+const qid = (q) => (q ? `${q.subject}:${q.stepNo}` : "");
 
 // NEXT_PUBLIC_* is inlined at build time. When "true", the Learn tab becomes the
 // browsable Concept Hub (full catalog); otherwise it stays the weak-concept picker.
@@ -363,12 +364,22 @@ export default function Noobtopro() {
   // concept the user has since clicked.
   const learnRun = useRef(0);
 
-  // Monotonic token so an in-flight diagnostic grade (a multi-second Promise.all
-  // over /api/grade) can't land a stale write after the user abandons the flow
-  // — sign-out (SIGNED_OUT) or "Restart" (reset()) bump this so the resolving
-  // submitDiagnostic bails instead of re-persisting the baseline and bouncing
-  // the freshly-reset UI back onto the dashboard.
+  // Monotonic token so an in-flight diagnostic STEP grade or finalize can't land
+  // a stale write after the user abandons the flow — sign-out (SIGNED_OUT),
+  // "Restart" (reset()), or a fresh beginDiagnostic bump this so resolving calls
+  // bail instead of appending questions / re-persisting the baseline into a
+  // newer run's UI.
   const diagRun = useRef(0);
+  // The adaptive walk's per-subject completion tokens (subject → signed final
+  // token; finalize fires once all three land) and any failed step/finalize
+  // payloads awaiting the learner's "Try again".
+  const diagFinal = useRef({});
+  const diagFailed = useRef([]);
+  // Steps answered per subject (drives the progress pips), and the step-flow
+  // error shown on the diagnostic waiting card (kept apart from the global
+  // `error` banner so a recoverable step failure doesn't look fatal).
+  const [diagAnswered, setDiagAnswered] = useState({});
+  const [diagError, setDiagError] = useState("");
 
   // Monotonic token so a slow in-flight startPractice generation can't land its
   // question after the user has moved to a different practice question/subject —
@@ -618,38 +629,39 @@ export default function Noobtopro() {
   }
 
   /* --- diagnostic --- */
+  // ADAPTIVE placement start (RANKS_PLAN §8): /api/generate returns ONE signed
+  // middle-band starter per subject; each graded step then returns the next item
+  // on its subject's ±1-band walk. `questions` GROWS as steps land (the starters
+  // arrive in round-robin order and each subject's next item appends as its grade
+  // returns, so answering naturally interleaves subjects and hides grading
+  // latency); a stale run is superseded via diagRun.
   async function beginDiagnostic() {
     setError("");
+    setDiagError("");
     setBusy(true);
     try {
       const data = await api("/api/generate", { kind: "diagnostic" });
-      // Index by subject+difficulty, then require ALL 3 subjects × ALL tiers
-      // (6 questions: easy+hard per subject). Guards against duplicates / unknown
-      // subject or difficulty / a partial set. ORDER.includes is prototype-safe.
-      const byKey = {};
-      for (const q of data.questions || []) {
-        if (
+      const qs = (data && Array.isArray(data.questions) ? data.questions : []).filter(
+        (q) =>
           q &&
           ORDER.includes(q.subject) &&
-          DIAGNOSTIC_DIFFICULTIES.includes(q.difficulty) &&
           typeof q.question === "string" &&
           q.question.trim() &&
-          !byKey[qid(q)]
-        ) {
-          byKey[qid(q)] = q;
-        }
-      }
-      // Order subject-major, easy → hard.
-      const qs = [];
-      for (const s of ORDER) for (const d of DIAGNOSTIC_DIFFICULTIES) if (byKey[`${s}:${d}`]) qs.push(byKey[`${s}:${d}`]);
-      if (qs.length < ORDER.length * DIAGNOSTIC_DIFFICULTIES.length) {
-        throw new Error("Could not generate a full diagnostic. Please try again.");
+          typeof q.token === "string" &&
+          q.stepNo === 1
+      );
+      if (!data || data.adaptive !== true || qs.length !== ORDER.length) {
+        throw new Error("Could not start the diagnostic. Please try again.");
       }
       const init = {};
       qs.forEach((q) => (init[qid(q)] = { text: "", img: null }));
       // Release any previews left over from a previous diagnostic before replacing
       // the answers map, so re-taking the diagnostic can't leak the old blob URLs.
       Object.values(answers).forEach((a) => revokePreview(a && a.img));
+      diagRun.current++; // supersede any in-flight steps from an abandoned run
+      diagFinal.current = {};
+      diagFailed.current = [];
+      setDiagAnswered({});
       setQuestions(qs);
       setAnswers(init);
       setQi(0);
@@ -694,66 +706,98 @@ export default function Noobtopro() {
     setAnswers((a) => ({ ...a, [curKey]: { ...a[curKey], img: null } }));
   }
 
+  // Submit the CURRENT step's answer: fire its grade in the background (the §8
+  // walk's next item arrives with the grade) and advance immediately to the next
+  // queued question — answering subject B while subject A grades is what hides
+  // the per-step latency. Advancing past the end of `questions` is the WAITING
+  // state (curQ goes null); the pending append then materializes questions[qi].
   function nextDiagnostic() {
-    if (qi < questions.length - 1) setQi(qi + 1);
-    else submitDiagnostic();
+    const q = curQ;
+    const a = curAns;
+    setDiagAnswered((m) => ({ ...m, [q.subject]: (m[q.subject] || 0) + 1 }));
+    submitDiagStep(q, a);
+    setQi(qi + 1);
   }
 
-  // "I don't know" on the diagnostic: record the current question as a SKIP (empty answer,
-  // image discarded) and advance — the empty answer is docked server-side with NO Groq
-  // grade. Pass the freshly-cleared map straight to submitDiagnostic on the last question
-  // so it doesn't read the pre-clear state (setState is async).
+  // "I don't know": record a SKIP (empty answer, image discarded) — docked
+  // server-side with NO Groq grade; the walk descends a band, by design.
   function skipDiagnostic() {
     if (curAns.img) revokePreview(curAns.img);
-    const cleared = { ...answers, [curKey]: { text: "", img: null } };
-    setAnswers(cleared);
-    if (qi < questions.length - 1) setQi(qi + 1);
-    else submitDiagnostic(cleared);
+    setAnswers((m) => ({ ...m, [curKey]: { text: "", img: null } }));
+    setDiagAnswered((m) => ({ ...m, [curQ.subject]: (m[curQ.subject] || 0) + 1 }));
+    submitDiagStep(curQ, { text: "", img: null });
+    setQi(qi + 1);
   }
 
-  async function submitDiagnostic(answersArg) {
-    const ans = answersArg || answers;
-    const myRun = ++diagRun.current;
-    setError("");
+  // One graded step round-trip: the signed token + this answer go up; the grade
+  // folds into the server's signed chain and either the next item or the
+  // subject's completion token comes back. Failures keep the token valid and
+  // queue the payload for "Try again" (the waiting card shows diagError).
+  async function submitDiagStep(q, a) {
+    const myRun = diagRun.current;
+    const payload = {
+      kind: "diagnostic",
+      token: q.token,
+      reasoning: a.text,
+      image: a.img ? { mime: a.img.mime, data: a.img.data } : undefined,
+    };
+    try {
+      // authApi when signed in (the per-account budget + finalize persistence are
+      // bound to the verified JWT); plain api as a guest.
+      const data = user ? await authApi("/api/score", payload) : await api("/api/score", payload);
+      if (myRun !== diagRun.current) return; // superseded (restart/sign-out/new run)
+      if (data && data.next && typeof data.next.question === "string" && typeof data.next.token === "string") {
+        setAnswers((m) => ({ ...m, [qid(data.next)]: { text: "", img: null } }));
+        setQuestions((qs) => [...qs, data.next]); // a waiting curQ materializes here
+      } else if (data && data.subjectComplete && typeof data.finalToken === "string") {
+        diagFinal.current[q.subject] = data.finalToken;
+        if (ORDER.every((s) => typeof diagFinal.current[s] === "string")) finalizeDiagnostic();
+      } else {
+        throw new Error("Unexpected placement response. Please try again.");
+      }
+    } catch (e) {
+      if (myRun !== diagRun.current) return;
+      diagFailed.current.push({ q, a });
+      setDiagError(e.message || "Grading hit a snag. Please try again.");
+    }
+  }
+
+  // Re-fire everything that failed (step grades and/or the finalize) — the signed
+  // tokens are still valid, so a transient outage costs nothing but the retry.
+  function retryDiagnostic() {
+    setDiagError("");
+    const failed = diagFailed.current.splice(0);
+    for (const f of failed) submitDiagStep(f.q, f.a);
+    if (failed.length === 0 && ORDER.every((s) => typeof diagFinal.current[s] === "string")) {
+      finalizeDiagnostic();
+    }
+  }
+
+  // All three subjects' walks are complete: one ZERO-Groq finalize call verifies
+  // the three signed transcripts, aggregates the path-weighted baseline, and (for
+  // a signed-in caller) persists it server-authoritatively.
+  async function finalizeDiagnostic() {
+    const myRun = diagRun.current;
+    setDiagError("");
     setStage("scoring");
     try {
-      // Build the answers payload (one per question). Grading + difficulty-weighted
-      // aggregation now happen SERVER-SIDE in ONE /api/score request (bounded
-      // concurrency + retry-once-on-429 + allSettled), replacing the old 9-parallel-
-      // call burst where a single 429 sank the whole diagnostic.
-      const payload = questions.map((q) => {
-        const a = ans[qid(q)] || { text: "", img: null };
-        return {
-          subject: q.subject,
-          question: q.question,
-          difficulty: q.difficulty,
-          // reasoningSurface/trap are NOT sent — the server derives them from the curated
-          // bank by (subject, difficulty), so a crafted payload can't spoof the grader.
-          reasoning: a.text,
-          image: a.img ? { mime: a.img.mime, data: a.img.data } : undefined,
-        };
-      });
-
+      const payload = { kind: "diagnostic", tokens: ORDER.map((s) => diagFinal.current[s]) };
       let scoresObj;
       if (user) {
-        // Signed-in: the server grades, aggregates, AND persists the baseline for the
-        // verified user (server-authoritative — the client supplies no score).
-        const data = await authApi("/api/score", { kind: "diagnostic", answers: payload });
-        // Abandoned mid-grade (signed out / Restart): bail before touching state.
+        const data = await authApi("/api/score", payload);
+        // Abandoned mid-finalize (signed out / Restart): bail before touching state.
         if (myRun !== diagRun.current) return;
         scoresObj = data.scores || {};
         setScores(scoresObj);
         if (data.attempt) setHistory((h) => [...h, data.attempt]);
       } else {
-        // Guest: the server grades + aggregates (no account to persist to); the
-        // baseline is saved to localStorage here.
-        const data = await api("/api/score", { kind: "diagnostic", answers: payload });
+        // Guest: the server aggregates (no account to persist to); the baseline is
+        // saved to localStorage here, including the SERVER-derived mastery updates
+        // so the Learn tab colors the tested concepts for guests too.
+        const data = await api("/api/score", payload);
         if (myRun !== diagRun.current) return;
         scoresObj = data.scores || {};
         const evt = { type: "baseline", t: now(), totalAfter: totalPoints(scoresObj), phdAfter: phdIndex(scoresObj) };
-        // data.masteryUpdates = the SERVER-derived per-concept mastery updates (one per
-        // graded bank question) — stored locally so the Learn tab colors the tested
-        // concepts for guests too (signed-in users get them persisted server-side).
         const st = await saveProgress(scoresObj, evt, data.masteryUpdates);
         if (myRun !== diagRun.current) return; // abandoned during the save round-trip
         if (st && st.history) setHistory(st.history); // null = couldn't refresh; keep current
@@ -769,7 +813,8 @@ export default function Noobtopro() {
       if (!user && isSupabaseConfigured) setShowSaveModal(true);
     } catch (e) {
       if (myRun !== diagRun.current) return; // abandoned — don't surface a stale error or stage
-      setError(e.message || "Grading failed.");
+      // Keep the final tokens; the waiting card's "Try again" re-runs finalize.
+      setDiagError(e.message || "Grading failed.");
       setStage("diagnostic");
     }
   }
@@ -1346,24 +1391,22 @@ export default function Noobtopro() {
             {/* DIAGNOSTIC */}
             {stage === "diagnostic" && curQ && (
               <div className="fade-up" key={qi}>
-                {/* Progress: 3 subject groups × 2 difficulty pips (easy→hard),
-                    filled up to the current question. Data-driven off
-                    DIAGNOSTIC_DIFFICULTIES; relies on the subject-major,
-                    easy→hard ordering set in beginDiagnostic. */}
+                {/* Progress: 3 subject groups × stepsTotal pips, filled by the steps
+                    ANSWERED per subject (the §8 adaptive walk — band varies per step,
+                    so pips count steps, not tiers). */}
                 <div className="np-diag-progress">
-                  {ORDER.map((s, si) => (
+                  {ORDER.map((s) => (
                     <div key={s} className="np-diag-proggroup">
-                      {DIAGNOSTIC_DIFFICULTIES.map((d, di) => {
-                        const idx = si * DIAGNOSTIC_DIFFICULTIES.length + di;
-                        return <div key={d} className="np-progdot" style={{ background: idx <= qi ? SUBJECTS[s].color : "rgba(255,255,255,.12)" }} />;
-                      })}
+                      {Array.from({ length: curQ.stepsTotal || 4 }, (_, di) => (
+                        <div key={di} className="np-progdot" style={{ background: di < (diagAnswered[s] || 0) ? SUBJECTS[s].color : "rgba(255,255,255,.12)" }} />
+                      ))}
                     </div>
                   ))}
                 </div>
                 <div className="np-qmeta">
                   <SubjectGlyph subject={curSubject} />
                   <span className="np-metaline">
-                    {SUBJECTS[curSubject].label.toUpperCase()} · {(DIFFICULTY_LABELS[curQ.difficulty] || "").toUpperCase()} · {qi + 1}/{questions.length}
+                    {SUBJECTS[curSubject].label.toUpperCase()} · {(DIFFICULTY_LABELS[curQ.difficulty] || "").toUpperCase()} · STEP {curQ.stepNo}/{curQ.stepsTotal || 4}
                   </span>
                   {curQ.topic && <span className="np-topic">{curQ.topic}</span>}
                 </div>
@@ -1377,10 +1420,30 @@ export default function Noobtopro() {
                   onSubmit={nextDiagnostic}
                   onSkip={skipDiagnostic}
                   lockKey={curKey}
-                  submitLabel={qi < questions.length - 1 ? "Next question" : "Get ranked"}
+                  submitLabel={
+                    Object.values(diagAnswered).reduce((a, n) => a + n, 0) >= ORDER.length * (curQ.stepsTotal || 4) - 1
+                      ? "Get ranked"
+                      : "Next question"
+                  }
                   loading={false}
                 />
-                <p className="np-hint">noobtopro grades your <em>thinking</em>, so explain your full approach — or attach a photo of your worked notes.</p>
+                <p className="np-hint">noobtopro grades your <em>thinking</em>, so explain your full approach — or attach a photo of your worked notes. Each answer is scored while you work on the next subject, and the difficulty adapts to you.</p>
+              </div>
+            )}
+
+            {/* Adaptive-walk WAITING / RETRY state: every served question is answered
+                and the next item (or the finalize) is still in flight — or a step
+                failed and its signed token awaits a retry. */}
+            {stage === "diagnostic" && !curQ && (
+              <div className="fade-up">
+                {diagError ? (
+                  <div className="np-card" style={{ textAlign: "center", padding: "32px 24px" }}>
+                    <p className="np-lessontext" style={{ marginBottom: 16 }}>{diagError}</p>
+                    <button className="np-btn np-primary" onClick={retryDiagnostic}>Try again</button>
+                  </div>
+                ) : (
+                  <Loader subject="scoring your last answer" />
+                )}
               </div>
             )}
 

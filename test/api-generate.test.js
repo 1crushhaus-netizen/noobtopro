@@ -18,7 +18,8 @@ vi.mock("@/lib/supabaseAdmin", async (importOriginal) => ({
 
 import { POST } from "@/app/api/generate/route";
 import { _resetRateLimits } from "@/lib/rateLimit";
-import { ORDER, DIAGNOSTIC_DIFFICULTIES } from "@/lib/scoring";
+import { ORDER } from "@/lib/scoring";
+import { verifyDiagToken } from "@/lib/questionToken";
 
 function req(bodyObjOrString) {
   const body =
@@ -42,11 +43,16 @@ function mockGroqReturning(payload) {
 
 beforeEach(() => {
   process.env.GROQ_API_KEY = "test-key";
+  // The ADAPTIVE diagnostic start signs a step token per subject, so a signing
+  // key must exist for the diagnostic paths (individual tests that need the
+  // unsigned 503 behavior delete it themselves).
+  process.env.QUESTION_TOKEN_SECRET = "gen-test-secret";
   _resetRateLimits();
   calib.requireUser.mockClear();
   calib.adminClient = null;
 });
 afterEach(() => {
+  delete process.env.QUESTION_TOKEN_SECRET;
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -118,33 +124,39 @@ describe("POST /api/generate — validation", () => {
   });
 });
 
-describe("POST /api/generate — diagnostic (curated bank, zero Groq)", () => {
-  it("serves the curated 9-question diagnostic bank WITHOUT calling Groq", async () => {
-    const failFetch = vi.fn(() => { throw new Error("the diagnostic must not call Groq — it's a curated bank"); });
+describe("POST /api/generate — ADAPTIVE diagnostic start (curated bank, zero Groq, RANKS_PLAN §8)", () => {
+  it("serves one SIGNED middle-band starter per subject WITHOUT calling Groq", async () => {
+    const failFetch = vi.fn(() => { throw new Error("the diagnostic start must not call Groq — it's a curated bank"); });
     vi.stubGlobal("fetch", failFetch);
     const res = await POST(req({ kind: "diagnostic" }));
     expect(res.status).toBe(200);
     const json = await res.json();
+    expect(json.adaptive).toBe(true);
     expect(json.curated).toBe(true);
-    expect(json.questions).toHaveLength(9); // 3 subjects × 3 levels
+    expect(json.stepsPerSubject).toBe(4);
+    expect(json.questions).toHaveLength(ORDER.length);
+    for (const s of ORDER) {
+      const q = json.questions.find((x) => x.subject === s);
+      expect(q, s).toBeTruthy();
+      expect(q.difficulty).toBe("intermediate"); // the §8 middle-band start
+      expect(q.stepNo).toBe(1);
+      expect(q.stepsTotal).toBe(4);
+      expect(typeof q.question === "string" && q.question.trim().length > 0).toBe(true);
+      expect(typeof q.token).toBe("string");
+      // The token binds the walk state: subject, step 1, the served item, empty transcript.
+      const v = verifyDiagToken(q.token);
+      expect(v.ok).toBe(true);
+      expect(v.state).toMatchObject({ subject: s, step: 1, transcript: [] });
+      expect(v.state.itemId.startsWith(`${s}:intermediate:`)).toBe(true);
+      expect(v.state.asked).toEqual([v.state.itemId]);
+    }
     expect(failFetch).not.toHaveBeenCalled(); // zero generation tokens
   });
 
-  it("covers every subject at every level (beginner/intermediate/hard), each with a non-empty question", async () => {
+  it("503s when token signing is unconfigured (the walk can't run unsigned)", async () => {
+    delete process.env.QUESTION_TOKEN_SECRET;
     const res = await POST(req({ kind: "diagnostic" }));
-    const { questions } = await res.json();
-    const slots = new Set(questions.map((q) => `${q.subject}:${q.difficulty}`));
-    for (const s of ORDER) {
-      for (const d of DIAGNOSTIC_DIFFICULTIES) expect(slots.has(`${s}:${d}`)).toBe(true);
-    }
-    for (const q of questions) expect(typeof q.question === "string" && q.question.trim().length > 0).toBe(true);
-  });
-
-  it("returns a fresh copy each call (the bank can't be mutated by a caller)", async () => {
-    const a = await (await POST(req({ kind: "diagnostic" }))).json();
-    a.questions[0].question = "MUTATED";
-    const b = await (await POST(req({ kind: "diagnostic" }))).json();
-    expect(b.questions[0].question).not.toBe("MUTATED");
+    expect(res.status).toBe(503);
   });
 });
 
@@ -270,14 +282,15 @@ describe("POST /api/generate — server-issued question tokens + stripped diagno
     }
   });
 
-  it("diagnostic responses NO LONGER ship trap/reasoningSurface (audit P2-9 — placement gaming via devtools)", async () => {
+  it("diagnostic starters NEVER ship trap/reasoningSurface/conceptKey/id (audit P2-9 — the grader resolves them from the bank by the SIGNED item id)", async () => {
     const res = await POST(req({ kind: "diagnostic" }));
     expect(res.status).toBe(200);
     const j = await res.json();
-    expect(j.questions).toHaveLength(9);
     for (const q of j.questions) {
       expect(q.trap).toBeUndefined();
       expect(q.reasoningSurface).toBeUndefined();
+      expect(q.conceptKey).toBeUndefined();
+      expect(q.itemId).toBeUndefined();
       expect(typeof q.question).toBe("string"); // the visible fields still ship
     }
   });
