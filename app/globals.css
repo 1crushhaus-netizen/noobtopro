@@ -94,6 +94,7 @@
   --w-side: 248px;               /* app sidebar */
   --scrim: rgba(0, 0, 0, .7);
   --shadow-lg: 0 24px 64px rgba(0, 0, 0, .55);
+  --scroll-shadow: rgba(255, 255, 255, .07);  /* light haze — black shadows vanish on a black panel */
 }
 
 [data-theme="light"] {
@@ -129,6 +130,7 @@
 
   --scrim: rgba(0, 0, 0, .4);
   --shadow-lg: 0 24px 64px rgba(0, 0, 0, .16);
+  --scroll-shadow: rgba(0, 0, 0, .14);
 }
 
 /* Map the semantic tokens onto Tailwind utility names (bg-panel, text-muted,
@@ -187,6 +189,7 @@ body {
 .np-side .np-nav { order: 3; width: 100%; }
 .np-side-foot { order: 2; margin-left: auto; display: flex; align-items: center; gap: 10px; }
 .np-side-user { display: none; }
+.np-side-id { display: none; }
 
 @media (min-width: 1024px) {
   .np-side {
@@ -209,8 +212,15 @@ body {
   .np-side-user {
     display: block; font-size: 12px; color: var(--faint);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    padding: 0 2px;
+    padding: 0;
   }
+  /* Signed-in identity block (avatar + name + email + rank chip) — identity's
+     single home; the Dashboard bento carries no identity bar. */
+  .np-side-id { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 0 2px 2px; }
+  .np-side-avatar { width: 30px; height: 30px; font-size: 13px; }
+  .np-side-idtext { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .np-side-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .np-side-rank { font-size: 10px; padding: 2px 8px; flex: none; }
   .np-frame--side { margin-left: var(--w-side); }
 }
 
@@ -425,6 +435,10 @@ body {
 .np-emptytitle { font-family: var(--display); font-size: 18px; font-weight: 600; margin: 0 0 8px; }
 .np-chartsub { font-size: 13px; color: var(--muted); margin-bottom: 14px; }
 .np-chart { width: 100%; height: auto; display: block; }
+/* Chart legend (leaderboard rank-distribution curves) */
+.np-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 10px; }
+.np-legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.np-legend-swatch { width: 14px; height: 2px; border-radius: 1px; flex: none; }
 .np-subjectglyph { font-family: var(--mono); }
 .np-empty { text-align: center; padding: 48px 24px; color: var(--muted); }
 .np-empty .np-question { color: var(--text); margin-bottom: 14px; }
@@ -492,6 +506,54 @@ body {
 
 .np-learngroup { padding: 6px 0; }
 .np-learngroup + .np-learngroup { border-top: 1px solid var(--line); margin-top: 6px; }
+
+/* ---- Learn tab shell: "up next" strip · subject tabs · search · rank accordions ---- */
+.np-upnext { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+.np-upnext-card { padding: 14px 16px; }
+.np-upnext-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+.np-upnext-subject { font-size: 14px; font-weight: 600; }
+.np-upnext-rank { margin-left: auto; font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.np-upnext-chips { display: flex; flex-direction: column; gap: 6px; }
+.np-upnext-chips .np-concepttag { width: 100%; justify-content: flex-start; }
+
+.np-learn-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+/* np-learn-search is its own class (not a hub-search selector) because
+   mobile-responsive.test.js reads the FIRST hub-search rule body in this file
+   for the 16px iOS-zoom guarantee. */
+.np-learn-search { margin-left: auto; }
+
+/* Segmented subject switcher */
+.np-seg { display: inline-flex; gap: 2px; border: 1px solid var(--line); border-radius: var(--radius-btn); padding: 3px; background: var(--tint-1); }
+.np-seg-btn { display: inline-flex; align-items: center; gap: 7px; border: none; background: none; border-radius: 6px; padding: 8px 14px; min-height: 38px; font-family: var(--ui); font-size: 13.5px; font-weight: 500; color: var(--muted); cursor: pointer; transition: color .15s ease, background .15s ease; }
+.np-seg-btn:hover { color: var(--text); }
+.np-seg-btn.active { background: var(--tint-2); color: var(--text); }
+.np-seg-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* Collapsible rank header: chevron + rank + breadth counter + mini progress bar */
+.np-rankhead { display: flex; align-items: center; gap: 10px; width: 100%; background: none; border: none; padding: 8px 2px; min-height: 44px; cursor: pointer; font-family: var(--ui); text-align: left; }
+.np-rankhead:hover .np-hub-topiclabel { color: var(--text); }
+.np-rankhead:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--radius-inset); }
+.np-rankchevron { display: inline-flex; color: var(--faint); transform: rotate(-90deg); transition: transform .15s ease; flex: none; }
+.np-rankchevron.open { transform: rotate(0deg); }
+.np-rankbar { width: 90px; height: 4px; border-radius: 2px; background: var(--tint-2); overflow: hidden; flex: none; margin-left: auto; }
+.np-rankbar-fill { display: block; height: 100%; background: var(--phys); border-radius: 2px; transition: width .4s ease; }
+
+/* Aligned concept grid (uniform rows, truncating labels — title carries the rest) */
+.np-conceptgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px; margin: 4px 0 10px 24px; }
+.np-conceptgrid .np-concepttag { width: 100%; justify-content: flex-start; }
+.np-ctlabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Legend chips double as the status filter */
+.np-filterchip { background: none; border: 1px solid transparent; border-radius: var(--radius-pill); padding: 4px 11px; min-height: 28px; cursor: pointer; transition: border-color .15s ease, background .15s ease, color .15s ease; }
+.np-filterchip:hover { background: var(--tint-1); color: var(--text); }
+.np-filterchip.active { border-color: var(--line-strong); background: var(--tint-1); color: var(--text); }
+.np-filterchip:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+@media (max-width: 680px) {
+  .np-upnext { grid-template-columns: 1fr; }
+  .np-conceptgrid { margin-left: 0; }
+  .np-learn-search { margin-left: 0; }
+}
 .np-learngrouphead {
   display: flex; align-items: center; gap: 8px; margin: 6px 0 10px;
   font-size: 14px; font-weight: 600;
@@ -619,11 +681,15 @@ body {
 .np-dash-identity .np-profilename { font-size: 14px; line-height: 1.25; }
 .np-dash-identity .np-profileemail { font-size: 12px; line-height: 1.25; }
 .np-dash-rankchip { font-family: var(--mono); font-size: 12px; letter-spacing: .02em; color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-pill); padding: 4px 12px; white-space: nowrap; background: var(--tint-1); }
-.np-dash-kpis { grid-column: span 4; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-.np-dash-kpis .np-statcard { padding: 10px 14px; gap: 2px; justify-content: center; }
-.np-dash-kpis .np-statnum { font-size: 22px; }
-.np-dash-radar { grid-column: span 5; }
-.np-dash-mid { grid-column: span 3; display: flex; flex-direction: column; gap: 14px; }
+/* Row 1 is purely the KPI cluster (identity lives in the sidebar). */
+.np-dash-kpis { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.np-dash-kpis .np-statcard { padding: 12px 16px; gap: 2px; justify-content: center; }
+.np-dash-kpis .np-statnum { font-size: 24px; }
+/* Row 2 splits into equal thirds: the sidebar narrowed the grid vs the old
+   tab layout, and at span-3 the text-dense "By subject" gate lines wrapped to
+   three lines each — overflowing the height-locked track. */
+.np-dash-radar { grid-column: span 4; }
+.np-dash-mid { grid-column: span 4; display: flex; flex-direction: column; gap: 14px; }
 .np-dash-lead { grid-column: span 4; }
 .np-dash-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 2px; }
 .np-dash-actbtn { min-height: 42px; }
@@ -692,7 +758,6 @@ body {
     align-items: stretch;
     overflow: hidden;
   }
-  .np-dash-frame .np-dash-identity { grid-row: 1; }
   .np-dash-frame .np-dash-kpis     { grid-row: 1; }
   .np-dash-frame .np-dash-radar    { grid-row: 2; min-height: 0; }
   .np-dash-frame .np-dash-mid      { grid-row: 2; min-height: 0; }
@@ -705,8 +770,17 @@ body {
     display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 16px;
   }
   .np-dash-frame .np-dash-lead { display: flex; flex-direction: column; }
-  .np-dash-frame .np-dash-mid > .np-card:first-child { flex: 0 0 auto; }
-  .np-dash-frame .np-dash-mid > .np-card:last-child { flex: 1 1 0; }
+  .np-dash-frame .np-dash-mid { overflow: hidden; }
+  /* "By subject" keeps its natural height while it fits, but may SHRINK and
+     scroll internally when the gate lines wrap taller than the track — it must
+     never overlap the action bar or push "Why your rank moved" out of view.
+     Both cards carry a floor so neither can be crushed to nothing. */
+  .np-dash-frame .np-dash-mid > .np-card:first-child {
+    flex: 0 1 auto; min-height: 150px; display: block;
+    overflow-y: auto; overscroll-behavior: contain;
+    scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent;
+  }
+  .np-dash-frame .np-dash-mid > .np-card:last-child { flex: 1 1 0; min-height: 140px; }
 
   .np-dash-frame .np-dash-cardhead { flex: 0 0 auto; }
   .np-dash-frame .np-dash-cardbody {
@@ -714,11 +788,34 @@ body {
     overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable;
     scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent;
   }
+  /* Scroll affordance ("more above/below"): edge shadows pinned to the
+     container (attachment: scroll) + panel-colored covers that travel with the
+     content (attachment: local) and hide each shadow when that edge is fully
+     scrolled. Theme-proof: covers fade to var(--panel); the shadow hue is the
+     per-theme --scroll-shadow (a light haze on the black panel, a grey shadow
+     on the white one). Longhand on purpose — the background shorthand would
+     clobber .np-card's background-color. */
+  .np-dash-frame .np-dash-cardbody,
+  .np-dash-frame .np-dash-mid > .np-card:first-child {
+    background-image:
+      linear-gradient(var(--panel) 30%, transparent),
+      linear-gradient(transparent, var(--panel) 70%),
+      radial-gradient(farthest-side at 50% 0, var(--scroll-shadow), transparent),
+      radial-gradient(farthest-side at 50% 100%, var(--scroll-shadow), transparent);
+    background-position: center top, center bottom, center top, center bottom;
+    background-size: 100% 28px, 100% 28px, 100% 12px, 100% 12px;
+    background-repeat: no-repeat;
+    background-attachment: local, local, scroll, scroll;
+  }
   .np-dash-frame .np-dash-cardbody:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 8px; }
   .np-dash-frame .np-dash-cardbody::-webkit-scrollbar { width: 8px; }
   .np-dash-frame .np-dash-cardbody::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 4px; }
 
-  .np-dash-frame .np-dash-radar .np-chart { max-height: 380px; }
+  /* Radar: the chart SHRINKS into whatever height is left so the focus rows
+     ("Weakest: …") stay pinned and always visible — no internal scroll here. */
+  .np-dash-frame .np-dash-radarchart { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; }
+  .np-dash-frame .np-dash-radarchart .np-chart { width: 100%; height: 100%; max-height: 300px; }
+  .np-dash-frame .np-dash-radar .np-dash-focus { flex: 0 0 auto; }
 
   .np-dash-frame .np-dash-actions { padding-top: 12px; border-top: 1px solid var(--line); }
   .np-dash-frame .np-dash-actbtn { min-height: 44px; }

@@ -379,7 +379,10 @@ describe("Noobtopro — AI concept-practice drill flow (increment 3)", () => {
     render(<Noobtopro />);
     // Go to the Learn tab.
     fireEvent.click(await screen.findByRole("button", { name: /^Learn$/ }));
-    // Open the Quadratics concept page.
+    // Open the Quadratics concept page (math · high is a collapsed rank — surface it via search).
+    fireEvent.change(await screen.findByRole("searchbox", { name: /search concepts/i }), {
+      target: { value: "Quadratic functions & equations" },
+    });
     fireEvent.click(await screen.findByRole("button", { name: "Quadratic functions & equations" }));
     // Click the drill button.
     fireEvent.click(await screen.findByRole("button", { name: /practice this concept/i }));
@@ -427,6 +430,9 @@ describe("Noobtopro — guest concept-drill updates mastery end-to-end (incremen
 
     render(<Noobtopro />);
     fireEvent.click(await screen.findByRole("button", { name: /^Learn$/ }));
+    fireEvent.change(await screen.findByRole("searchbox", { name: /search concepts/i }), {
+      target: { value: "Quadratic functions & equations" },
+    });
     fireEvent.click(await screen.findByRole("button", { name: "Quadratic functions & equations" }));
     fireEvent.click(await screen.findByRole("button", { name: /practice this concept/i }));
     await screen.findByText(/DRILL-Q2/);

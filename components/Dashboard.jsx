@@ -218,8 +218,10 @@ function BySubject({ scores, mastery, onPractice }) {
 }
 
 // Reasoning radar + a compact "what to work on" (weakest axis + weak concept) per
-// profiled subject.
-function RadarPanel({ scores, onPractice, onLearn, scrollRegion }) {
+// profiled subject. No internal scroll: the chart SHRINKS to whatever height is
+// left so the focus rows below it are always visible — "what to work on" is the
+// actionable part and must never require scrolling to find.
+function RadarPanel({ scores, onPractice, onLearn }) {
   const rubricSubjects = ORDER
     .filter((k) => scores && scores[k] && scores[k].rubric && typeof scores[k].rubric === "object")
     .map((k) => ({ key: k, label: SUBJECTS[k].label, color: SUBJECTS[k].color, rubric: scores[k].rubric }));
@@ -233,8 +235,10 @@ function RadarPanel({ scores, onPractice, onLearn, scrollRegion }) {
         </div>
       </div>
       {rubricSubjects.length >= 1 ? (
-        <div className="np-dash-cardbody" tabIndex={scrollRegion ? 0 : undefined} role="region" aria-label="Reasoning profile detail">
-          <RadarChart subjects={rubricSubjects} />
+        <>
+          <div className="np-dash-radarchart">
+            <RadarChart subjects={rubricSubjects} />
+          </div>
           <div className="np-dash-focus">
             {rubricSubjects.map((s) => {
               const lowKeys = lowestRubricDimensions(s.rubric, 1);
@@ -259,9 +263,9 @@ function RadarPanel({ scores, onPractice, onLearn, scrollRegion }) {
               );
             })}
           </div>
-        </div>
+        </>
       ) : (
-        <div className="np-dash-cardbody"><p className="np-statsub">Finish the diagnostic to see your reasoning profile.</p></div>
+        <p className="np-statsub">Finish the diagnostic to see your reasoning profile.</p>
       )}
     </div>
   );
@@ -436,9 +440,10 @@ export default function Dashboard({
         <p className="np-lede">Your scores, reasoning profile, rank, and recent progress — all in one place.</p>
       </div>
       <div className="np-dash">
-        {identity}
+        {/* Identity (avatar + name + rank) lives in the app sidebar — the bento's
+            top row is purely the KPI cluster. */}
         <KpiStats scores={scores} attempts={attempts} />
-        <RadarPanel scores={scores} onPractice={onPractice} onLearn={onLearn} scrollRegion={isWide} />
+        <RadarPanel scores={scores} onPractice={onPractice} onLearn={onLearn} />
         <div className="np-dash-mid">
           <BySubject scores={scores} mastery={mastery} onPractice={onPractice} />
           <RecentMoves history={history} scrollRegion={isWide} />

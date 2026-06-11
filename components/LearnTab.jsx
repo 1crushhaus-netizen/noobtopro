@@ -60,94 +60,280 @@ export default function LearnTab({ onPractice, busyConcept = null } = {}) {
 
 // One concept chip, colored by mastery state. A non-grey state is also conveyed in
 // text (title + aria-label), never color alone (WCAG 1.4.1); an untouched (grey)
-// chip keeps its plain label as the accessible name.
-function ConceptChip({ subject, concept, state, onOpen, titleExtra }) {
+// chip keeps its plain label as the accessible name. The label is wrapped so it can
+// truncate inside the aligned concept grid (full text stays in title/aria-label).
+function ConceptChip({ subject, concept, state, onOpen, titleExtra, namePrefix }) {
   const colored = state && state !== "grey";
+  const detail = titleExtra || concept.strand || "";
+  // namePrefix distinguishes contexts that repeat a concept (the "Up next" strip vs
+  // the curriculum grid) so accessible names stay unique and carry their context.
+  const baseName = `${namePrefix ? `${namePrefix}: ` : ""}${concept.label}`;
   return (
     <button
       type="button"
       className={`np-concepttag${colored ? ` np-concepttag--${state}` : ""}`}
-      title={colored ? `${titleExtra || concept.strand || ""} — ${MASTERY_LABELS[state]}` : titleExtra || concept.strand}
-      aria-label={colored ? `${concept.label} — ${MASTERY_LABELS[state]}` : undefined}
+      title={`${concept.label}${detail ? ` · ${detail}` : ""}${colored ? ` — ${MASTERY_LABELS[state]}` : ""}`}
+      aria-label={colored || namePrefix ? `${baseName}${colored ? ` — ${MASTERY_LABELS[state]}` : ""}` : undefined}
       onClick={onOpen}
     >
-      {concept.label}
+      <span className="np-ctlabel">{concept.label}</span>
     </button>
   );
 }
 
-// The mastery color key, shown once above the curriculum listing.
-function MasteryLegend() {
-  const items = [
-    ["green", "Mastered"],
-    ["yellow", "In progress"],
-    ["red", "Struggling"],
-    ["grey", "Not attempted"],
-  ];
+// The mastery color key, doubling as the STATUS FILTER: each state chip filters the
+// listing to concepts in that state ("all" restores everything). Keyed glyphs mirror
+// the concept chips, so the legend teaches the encoding while it filters.
+const FILTER_STATES = [
+  ["green", "Mastered"],
+  ["yellow", "In progress"],
+  ["red", "Struggling"],
+  ["grey", "Not attempted"],
+];
+function MasteryFilter({ filter, onFilter }) {
   return (
-    // role="group" so the aria-label is actually exposed (a bare div's label is ignored by AT).
-    <div className="np-masterylegend" role="group" aria-label="Concept color key">
-      {items.map(([state, label]) => (
-        <span key={state} className={`np-masterylegend-item np-masterylegend--${state}`}>
+    <div className="np-masterylegend" role="group" aria-label="Concept color key & status filter">
+      <button
+        type="button"
+        className={`np-masterylegend-item np-filterchip${filter === "all" ? " active" : ""}`}
+        aria-pressed={filter === "all"}
+        onClick={() => onFilter("all")}
+      >
+        All
+      </button>
+      {FILTER_STATES.map(([state, label]) => (
+        <button
+          key={state}
+          type="button"
+          className={`np-masterylegend-item np-masterylegend--${state} np-filterchip${filter === state ? " active" : ""}`}
+          aria-pressed={filter === state}
+          onClick={() => onFilter(filter === state ? "all" : state)}
+        >
           {label}
-        </span>
+        </button>
       ))}
     </div>
   );
 }
 
-// ---- the curriculum listing (subject → rank → concept chips) ----
-function CurriculumList({ stateFor, mastery, onOpen }) {
+// The rank a learner is currently climbing in a subject: the lowest populated rank
+// whose breadth-gate counter isn't complete (everything complete → the highest one).
+function currentRankFor(mastery, subject) {
+  let last = RANKS[0];
+  for (const rank of RANKS) {
+    if (isRankWip(subject, rank)) continue;
+    last = rank;
+    const total = conceptsFor(subject, rank).length;
+    if (rankCoverage(mastery, subject, rank).mastered < total) return rank;
+  }
+  return last;
+}
+
+// "Up next" strip: per subject, the current rank + the first few concepts that still
+// need work there (struggling first, then in-progress, then untouched) — the direct
+// answer to "what should I learn now?" without opening anything.
+function UpNext({ mastery, stateFor, onOpen }) {
+  const PRIORITY = { red: 0, yellow: 1, grey: 2 };
   return (
-    <div className="fade-up">
-      <h2 className="np-h2">Learn</h2>
-      <p className="np-lede" style={{ marginBottom: 12 }}>
-        The full concept curriculum, organized by subject and rank — from Elementary up to Doctorate.
-        Open any concept for its foundations, a written guide with a worked example, and practice.
-      </p>
-      <MasteryLegend />
-
+    <div className="np-upnext">
       {ORDER.map((subject) => {
-        const color = SUBJECTS[subject].color;
+        const rank = currentRankFor(mastery, subject);
+        const next = conceptsFor(subject, rank)
+          .map((c) => ({ ...c, state: stateFor(subject, c.key) }))
+          .filter((c) => c.state !== "green")
+          .sort((a, b) => (PRIORITY[a.state] ?? 3) - (PRIORITY[b.state] ?? 3))
+          .slice(0, 3);
         return (
-          <div key={subject} className="np-card" style={{ marginBottom: 16 }}>
-            <div className="np-learngrouphead">
+          <div key={subject} className="np-card np-upnext-card">
+            <div className="np-upnext-head">
               <SubjectGlyph subject={subject} />
-              <span>{SUBJECTS[subject].label}</span>
+              <span className="np-upnext-subject">{SUBJECTS[subject].label}</span>
+              <span className="np-upnext-rank">{RANK_LABELS[rank]}</span>
             </div>
-
-            {RANKS.map((rank) => (
-              <div key={rank} className="np-learngroup">
-                <div className="np-hub-topiclabel" style={{ color }}>
-                  {RANK_LABELS[rank]}
-                  {/* §7 breadth-gate progress for this rank: green concepts / total —
-                      the count that must reach N/N before the rank above unlocks. */}
-                  {!isRankWip(subject, rank) && (
-                    <span className="np-learncount">
-                      {rankCoverage(mastery, subject, rank).mastered}/{conceptsFor(subject, rank).length} mastered
-                    </span>
-                  )}
-                </div>
-                {isRankWip(subject, rank) ? (
-                  <p className="np-hint" style={{ margin: "2px 0 0", fontStyle: "italic" }}>{WIP_RANKS_NOTE}</p>
-                ) : (
-                  <div className="np-weaktags">
-                    {conceptsFor(subject, rank).map((c) => (
-                      <ConceptChip
-                        key={c.key}
-                        subject={subject}
-                        concept={c}
-                        state={stateFor(subject, c.key)}
-                        onOpen={() => onOpen({ subject, rank, ...c })}
-                      />
-                    ))}
-                  </div>
-                )}
+            {next.length > 0 ? (
+              <div className="np-upnext-chips">
+                {next.map((c) => (
+                  <ConceptChip
+                    key={c.key}
+                    subject={subject}
+                    concept={c}
+                    state={c.state}
+                    namePrefix="Up next"
+                    titleExtra={`${RANK_LABELS[rank]} · ${c.strand || ""}`}
+                    onOpen={() => onOpen({ subject, rank, key: c.key, label: c.label, strand: c.strand })}
+                  />
+                ))}
               </div>
-            ))}
+            ) : (
+              <p className="np-statsub" style={{ margin: 0 }}>Rank complete — keep climbing.</p>
+            )}
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ---- the curriculum listing: subject tabs → collapsible rank sections → an
+// aligned concept grid. Search spans ALL subjects; the status filter narrows to
+// one mastery state (and expands every rank that has matches). ----
+function CurriculumList({ stateFor, mastery, onOpen }) {
+  const [subject, setSubject] = useState(ORDER[0]);
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState("all"); // "all" | green | yellow | red | grey
+  // Explicit user expand/collapse choices; anything unset falls back to the default
+  // (only the subject's CURRENT rank starts open).
+  const [openOverrides, setOpenOverrides] = useState({});
+
+  const q = query.trim().toLowerCase();
+  const matchesFilter = (s, key) => filter === "all" || stateFor(s, key) === filter;
+  const isOpen = (s, rank) =>
+    filter !== "all" ? true : (openOverrides[`${s}:${rank}`] ?? rank === currentRankFor(mastery, s));
+  const toggle = (s, rank) =>
+    setOpenOverrides((o) => ({ ...o, [`${s}:${rank}`]: !isOpen(s, rank) }));
+
+  // Search mode: a flat, cross-subject result list (grouped by subject) replaces the
+  // tabbed listing while a query is present.
+  const searchResults = q
+    ? ORDER.map((s) => ({
+        subject: s,
+        items: RANKS.filter((r) => !isRankWip(s, r)).flatMap((r) =>
+          conceptsFor(s, r)
+            .filter((c) => c.label.toLowerCase().includes(q) && matchesFilter(s, c.key))
+            .map((c) => ({ ...c, rank: r }))
+        ),
+      })).filter((g) => g.items.length > 0)
+    : null;
+
+  return (
+    <div className="fade-up">
+      <h2 className="np-h2">Learn</h2>
+      <p className="np-lede" style={{ marginBottom: 14 }}>
+        The full concept curriculum, organized by subject and rank — from Elementary up to Doctorate.
+        Open any concept for its foundations, a written guide with a worked example, and practice.
+      </p>
+
+      <UpNext mastery={mastery} stateFor={stateFor} onOpen={onOpen} />
+
+      <div className="np-learn-controls">
+        <div className="np-seg" role="tablist" aria-label="Subject">
+          {ORDER.map((s) => (
+            <button
+              key={s}
+              type="button"
+              role="tab"
+              aria-selected={subject === s}
+              className={"np-seg-btn" + (subject === s ? " active" : "")}
+              onClick={() => setSubject(s)}
+            >
+              <SubjectGlyph subject={s} /> {SUBJECTS[s].label}
+            </button>
+          ))}
+        </div>
+        <input
+          type="search"
+          className="np-input np-hub-search np-learn-search"
+          placeholder="Search concepts…"
+          aria-label="Search concepts"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
+
+      <MasteryFilter filter={filter} onFilter={setFilter} />
+
+      {searchResults ? (
+        searchResults.length > 0 ? (
+          searchResults.map((g) => (
+            <div key={g.subject} className="np-card" style={{ marginBottom: 14 }}>
+              <div className="np-learngrouphead">
+                <SubjectGlyph subject={g.subject} />
+                <span>{SUBJECTS[g.subject].label}</span>
+                <span className="np-learncount">{g.items.length} match{g.items.length === 1 ? "" : "es"}</span>
+              </div>
+              <div className="np-conceptgrid">
+                {g.items.map((c) => (
+                  <ConceptChip
+                    key={c.key}
+                    subject={g.subject}
+                    concept={c}
+                    state={stateFor(g.subject, c.key)}
+                    titleExtra={`${RANK_LABELS[c.rank] || ""} · ${c.strand || ""}`}
+                    onOpen={() => onOpen({ subject: g.subject, rank: c.rank, key: c.key, label: c.label, strand: c.strand })}
+                  />
+                ))}
+              </div>
+            </div>
+          ))
+        ) : (
+          <p className="np-hint">No concepts match “{query.trim()}”.</p>
+        )
+      ) : (
+        <div className="np-card">
+          <div className="np-learngrouphead">
+            <SubjectGlyph subject={subject} />
+            <span>{SUBJECTS[subject].label}</span>
+          </div>
+
+          {RANKS.map((rank) => {
+            const wip = isRankWip(subject, rank);
+            const concepts = wip ? [] : conceptsFor(subject, rank);
+            const visible = wip ? [] : concepts.filter((c) => matchesFilter(subject, c.key));
+            const cov = wip ? null : rankCoverage(mastery, subject, rank);
+            const open = isOpen(subject, rank);
+            // Under a status filter, ranks with no matching concepts collapse away
+            // entirely (headers stay when unfiltered so counters always inform).
+            if (filter !== "all" && !wip && visible.length === 0) return null;
+            return (
+              <div key={rank} className="np-learngroup">
+                <button
+                  type="button"
+                  className="np-rankhead"
+                  aria-expanded={open}
+                  aria-label={
+                    wip
+                      ? RANK_LABELS[rank]
+                      : `${RANK_LABELS[rank]} — ${cov.mastered} of ${concepts.length} mastered`
+                  }
+                  onClick={() => toggle(subject, rank)}
+                >
+                  <span className={"np-rankchevron" + (open ? " open" : "")} aria-hidden="true">
+                    <Icon name="chevron" size={14} />
+                  </span>
+                  <span className="np-hub-topiclabel" style={{ margin: 0 }}>{RANK_LABELS[rank]}</span>
+                  {!wip && (
+                    <>
+                      <span className="np-learncount">{cov.mastered}/{concepts.length} mastered</span>
+                      <span className="np-rankbar" aria-hidden="true">
+                        <span
+                          className="np-rankbar-fill"
+                          style={{ width: `${concepts.length ? Math.round((cov.mastered / concepts.length) * 100) : 0}%` }}
+                        />
+                      </span>
+                    </>
+                  )}
+                </button>
+                {open &&
+                  (wip ? (
+                    <p className="np-hint" style={{ margin: "2px 0 8px 24px", fontStyle: "italic" }}>{WIP_RANKS_NOTE}</p>
+                  ) : (
+                    <div className="np-conceptgrid">
+                      {visible.map((c) => (
+                        <ConceptChip
+                          key={c.key}
+                          subject={subject}
+                          concept={c}
+                          state={stateFor(subject, c.key)}
+                          onOpen={() => onOpen({ subject, rank, ...c })}
+                        />
+                      ))}
+                    </div>
+                  ))}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

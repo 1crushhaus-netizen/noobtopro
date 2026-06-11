@@ -6,6 +6,7 @@ import {
   ORDER,
   SCALE_NOTE,
   band,
+  rankFor,
   totalPoints,
   phdIndex,
   DIFFICULTY_LABELS,
@@ -288,6 +289,36 @@ function AnswerComposer({ value, onText, img, onAttach, onRemoveImg, onSubmit, o
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Signed-in identity in the sidebar footer (avatar + name + email + overall rank).
+// This is identity's ONLY home — the Dashboard bento dropped its identity bar so
+// the top row is purely KPIs.
+function SidebarIdentity({ user, scores }) {
+  const [imgFailed, setImgFailed] = useState(false);
+  if (!user) return null;
+  const meta = user.user_metadata || {};
+  const name = meta.full_name || meta.name || user.email || "You";
+  const avatar = meta.avatar_url || meta.picture || null;
+  const showAvatar = avatar && !imgFailed;
+  return (
+    <div className="np-side-id">
+      {showAvatar ? (
+        <img className="np-avatar np-side-avatar" src={avatar} alt="" referrerPolicy="no-referrer" onError={() => setImgFailed(true)} />
+      ) : (
+        <div className="np-avatar np-avatarfallback np-side-avatar">{String(name).charAt(0).toUpperCase()}</div>
+      )}
+      <div className="np-side-idtext">
+        <span className="np-side-name">{name}</span>
+        {user.email && <span className="np-side-user">{user.email}</span>}
+      </div>
+      {scores && (
+        <span className="np-dash-rankchip np-side-rank" title="Your overall rank">
+          {rankFor(phdIndex(scores)).name}
+        </span>
+      )}
     </div>
   );
 }
@@ -1282,6 +1313,7 @@ export default function Noobtopro() {
             )}
           </nav>
           <div className="np-side-foot">
+            <SidebarIdentity user={user} scores={scores} />
             <ThemeToggle />
             {user ? (
               <button className="np-signinbtn" onClick={handleSignOut} title={user.email || ""}>
@@ -1295,7 +1327,6 @@ export default function Noobtopro() {
                 <Icon name="login" size={16} /> Sign in
               </button>
             )}
-            {user && user.email && <span className="np-side-user">{user.email}</span>}
           </div>
         </aside>
       )}
