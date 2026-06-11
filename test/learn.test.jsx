@@ -195,3 +195,60 @@ describe("LearnTab — curated written guide on the concept page (Phase D, §12.
     expect(screen.getByText("Ask yourself")).toBeTruthy();
   });
 });
+
+describe("LearnTab — cross-subject root concepts (§12.2 enhancement)", () => {
+  it("a chemistry concept lists its math foundation under 'From other subjects' and navigates across subjects", async () => {
+    await renderTab();
+    fireEvent.click(screen.getByRole("button", { name: "Stoichiometry" })); // chemistry · high
+    expect(screen.getByText(/from other subjects/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Mathematics: Proportional relationships" }));
+    expect(screen.getByRole("heading", { name: "Proportional relationships" })).toBeTruthy(); // now on the MATH page
+  });
+
+  it("cross-root chips are colored by the OTHER subject's mastery", async () => {
+    mocks.loadMastery.mockResolvedValue({
+      mastery: { math: { logarithms: { attempts: 2, greenHits: 2, lastQuality: 90, bestQuality: 90 } } },
+    });
+    await renderTab();
+    fireEvent.click(screen.getByRole("button", { name: "Acids & bases (intro)" })); // chemistry · high → math logarithms
+    const chip = screen.getByRole("button", { name: /Mathematics: Logarithms & logarithmic functions — Mastered/i });
+    expect(chip.className).toContain("np-concepttag--green");
+  });
+
+  it("a concept without cross roots shows no 'From other subjects' row", async () => {
+    await renderTab();
+    fireEvent.click(screen.getByRole("button", { name: "Quadratic functions & equations" }));
+    expect(screen.queryByText(/from other subjects/i)).toBeNull();
+  });
+});
+
+describe("LearnTab — mastery-calibrated drill (RANKS_PLAN §6)", () => {
+  it("passes the concept's masteryState to onPractice (grey when untouched)", async () => {
+    const onPractice = vi.fn();
+    await act(async () => { render(<LearnTab onPractice={onPractice} />); });
+    fireEvent.click(screen.getByRole("button", { name: "Quadratic functions & equations" }));
+    fireEvent.click(screen.getByRole("button", { name: /practice this concept/i }));
+    expect(onPractice.mock.calls[0][0]).toMatchObject({ subject: "math", key: "quadratics", masteryState: "grey" });
+  });
+
+  it("a GREEN concept passes masteryState green and shows the stretch copy", async () => {
+    mocks.loadMastery.mockResolvedValue({
+      mastery: { math: { quadratics: { attempts: 2, greenHits: 2, lastQuality: 85, bestQuality: 90 } } },
+    });
+    const onPractice = vi.fn();
+    await act(async () => { render(<LearnTab onPractice={onPractice} />); });
+    fireEvent.click(screen.getByRole("button", { name: /Quadratic functions & equations — Mastered/i }));
+    expect(screen.getByText(/stretch question one notch up/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /practice this concept/i }));
+    expect(onPractice.mock.calls[0][0]).toMatchObject({ key: "quadratics", masteryState: "green" });
+  });
+
+  it("a RED concept shows the gentler-round copy on the practice card", async () => {
+    mocks.loadMastery.mockResolvedValue({
+      mastery: { math: { quadratics: { attempts: 1, greenHits: 0, lastQuality: 10, bestQuality: 10 } } },
+    });
+    await renderTab();
+    fireEvent.click(screen.getByRole("button", { name: /Quadratic functions & equations — Struggling/i }));
+    expect(screen.getByText(/one notch gentler/i)).toBeTruthy();
+  });
+});

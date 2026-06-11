@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { SUBJECTS, ORDER } from "@/lib/scoring";
-import { RANKS, RANK_LABELS, conceptsFor, isRankWip, WIP_RANKS_NOTE, rootsFor } from "@/lib/curriculum";
+import { RANKS, RANK_LABELS, conceptsFor, isRankWip, WIP_RANKS_NOTE, rootsFor, crossRootsFor } from "@/lib/curriculum";
 import { conceptState, MASTERY_LABELS } from "@/lib/mastery";
 import { loadGuide } from "@/lib/guides";
 import { loadMastery } from "@/lib/store";
@@ -146,7 +146,8 @@ function CurriculumList({ stateFor, onOpen }) {
 function ConceptPage({ concept, state, stateFor, onOpen, onBack, onPractice, busyConcept }) {
   const { subject, key, label, rank } = concept;
   const color = SUBJECTS[subject] ? SUBJECTS[subject].color : "var(--text)";
-  const roots = rootsFor(subject, key); // [{ key, label, strand, rank }]
+  const roots = rootsFor(subject, key); // [{ key, label, strand, rank }] — same subject
+  const crossRoots = crossRootsFor(subject, key); // [{ subject, key, … }] — other subjects
   const generating = busyConcept === key;
 
   // The curated written guide (Phase D, §12.3) — undefined while its subject·rank
@@ -200,22 +201,46 @@ function ConceptPage({ concept, state, stateFor, onOpen, onBack, onPractice, bus
         </div>
       )}
 
-      {/* Root concepts — the lower-rank foundations, each a link to its own page. */}
-      {roots.length > 0 ? (
+      {/* Root concepts — the foundations, each a link to its own page: the same-subject
+          lower-rank roots, then any CROSS-SUBJECT roots (§12.2 enhancement — e.g.
+          calculus-based physics → math derivatives), whose chips carry their subject
+          name and navigate into that subject's concept page. */}
+      {roots.length > 0 || crossRoots.length > 0 ? (
         <div className="np-card" style={{ marginBottom: 16 }}>
           <div className="np-cardicon" style={{ color }}>Root concepts — understand these first</div>
-          <div className="np-weaktags" style={{ marginTop: 8 }}>
-            {roots.map((r) => (
-              <ConceptChip
-                key={r.key}
-                subject={subject}
-                concept={r}
-                state={stateFor(subject, r.key)}
-                titleExtra={`${RANK_LABELS[r.rank] || ""} · ${r.strand || ""}`}
-                onOpen={() => onOpen({ subject, ...r })}
-              />
-            ))}
-          </div>
+          {roots.length > 0 && (
+            <div className="np-weaktags" style={{ marginTop: 8 }}>
+              {roots.map((r) => (
+                <ConceptChip
+                  key={r.key}
+                  subject={subject}
+                  concept={r}
+                  state={stateFor(subject, r.key)}
+                  titleExtra={`${RANK_LABELS[r.rank] || ""} · ${r.strand || ""}`}
+                  onOpen={() => onOpen({ subject, ...r })}
+                />
+              ))}
+            </div>
+          )}
+          {crossRoots.length > 0 && (
+            <>
+              <div className="np-eyebrow np-eyebrow--sm" style={{ margin: "12px 2px 2px" }}>
+                From other subjects
+              </div>
+              <div className="np-weaktags" style={{ marginTop: 6 }}>
+                {crossRoots.map((r) => (
+                  <ConceptChip
+                    key={`${r.subject}:${r.key}`}
+                    subject={r.subject}
+                    concept={{ ...r, label: `${SUBJECTS[r.subject] ? SUBJECTS[r.subject].label : r.subject}: ${r.label}` }}
+                    state={stateFor(r.subject, r.key)}
+                    titleExtra={`${SUBJECTS[r.subject] ? SUBJECTS[r.subject].label : ""} · ${RANK_LABELS[r.rank] || ""} · ${r.strand || ""}`}
+                    onOpen={() => onOpen({ ...r })}
+                  />
+                ))}
+              </div>
+            </>
+          )}
         </div>
       ) : (
         <p className="np-hint" style={{ marginBottom: 16 }}>
@@ -227,13 +252,21 @@ function ConceptPage({ concept, state, stateFor, onOpen, onBack, onPractice, bus
           example, and self-questions — read first, then practice below. */}
       {guide && <ConceptGuide guide={guide} color={color} />}
 
-      {/* AI concept-practice drill (increment 3): an on-request question targeting THIS
-          concept, graded process-first, that updates the concept's mastery coloring. */}
+      {/* AI concept-practice drill (increment 3 + mastery calibration, RANKS_PLAN §6):
+          an on-request question targeting THIS concept, framed at its rank band shifted
+          by the learner's standing (green stretches up, red comes gentler — the server
+          resolves the state authoritatively for signed-in users; masteryState is the
+          guest fallback). Graded process-first; updates the mastery coloring above. */}
       <div className="np-card np-lesson">
         <div className="np-cardicon" style={{ color }}>Practice this concept</div>
         <p className="np-lessontext" style={{ color: "var(--muted)", marginBottom: 12 }}>
           Get a reasoning question aimed right at <strong style={{ color: "var(--text)" }}>{label}</strong>,
-          framed at the {RANK_LABELS[rank] || rank} level. Explain your thinking and it's graded on
+          framed at the {RANK_LABELS[rank] || rank} level.{" "}
+          {state === "red"
+            ? "Since you've been struggling here, the next question comes one notch gentler — rebuild from the core idea."
+            : state === "green"
+              ? "You've shown mastery here, so expect a stretch question one notch up."
+              : ""}{state === "red" || state === "green" ? " " : ""}Explain your thinking and it's graded on
           reasoning — your attempts update this concept's standing above.
         </p>
         {onPractice ? (
@@ -242,7 +275,7 @@ function ConceptPage({ concept, state, stateFor, onOpen, onBack, onPractice, bus
             className="np-btn np-primary np-btn--subject"
             style={{ "--subject": color }}
             disabled={generating}
-            onClick={() => onPractice(concept)}
+            onClick={() => onPractice({ ...concept, masteryState: state })}
           >
             {generating ? "Generating a question…" : "Practice this concept"}
           </button>

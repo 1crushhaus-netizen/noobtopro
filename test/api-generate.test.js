@@ -1,5 +1,21 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
+// Mastery-calibration seams (RANKS_PLAN §6): the route verifies a JWT and reads the
+// caller's concept_mastery row ONLY when an Authorization header is present. Defaults
+// mirror an unconfigured server: no valid user, no admin client (guest path).
+const calib = vi.hoisted(() => ({
+  requireUser: vi.fn(async () => ({ error: "Authentication required.", status: 401 })),
+  adminClient: null,
+}));
+vi.mock("@/lib/adminAuth", async (importOriginal) => ({
+  ...(await importOriginal()),
+  requireUser: (...a) => calib.requireUser(...a),
+}));
+vi.mock("@/lib/supabaseAdmin", async (importOriginal) => ({
+  ...(await importOriginal()),
+  getSupabaseAdmin: () => calib.adminClient,
+}));
+
 import { POST } from "@/app/api/generate/route";
 import { _resetRateLimits } from "@/lib/rateLimit";
 import { ORDER, DIAGNOSTIC_DIFFICULTIES } from "@/lib/scoring";
@@ -27,6 +43,8 @@ function mockGroqReturning(payload) {
 beforeEach(() => {
   process.env.GROQ_API_KEY = "test-key";
   _resetRateLimits();
+  calib.requireUser.mockClear();
+  calib.adminClient = null;
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -337,5 +355,119 @@ describe("POST /api/generate — concept-practice drill (increment 3)", () => {
     expect(sentUser).toContain("Counting & cardinality");
     expect(sentUser).not.toContain("should not appear");
     expect((await res.json()).difficulty).toBe("beginner"); // elementary → beginner
+  });
+});
+
+// ---- mastery-calibrated drill difficulty (RANKS_PLAN §6 via §12.3) ----------
+
+// Same-origin request WITH a bearer token (the signed-in drill path).
+function reqAuthed(bodyObj) {
+  return new Request("http://test.local/api/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer test-jwt" },
+    body: JSON.stringify(bodyObj),
+  });
+}
+
+// Minimal concept_mastery read chain: from().select().eq().eq().eq().maybeSingle().
+const masteryClient = (row) => ({
+  from: () => ({
+    select: () => ({
+      eq: () => ({ eq: () => ({ eq: () => ({ maybeSingle: async () => ({ data: row }) }) }) }),
+    }),
+  }),
+});
+
+describe("POST /api/generate — mastery-calibrated drill band (RANKS_PLAN §6)", () => {
+  const drillPayload = {
+    topic: "Algebra", topicSlug: "algebra", targetConcept: "x",
+    difficulty: "beginner", reasoningSurface: "multi-step",
+    question: "Solve x² - 5x + 6 = 0 and explain each step.",
+  };
+
+  it("guest masteryState shifts the band ±1 around the rank band (quadratics: intermediate base)", async () => {
+    mockGroqReturning(drillPayload);
+    let j = await (await POST(req({ kind: "practice", subject: "math", conceptKey: "quadratics", masteryState: "green" }))).json();
+    expect(j.difficulty).toBe("advanced"); // stretch one notch up
+
+    mockGroqReturning(drillPayload);
+    j = await (await POST(req({ kind: "practice", subject: "math", conceptKey: "quadratics", masteryState: "red" }))).json();
+    expect(j.difficulty).toBe("foundational"); // gentler one notch down
+
+    mockGroqReturning(drillPayload);
+    j = await (await POST(req({ kind: "practice", subject: "math", conceptKey: "quadratics", masteryState: "yellow" }))).json();
+    expect(j.difficulty).toBe("intermediate"); // in progress → rank band
+  });
+
+  it("clamps at the ladder edges and ignores junk/grey states (no widening beyond ±1)", async () => {
+    mockGroqReturning(drillPayload);
+    let j = await (await POST(req({ kind: "practice", subject: "math", conceptKey: "counting_cardinality", masteryState: "red" }))).json();
+    expect(j.difficulty).toBe("beginner"); // elementary red: nothing below beginner
+
+    mockGroqReturning(drillPayload);
+    j = await (await POST(req({ kind: "practice", subject: "math", conceptKey: "derivatives", masteryState: "green" }))).json();
+    expect(j.difficulty).toBe("phd"); // university green: advanced +1
+
+    for (const masteryState of ["grey", "purple", "GREEN", 42, { evil: true }]) {
+      mockGroqReturning(drillPayload);
+      j = await (await POST(req({ kind: "practice", subject: "math", conceptKey: "quadratics", masteryState }))).json();
+      expect(j.difficulty, `state ${JSON.stringify(masteryState)}`).toBe("intermediate");
+    }
+  });
+
+  it("steers the prompt: red asks for a gentler problem, green for a stretch, neutral for neither", async () => {
+    let fetchMock = mockGroqReturning(drillPayload);
+    await POST(req({ kind: "practice", subject: "math", conceptKey: "quadratics", masteryState: "red" }));
+    let sentUser = JSON.parse(fetchMock.mock.calls[0][1].body).messages.find((m) => m.role === "user").content;
+    expect(sentUser).toMatch(/gentler, confidence-building/i);
+
+    fetchMock = mockGroqReturning(drillPayload);
+    await POST(req({ kind: "practice", subject: "math", conceptKey: "quadratics", masteryState: "green" }));
+    sentUser = JSON.parse(fetchMock.mock.calls[0][1].body).messages.find((m) => m.role === "user").content;
+    expect(sentUser).toMatch(/stretch problem/i);
+
+    fetchMock = mockGroqReturning(drillPayload);
+    await POST(req({ kind: "practice", subject: "math", conceptKey: "quadratics" }));
+    sentUser = JSON.parse(fetchMock.mock.calls[0][1].body).messages.find((m) => m.role === "user").content;
+    expect(sentUser).not.toMatch(/gentler, confidence-building|stretch problem/i);
+  });
+
+  it("signed-in: the band comes from the SERVER-read concept_mastery row — the body hint is IGNORED", async () => {
+    calib.requireUser.mockResolvedValueOnce({ user: { id: "user-1" } });
+    calib.adminClient = masteryClient({ attempts: 3, green_hits: 2, last_quality: 90, best_quality: 95 }); // → green
+    mockGroqReturning(drillPayload);
+    const j = await (await POST(reqAuthed({ kind: "practice", subject: "math", conceptKey: "quadratics", masteryState: "red" }))).json();
+    expect(j.difficulty).toBe("advanced"); // server-derived green (+1), NOT the claimed red (−1)
+    expect(calib.requireUser).toHaveBeenCalledTimes(1);
+  });
+
+  it("signed-in with no mastery row yet → neutral rank band", async () => {
+    calib.requireUser.mockResolvedValueOnce({ user: { id: "user-1" } });
+    calib.adminClient = masteryClient(null);
+    mockGroqReturning(drillPayload);
+    const j = await (await POST(reqAuthed({ kind: "practice", subject: "math", conceptKey: "quadratics", masteryState: "green" }))).json();
+    expect(j.difficulty).toBe("intermediate"); // untouched concept; the hint is still ignored
+  });
+
+  it("an INVALID token degrades to the neutral rank band and the route stays open (200)", async () => {
+    calib.requireUser.mockResolvedValueOnce({ error: "Invalid or expired session.", status: 401 });
+    mockGroqReturning(drillPayload);
+    const res = await POST(reqAuthed({ kind: "practice", subject: "math", conceptKey: "quadratics", masteryState: "green" }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).difficulty).toBe("intermediate"); // a presented-but-bad token never honors the hint
+  });
+
+  it("the CALIBRATED band (not the rank band) is what gets signed into the token", async () => {
+    process.env.QUESTION_TOKEN_SECRET = "calib-test-secret";
+    try {
+      mockGroqReturning(drillPayload);
+      const j = await (await POST(req({ kind: "practice", subject: "math", conceptKey: "quadratics", masteryState: "green" }))).json();
+      const v = _vqt(j.token);
+      expect(v.ok).toBe(true);
+      expect(v.q.conceptKey).toBe("quadratics");
+      expect(v.q.difficulty).toBe("advanced"); // /api/score reads THIS (then applies its own ≤1-above-level clamp)
+    } finally {
+      delete process.env.QUESTION_TOKEN_SECRET;
+    }
   });
 });

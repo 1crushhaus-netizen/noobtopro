@@ -883,13 +883,18 @@ export default function Noobtopro() {
   // AI CONCEPT-PRACTICE DRILL (increment 3, RANKS_PLAN §12.3): from a Learn-tab concept
   // page, generate a question TARGETING that curriculum concept and enter the practice
   // flow with it. /api/generate validates the conceptKey against the curriculum, frames
-  // the question at the concept's rank, tags it with `conceptKey` + the rank band, and
-  // signs both into the token — so the graded attempt (signed-in via /api/score, guest
-  // via /api/grade) updates THIS concept's mastery coloring. `concept` is the full
-  // object { subject, key, label, rank, strand } from the concept page.
+  // the question at the concept's MASTERY-CALIBRATED band (rank band, ±1 by the
+  // learner's standing on the concept — RANKS_PLAN §6), tags it with `conceptKey` +
+  // that band, and signs both into the token — so the graded attempt (signed-in via
+  // /api/score, guest via /api/grade) updates THIS concept's mastery coloring.
+  // authApi (not api): a signed-in caller's JWT lets the server read their OWN
+  // concept_mastery row for the calibration; `masteryState` is the guest fallback the
+  // server only honors on unauthenticated calls (guest mastery is localStorage-derived
+  // anyway). `concept` is { subject, key, label, rank, strand, masteryState } from the
+  // concept page.
   async function startConceptDrill(concept) {
     if (!concept || !concept.subject || !concept.key) return;
-    const { subject, key } = concept;
+    const { subject, key, masteryState } = concept;
     // Run-token guard (mirrors startPractice): bumping practiceRun supersedes any
     // in-flight practice/drill generation, and the post-fetch check drops THIS drill
     // if a newer one (or a sign-out/Restart) started while it was generating — so a
@@ -898,7 +903,12 @@ export default function Noobtopro() {
     setDrillBusy(key);
     setError("");
     try {
-      const data = await api("/api/generate", { kind: "practice", subject, conceptKey: key });
+      const data = await authApi("/api/generate", {
+        kind: "practice",
+        subject,
+        conceptKey: key,
+        ...(typeof masteryState === "string" && masteryState !== "grey" ? { masteryState } : {}),
+      });
       // Superseded by a newer drill/practice (or sign-out/Restart): bail WITHOUT
       // touching drillBusy — the newer run now owns that spinner state.
       if (myRun !== practiceRun.current) return;
@@ -908,8 +918,9 @@ export default function Noobtopro() {
       // Clear the spinner BEFORE entering practice — startPracticeWithQuestion bumps
       // practiceRun (to navigate away), so a run-gated clear afterward would never fire.
       setDrillBusy(null);
-      // The server set difficulty (the rank band) + conceptKey; enter practice with the
-      // server-issued question verbatim (it carries the token the grader path needs).
+      // The server set difficulty (the mastery-calibrated band) + conceptKey; enter the
+      // practice flow with the server-issued question verbatim (it carries the token
+      // the grader path needs).
       startPracticeWithQuestion(subject, data);
     } catch (e) {
       if (myRun !== practiceRun.current) return; // superseded — don't clear/surface a stale error

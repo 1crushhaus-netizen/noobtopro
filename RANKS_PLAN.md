@@ -272,7 +272,12 @@ Each concept chip is colored by the learner's per-concept state:
   LOWER-RANK, same-subject** prerequisites. Elementary concepts have `roots: []`. The graph is a
   DAG by construction (edges only point down in rank → no cycles). *Defaults (adjustable):
   lower-rank only and within-subject; cross-subject links (e.g. calculus-based physics → math)
-  are a noted future enhancement.*
+  are a noted future enhancement.* ✅ **Cross-subject links SHIPPED** as the separate, sparse
+  `CROSS_SUBJECT_PREREQUISITES` map (hand-authored, 1–2 per concept where load-bearing): edges
+  point only to an EARLIER subject in `SUBJECT_FOUNDATION_ORDER` (math ◀ physics ◀ chemistry)
+  at ≤ the source's rank — still acyclic by construction (invariants pinned in
+  `test/curriculum.test.js`). Rendered on the concept page under *"From other subjects"*,
+  navigating into the other subject's page.
 - **Concept page:** opening a concept shows a dedicated page — title = the concept, and beneath
   it the **root concepts as clickable buttons** that navigate to their pages. This makes the
   learning path explicit and branched. The same graph powers the red-concept "start with roots"
@@ -284,7 +289,9 @@ The page body:
 - a section of **self-questions** to promote thinking; ✅
 - an on-request **AI-generated problem targeting this concept** — the per-concept
   *calibrated drill* (difficulty tied to the learner's mastery of this concept, per §6). ✅
-  *(shipped earlier as increment 3)*
+  *(shipped as increment 3; the §6 mastery calibration shipped after Phase D —
+  `calibratedDrillBand`: the rank band shifted ±1 by the learner's standing on the concept,
+  resolved server-side from `concept_mastery` for signed-in users)*
 The explanation/example/self-questions are **curated, static** content (authored once); only the
 targeted problem is generated at runtime. *Implementation: all 224 guides live in
 `lib/guides/<subject>/<rank>.js` (one module per populated cell, lazily code-split via
