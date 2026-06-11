@@ -158,8 +158,9 @@ grades steps and finalizes the path-weighted baseline (`diagnosticPathScore`).
   model call per step; placement stays standardized across users.
 - **Branching = simple ±1 band per step**, starting at the middle (intermediate band):
   graded quality above the threshold → one band up, below → one band down. Deterministic
-  given the grades, explainable, and with 4 steps it reaches either extreme.
-- **Length = 4 steps per subject** (12 graded rounds), interleaving the three subjects
+  given the grades, explainable, and with 3 steps it reaches either extreme.
+- **Length = 3 steps per subject** (9 graded rounds — trimmed from 4/12 to ease the
+  rate-limit pressure of a full sitting), interleaving the three subjects
   round-robin to hide grading latency.
 - **Final placement** = the existing **reasoning-anchored, difficulty-weighted aggregate**
   of the answers given (the shipped full-range seeding math, unchanged), seeding Glicko
@@ -237,9 +238,10 @@ the curriculum:
 
 ### 11.4 Adaptive diagnostic length / latency — ✅ RESOLVED (owner decision, 2026-06-11)
 Each diagnostic step is a sequential graded round-trip (can't batch).
-- **Decision: 4 steps per subject** (12 graded rounds, subjects interleaved round-robin),
-  served from a **curated all-five-band bank** (incl. a PhD rung) with **simple ±1-band
-  branching** from the middle. Full spec in §8.
+- **Decision: 3 steps per subject** (9 graded rounds, subjects interleaved round-robin;
+  originally 4/12, trimmed to ease rate-limit pressure), served from a **curated
+  all-five-band bank** (incl. a PhD rung) with **simple ±1-band branching** from the
+  middle. Full spec in §8.
 
 ### 11.5 (further) Existing-user migration & grandfathering — ✅ RESOLVED: no grandfathering (owner decision, 2026-06-11)
 The rating remaps cleanly (×3.5, scale-free), **but the new coverage gate is new data**:

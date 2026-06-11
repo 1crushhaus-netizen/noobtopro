@@ -463,8 +463,8 @@ describe("POST /api/score diagnostic — adaptive STEP (signed ±1-band walk)", 
     expect(v.state.done).toBe(true);
     expect(v.state.subject).toBe("math");
     expect(v.state.transcript).toHaveLength(DIAG_STEPS_PER_SUBJECT);
-    // Strong grades from the middle: intermediate → advanced → phd → phd (clamped).
-    expect(v.state.transcript.map((e) => e.d)).toEqual(["intermediate", "advanced", "phd", "phd"]);
+    // Strong grades from the middle: intermediate → advanced → phd.
+    expect(v.state.transcript.map((e) => e.d)).toEqual(["intermediate", "advanced", "phd"]);
   });
 
   it("rejects tampered/foreign tokens: a practice token, a forged signature, and a signed-but-unknown item", async () => {
@@ -540,7 +540,7 @@ describe("POST /api/score diagnostic — FINALIZE (aggregate the signed walks)",
     }
     // The seed target is the REAL path-weighted aggregate over the walked bands.
     const quality = scoreFromRubric(normalizeRubric(DIAG_GRADE.rubric));
-    const walked = ["intermediate", "advanced", "phd", "phd"].map((d) => ({ difficulty: d, reasoningScore: quality }));
+    const walked = ["intermediate", "advanced", "phd"].map((d) => ({ difficulty: d, reasoningScore: quality }));
     expect(j.scores.math.score).toBe(Math.round((diagnosticPathScore(walked) * 350) / 100)); // quality aggregate → 0–350 placement
     expect(j.masteryUpdates).toHaveLength(ORDER.length * DIAG_STEPS_PER_SUBJECT);
   });
@@ -656,8 +656,8 @@ describe("POST /api/score — per-concept mastery counters", () => {
   it("diagnostic masteryUpdates carry the BANK's concept tags for the walked items (incl. a docked skip → red signal)", async () => {
     mockGroq(DIAG_GRADE);
     // Math: skip the FIRST step (docked, walks down), then answer strongly.
-    // Walk: intermediate(dock) → foundational → intermediate → advanced.
-    const m = await runSubjectWalk("math", { reasonings: ["   ", REASONING, REASONING, REASONING] });
+    // Walk: intermediate(dock) → foundational → intermediate.
+    const m = await runSubjectWalk("math", { reasonings: ["   ", REASONING, REASONING] });
     const p = await runSubjectWalk("physics");
     const c = await runSubjectWalk("chemistry");
     const res = await POST(req({ kind: "diagnostic", tokens: [m, p, c] }));

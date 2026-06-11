@@ -1465,7 +1465,7 @@ export default function Noobtopro() {
                 <div className="np-diag-progress">
                   {ORDER.map((s) => (
                     <div key={s} className="np-diag-proggroup">
-                      {Array.from({ length: curQ.stepsTotal || 4 }, (_, di) => (
+                      {Array.from({ length: curQ.stepsTotal || 3 }, (_, di) => (
                         <div key={di} className="np-progdot" style={{ background: di < (diagAnswered[s] || 0) ? SUBJECTS[s].color : "var(--tint-2)" }} />
                       ))}
                     </div>
@@ -1474,7 +1474,7 @@ export default function Noobtopro() {
                 <div className="np-qmeta">
                   <SubjectGlyph subject={curSubject} />
                   <span className="np-metaline">
-                    {SUBJECTS[curSubject].label.toUpperCase()} · {(DIFFICULTY_LABELS[curQ.difficulty] || "").toUpperCase()} · STEP {curQ.stepNo}/{curQ.stepsTotal || 4}
+                    {SUBJECTS[curSubject].label.toUpperCase()} · {(DIFFICULTY_LABELS[curQ.difficulty] || "").toUpperCase()} · STEP {curQ.stepNo}/{curQ.stepsTotal || 3}
                   </span>
                   {curQ.topic && <span className="np-topic">{curQ.topic}</span>}
                 </div>
@@ -1489,7 +1489,7 @@ export default function Noobtopro() {
                   onSkip={skipDiagnostic}
                   lockKey={curKey}
                   submitLabel={
-                    Object.values(diagAnswered).reduce((a, n) => a + n, 0) >= ORDER.length * (curQ.stepsTotal || 4) - 1
+                    Object.values(diagAnswered).reduce((a, n) => a + n, 0) >= ORDER.length * (curQ.stepsTotal || 3) - 1
                       ? "Get ranked"
                       : "Next question"
                   }

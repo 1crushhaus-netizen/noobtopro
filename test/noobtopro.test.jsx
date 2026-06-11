@@ -50,11 +50,11 @@ afterEach(() => {
 // ---- the ADAPTIVE diagnostic (RANKS_PLAN §8): stateful fetch-stub server ----
 // /api/generate returns one signed starter per subject; each /api/score STEP
 // returns that subject's next question (token encodes subject+step so the stub
-// stays stateless); the 4th step completes the subject; the finalize call
+// stays stateless); the 3rd step completes the subject; the finalize call
 // (tokens[]) returns the canned scores payload. Mirrors the real route contract
 // pinned in test/api-score.test.js.
 const DIAG_SUBJECTS = ["math", "physics", "chemistry"];
-const DIAG_STEPS = 4;
+const DIAG_STEPS = 3;
 const diagQ = (subject, stepNo) => ({
   subject,
   topic: "t",
@@ -104,7 +104,7 @@ async function attachImageToCurrentComposer(container) {
 }
 
 describe("Noobtopro — adaptive diagnostic flow (steps + finalize) & preview leak fix", () => {
-  it("walks all 12 steps (one grade each), finalizes once, and revokes every preview", async () => {
+  it("walks all 9 steps (one grade each), finalizes once, and revokes every preview", async () => {
     // The server-derived mastery updates the guest path must hand to saveProgress —
     // this seam (Noobtopro -> store) is the feature's ONLY guest activation path.
     const MASTERY_UPDATES = [
@@ -121,8 +121,8 @@ describe("Noobtopro — adaptive diagnostic flow (steps + finalize) & preview le
     const { container } = render(<Noobtopro />);
     fireEvent.click(await screen.findByRole("button", { name: /prove it/i }));
 
-    // Walk all 12 steps (3 starters, then each subject's next as its grade lands).
-    // Attach an image to each so there are 12 previews; "Get ranked" on the last.
+    // Walk all 9 steps (3 starters, then each subject's next as its grade lands).
+    // Attach an image to each so there are 9 previews; "Get ranked" on the last.
     for (let i = 0; i < DIAGNOSTIC_ORDER.length; i++) {
       const isLast = i === DIAGNOSTIC_ORDER.length - 1;
       await screen.findByText(DIAGNOSTIC_ORDER[i]);
@@ -135,7 +135,7 @@ describe("Noobtopro — adaptive diagnostic flow (steps + finalize) & preview le
     // Lands on the dashboard once the finalize completes.
     await screen.findByText("Where you stand");
 
-    // 12 per-step grade calls + ONE zero-Groq finalize carrying the 3 done-tokens.
+    // 9 per-step grade calls + ONE zero-Groq finalize carrying the 3 done-tokens.
     const scoreCalls = fetchMock.mock.calls.filter(([p]) => p === "/api/score");
     expect(scoreCalls).toHaveLength(DIAGNOSTIC_ORDER.length + 1);
     const finalize = JSON.parse(scoreCalls[scoreCalls.length - 1][1].body);
@@ -158,7 +158,7 @@ describe("Noobtopro — adaptive diagnostic flow (steps + finalize) & preview le
     expect(screen.getByRole("img", { name: /Mathematics: Score \d+ of 350/ })).toBeTruthy();
     expect(screen.getByRole("img", { name: /Chemistry: Score \d+ of 350/ })).toBeTruthy();
 
-    // Twelve previews were created; all twelve must be revoked on completion (no leak).
+    // Nine previews were created; all nine must be revoked on completion (no leak).
     expect(URL.createObjectURL).toHaveBeenCalledTimes(DIAGNOSTIC_ORDER.length);
     expect(URL.revokeObjectURL).toHaveBeenCalledTimes(DIAGNOSTIC_ORDER.length);
     for (let i = 0; i < DIAGNOSTIC_ORDER.length; i++) {

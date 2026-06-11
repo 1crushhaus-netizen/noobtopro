@@ -64,7 +64,7 @@ describe("pickDiagnosticItem (deterministic, standardized serving)", () => {
     expect(first.id).toBe("math:intermediate:1");
     const second = pickDiagnosticItem("math", "intermediate", [first.id]);
     expect(second.id).toBe("math:intermediate:2");
-    // Exhausted cell (unreachable on a real 4-step walk) falls back, never null.
+    // Exhausted cell (unreachable on a real 3-step walk) falls back, never null.
     expect(pickDiagnosticItem("math", "intermediate", [first.id, second.id]).id).toBe("math:intermediate:1");
   });
 
@@ -87,10 +87,10 @@ describe("nextDiagBand (the §8 ±1-band walk)", () => {
     expect(nextDiagBand(undefined, 0)).toBe("foundational"); // intermediate -1
   });
 
-  it("the walk's constants match the §8 decisions (4 steps, middle start)", () => {
-    expect(DIAG_STEPS_PER_SUBJECT).toBe(4);
+  it("the walk's constants match the §8 decisions (3 steps, middle start)", () => {
+    expect(DIAG_STEPS_PER_SUBJECT).toBe(3);
     expect(DIAG_START_BAND).toBe("intermediate");
-    // From the middle, a 4-step ±1 walk can reach either extreme…
+    // From the middle, a 3-step ±1 walk can reach either extreme…
     expect(nextDiagBand(nextDiagBand(DIAG_START_BAND, 100), 100)).toBe("phd");
     expect(nextDiagBand(nextDiagBand(DIAG_START_BAND, 0), 0)).toBe("beginner");
     // …and any band at most twice — which is why two items per cell suffice.
