@@ -934,20 +934,31 @@ export default function Noobtopro() {
   async function startConceptDrill(concept) {
     if (!concept || !concept.subject || !concept.key) return;
     const { subject, key } = concept;
+    // Run-token guard (mirrors startPractice): bumping practiceRun supersedes any
+    // in-flight practice/drill generation, and the post-fetch check drops THIS drill
+    // if a newer one (or a sign-out/Restart) started while it was generating — so a
+    // slow drill can't yank the learner into a stale concept's question.
+    const myRun = ++practiceRun.current;
     setDrillBusy(key);
     setError("");
     try {
       const data = await api("/api/generate", { kind: "practice", subject, conceptKey: key });
+      // Superseded by a newer drill/practice (or sign-out/Restart): bail WITHOUT
+      // touching drillBusy — the newer run now owns that spinner state.
+      if (myRun !== practiceRun.current) return;
       if (!data || typeof data.question !== "string" || !data.question.trim()) {
         throw new Error("Could not generate a practice question. Please try again.");
       }
+      // Clear the spinner BEFORE entering practice — startPracticeWithQuestion bumps
+      // practiceRun (to navigate away), so a run-gated clear afterward would never fire.
+      setDrillBusy(null);
       // The server set difficulty (the rank band) + conceptKey; enter practice with the
       // server-issued question verbatim (it carries the token the grader path needs).
       startPracticeWithQuestion(subject, data);
     } catch (e) {
-      setError(e.message || "Could not generate a practice question.");
-    } finally {
+      if (myRun !== practiceRun.current) return; // superseded — don't clear/surface a stale error
       setDrillBusy(null);
+      setError(e.message || "Could not generate a practice question.");
     }
   }
 
