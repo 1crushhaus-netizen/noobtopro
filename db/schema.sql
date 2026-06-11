@@ -147,6 +147,7 @@ create or replace function public._valid_glicko(j jsonb)
 returns boolean
 language sql
 immutable
+set search_path = public
 as $$
   select jsonb_typeof(j) = 'object'
      and (select count(*) from jsonb_each(j)) between 1 and 16
