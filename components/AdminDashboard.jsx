@@ -3,7 +3,8 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { SUBJECTS } from "@/lib/scoring";
 
-// Small colored pill. Severity high/med -> coral/gold; everything else neutral.
+// Small status pill on the np-admin-* recipes. Severity high/med -> muted
+// danger/improve accents (tokens, theme-stable); everything else neutral grey.
 function Badge({ children, tone = "neutral" }) {
   return <span className={`np-admin-badge np-admin-${tone}`}>{children}</span>;
 }
