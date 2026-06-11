@@ -438,7 +438,7 @@ describe("POST /api/grade — difficulty band threading (diagnostic)", () => {
   });
 
   it("normalizes a missing difficulty to (unspecified) in the diagnostic prompt", async () => {
-    const fetchMock = mockGroqReturning({ subject: "math", score: 50, weakConcepts: [], comment: "ok" });
+    const fetchMock = mockGroqReturning({ subject: "math", score: 50, rubric: { principle: 2 }, weakConcepts: [], comment: "ok" });
     const res = await POST(req(diagnosticBody())); // no difficulty key
     expect(res.status).toBe(200);
     expect(sentUserMessage(fetchMock)).toMatch(/difficulty band: \(unspecified\)/i);
@@ -450,7 +450,7 @@ describe("POST /api/grade — image validation + vision forwarding", () => {
   const PNG_B64 = "iVBORw0KGgo=";
 
   it("accepts a real image (magic bytes match) and sends it as a data: URL on the multimodal model", async () => {
-    const fetchMock = mockGroqReturning({ subject: "math", score: 70, weakConcepts: [], comment: "ok" });
+    const fetchMock = mockGroqReturning({ subject: "math", score: 70, rubric: { principle: 2 }, weakConcepts: [], comment: "ok" });
     const res = await POST(
       req({ kind: "diagnostic", subject: "math", question: "Q", reasoning: "see my photo", image: { mime: "image/png", data: PNG_B64 } })
     );
@@ -507,5 +507,30 @@ describe("POST /api/grade — hostile input handling", () => {
     mockGroqReturning({ subject: "math", score: 50, weakConcepts: [], comment: "" });
     const res = await POST(req({ kind: "diagnostic", subject: "math", question: "Q", reasoning: { evil: true } }));
     expect(res.status).toBe(200); // previously `reasoning.trim()` threw before validation
+  });
+});
+
+// ---- review round: the global Groq budget is wired on THIS unauthenticated route ----
+import { _resetRateLimits as _resetRL } from "@/lib/rateLimit";
+
+describe("POST /api/grade — global Groq budget (audit P2-3)", () => {
+  it("rejects with 429 once the platform-wide window is exhausted — IP rotation doesn't help", async () => {
+    process.env.GLOBAL_GROQ_BUDGET_PER_MIN = "1";
+    _resetRL();
+    try {
+      mockGroqReturning({ subject: "math", score: 50, rubric: { principle: 2 }, weakConcepts: [], comment: "ok" });
+      const mk = (ip) => new Request("http://test.local/api/grade", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-real-ip": ip },
+        body: JSON.stringify({ kind: "diagnostic", subject: "math", question: "Q", reasoning: "a substantive multi-step attempt at the problem" }),
+      });
+      expect((await POST(mk("198.51.100.1"))).status).toBe(200);
+      const res2 = await POST(mk("198.51.100.2")); // DIFFERENT IP — still globally bounded
+      expect(res2.status).toBe(429);
+      expect(res2.headers.get("Retry-After")).toBeTruthy();
+    } finally {
+      delete process.env.GLOBAL_GROQ_BUDGET_PER_MIN;
+      _resetRL();
+    }
   });
 });

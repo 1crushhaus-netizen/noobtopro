@@ -214,10 +214,13 @@ describe("signed-in data layer (Supabase paths)", () => {
     await loadState();
     expect(mocks.calls.scores.eq).toContainEqual(["user_id", "u1"]);
     expect(mocks.calls.attempts.eq).toContainEqual(["user_id", "u1"]);
+    // NEWEST first + bounded (audit P2-11): ascending-unbounded silently kept the
+    // OLDEST rows past PostgREST's max-rows cap, freezing the dashboard history.
     expect(mocks.calls.attempts.order).toEqual([
-      ["created_at", { ascending: true }],
-      ["id", { ascending: true }],
+      ["created_at", { ascending: false }],
+      ["id", { ascending: false }],
     ]);
+    expect(mocks.calls.attempts.limit).toEqual([500]);
   });
 });
 
@@ -472,5 +475,44 @@ describe("per-concept mastery (guest storage + signed-in reads + migration)", ()
     await migrateGuestToAccount();
     const [, args] = mocks.rpc.mock.calls[0];
     expect("p_mastery" in args).toBe(false);
+  });
+});
+
+describe("audit-fix round (P1-4 + P2-11)", () => {
+  const signedIn = { data: { session: { user: { id: "u1" } } } };
+
+  it("migrate_guest_data returning FALSE (account not empty) KEEPS the guest blob (no silent data loss)", async () => {
+    mocks.session = signedIn;
+    const guestBlob = { scores: { math: { score: 40, weakConcepts: [], comment: "" } }, history: [] };
+    window.localStorage.setItem(KEY, JSON.stringify(guestBlob));
+    mocks.rpc.mockResolvedValueOnce({ data: false, error: null });
+    const res = await migrateGuestToAccount();
+    expect(res.migrated).toBe(false);
+    expect(res.reason).toBe("account-not-empty");
+    // The blob survives — before this fix it was wiped on ANY non-error response.
+    expect(JSON.parse(window.localStorage.getItem(KEY))).toEqual(guestBlob);
+  });
+
+  it("migrate_guest_data returning TRUE clears the guest blob (the happy path is unchanged)", async () => {
+    mocks.session = signedIn;
+    window.localStorage.setItem(KEY, JSON.stringify({ scores: { math: { score: 40, weakConcepts: [], comment: "" } }, history: [] }));
+    mocks.rpc.mockResolvedValueOnce({ data: true, error: null });
+    const res = await migrateGuestToAccount();
+    expect(res.migrated).toBe(true);
+    expect(JSON.parse(window.localStorage.getItem(KEY))).toEqual({ scores: null, history: [] });
+  });
+
+  it("loadState returns the (desc-fetched) history re-reversed to chronological order", async () => {
+    mocks.session = signedIn;
+    mocks.db = {
+      scoresSelect: { data: [], error: null },
+      // The mock returns rows as the DB would: NEWEST first.
+      attemptsSelect: { data: [
+        { type: "attempt", created_at: "t2", subject: "math", reasoning_score: 80, delta: 2, new_score: 52, total_after: 52, phd_after: 17 },
+        { type: "attempt", created_at: "t1", subject: "math", reasoning_score: 70, delta: 1, new_score: 50, total_after: 50, phd_after: 16 },
+      ], error: null },
+    };
+    const st = await loadState();
+    expect(st.history.map((h) => h.t)).toEqual(["t1", "t2"]); // chronological for the charts
   });
 });

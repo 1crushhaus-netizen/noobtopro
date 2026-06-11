@@ -1,5 +1,11 @@
 -- ---------------------------------------------------------------------------
--- 0010 — PER-CONCEPT MASTERY (RANKS_PLAN §12.1, Learn-tab increment 2).
+-- 0012 — PER-CONCEPT MASTERY (RANKS_PLAN §12.1, Learn-tab increment 2).
+--
+-- (Renumbered 0010 → 0012: the audit-fix migration 0011 landed on live FIRST, so
+-- this migration applies on top of it. Two 0011 hardenings are FOLDED IN below
+-- because this migration recreates the same two functions: migrate_guest_data
+-- now keeps the _valid_glicko gate, and delete_user_data keeps the per-user
+-- advisory lock.)
 --
 -- Adds the per-(user, subject, curriculum-concept) mastery counters behind the
 -- Learn tab's green/yellow/red/grey chip coloring:
@@ -155,7 +161,10 @@ begin
          ),
          left(coalesce(s->>'comment', ''), 2000),
          case when jsonb_typeof(s->'rubric') = 'object' then s->'rubric' else null end,
-         case when jsonb_typeof(s->'glicko') = 'object' then s->'glicko' else null end,
+         -- Audit P2-6 (folded in from 0011): the glicko blob is guest-asserted —
+         -- admit only a bounded, numerically sane per-axis map (else null → lazy-seed).
+         -- This 3-arg migrate_guest_data REPLACES 0011's 2-arg, so it must keep the gate.
+         case when public._valid_glicko(s->'glicko') then s->'glicko' else null end,
          now()
   from jsonb_array_elements(coalesce(p_scores, '[]'::jsonb)) as s
   where s->>'subject' in ('math', 'physics', 'chemistry')
@@ -262,6 +271,9 @@ begin
   if uid is null then
     raise exception 'not authenticated';
   end if;
+  -- Per-user advisory lock (folded in from 0011, audit P2-7): a reset can't interleave
+  -- with an in-flight save_progress_for transaction.
+  perform pg_advisory_xact_lock(hashtextextended(uid::text, 0));
   delete from public.attempts where user_id = uid;
   delete from public.scores   where user_id = uid;
   delete from public.concept_mastery where user_id = uid;  -- a reset clears the chip coloring too

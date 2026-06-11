@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   session: { data: { session: null } },
   insert: [],
   insertResult: { error: null },
+  rpc: [], // captured [fn, args] — reportConcept goes through submit_concept_report now
+  rpcResult: { data: { status: "ok" }, error: null },
   calls: {}, // per-table: { [table]: { select, eq:[], ilike:[], order:[], limit:[] } }
   makeClient: null,
 }));
@@ -23,6 +25,7 @@ const mocks = vi.hoisted(() => ({
 // Build the fake chainable client fresh per test (clearing captured calls).
 mocks.makeClient = () => ({
   auth: { getSession: async () => mocks.session },
+  rpc: async (fn, args) => { mocks.rpc.push([fn, args]); return mocks.rpcResult; },
   from: (table) => {
     const c = (mocks.calls[table] ||= { eq: [], ilike: [], order: [], limit: [] });
     const chain = {
@@ -51,6 +54,8 @@ beforeEach(() => {
   mocks.result = { data: [], error: null };
   mocks.session = { data: { session: null } };
   mocks.insert = [];
+  mocks.rpc = [];
+  mocks.rpcResult = { data: { status: "ok" }, error: null };
   mocks.insertResult = { error: null };
   mocks.calls = {};
   mocks.client = mocks.makeClient();
@@ -149,38 +154,38 @@ describe("browsePublicConcepts", () => {
   });
 });
 
-describe("reportConcept", () => {
+describe("reportConcept (via the submit_concept_report RPC — 0011, audit P2-8)", () => {
   const signedIn = { data: { session: { user: { id: "u1" } } } };
   const guest = { data: { session: null } };
 
-  it("rejects an unknown subject with { error } and never inserts", async () => {
+  it("rejects an unknown subject with { error } and never calls the RPC", async () => {
     const out = await reportConcept({ subject: "bogus", conceptKey: "limits", reason: "bad" });
     expect(out.error).toBeTruthy();
-    expect(mocks.insert).toHaveLength(0);
+    expect(mocks.rpc).toHaveLength(0);
   });
 
-  it("rejects a guest (no session) with a sign-in error and never inserts", async () => {
+  it("rejects a guest (no session) with a sign-in error and never calls the RPC", async () => {
     mocks.session = guest;
     const out = await reportConcept({ subject: "math", conceptKey: "limits", reason: "bad" });
     expect(out.error).toMatch(/sign in/i);
-    expect(mocks.insert).toHaveLength(0);
+    expect(mocks.rpc).toHaveLength(0);
   });
 
-  it("signed-in: inserts with reporter_id=uid and a NORMALIZED concept_key, returns { ok:true }", async () => {
+  it("signed-in: calls submit_concept_report with a NORMALIZED concept_key (never a direct insert), returns { ok:true }", async () => {
     mocks.session = signedIn;
     const raw = "  Le Chatelier's Principle  ";
     const out = await reportConcept({ subject: "chemistry", conceptKey: raw, reason: "  duplicate guide  " });
     expect(out).toEqual({ ok: true });
-    expect(mocks.insert).toHaveLength(1);
-    const payload = mocks.insert[0][0];
-    expect(payload).toEqual({
-      subject: "chemistry",
-      concept_key: "le chatelier's principle", // normalized via conceptKey()
-      reporter_id: "u1",
-      reason: "duplicate guide", // trimmed
+    expect(mocks.insert).toHaveLength(0); // the direct PostgREST insert is GONE (grant revoked in 0011)
+    expect(mocks.rpc).toHaveLength(1);
+    const [fn, args] = mocks.rpc[0];
+    expect(fn).toBe("submit_concept_report");
+    expect(args).toEqual({
+      p_subject: "chemistry",
+      p_concept_key: "le chatelier's principle", // normalized via conceptKey()
+      p_reason: "duplicate guide", // trimmed
     });
-    // The stored key matches conceptKey() applied to the raw input.
-    expect(payload.concept_key).toBe(conceptKey(raw));
+    expect(args.p_concept_key).toBe(conceptKey(raw));
   });
 
   it("signed-in: caps the reason to 1000 chars", async () => {
@@ -188,37 +193,45 @@ describe("reportConcept", () => {
     const longReason = "x".repeat(5000);
     const out = await reportConcept({ subject: "math", conceptKey: "limits", reason: longReason });
     expect(out).toEqual({ ok: true });
-    expect(mocks.insert[0][0].reason).toHaveLength(1000);
+    expect(mocks.rpc[0][1].p_reason).toHaveLength(1000);
   });
 
-  it("signed-in: a blank/whitespace reason becomes null", async () => {
+  it("signed-in: a blank/whitespace/missing reason becomes null", async () => {
     mocks.session = signedIn;
     await reportConcept({ subject: "math", conceptKey: "limits", reason: "   " });
-    expect(mocks.insert[0][0].reason).toBeNull();
-    // A missing reason is also null.
-    mocks.insert = [];
+    expect(mocks.rpc[0][1].p_reason).toBeNull();
+    mocks.rpc = [];
     await reportConcept({ subject: "math", conceptKey: "limits" });
-    expect(mocks.insert[0][0].reason).toBeNull();
+    expect(mocks.rpc[0][1].p_reason).toBeNull();
   });
 
-  it("rejects when the normalized key is empty with { error } and never inserts", async () => {
+  it("rejects when the normalized key is empty with { error } and never calls the RPC", async () => {
     mocks.session = signedIn;
     const out = await reportConcept({ subject: "math", conceptKey: "   ", reason: "x" });
     expect(out.error).toBeTruthy();
-    expect(mocks.insert).toHaveLength(0);
+    expect(mocks.rpc).toHaveLength(0);
   });
 
   it("returns { error } when Supabase isn't configured (client null)", async () => {
     mocks.client = null;
     const out = await reportConcept({ subject: "math", conceptKey: "limits", reason: "x" });
     expect(out.error).toBeTruthy();
-    expect(mocks.insert).toHaveLength(0);
+    expect(mocks.rpc).toHaveLength(0);
   });
 
-  it("surfaces a DB insert error as { error }", async () => {
+  it("an already-open duplicate (status:'duplicate') is success UX; the open-report cap (status:'limited') surfaces a friendly error", async () => {
     mocks.session = signedIn;
-    mocks.insertResult = { error: { message: "insert denied" } };
+    mocks.rpcResult = { data: { status: "duplicate" }, error: null };
+    expect(await reportConcept({ subject: "math", conceptKey: "limits", reason: "x" })).toEqual({ ok: true });
+    mocks.rpcResult = { data: { status: "limited" }, error: null };
+    const out = await reportConcept({ subject: "math", conceptKey: "limits", reason: "x" });
+    expect(out.error).toMatch(/too many open reports/i);
+  });
+
+  it("surfaces an RPC error as { error }", async () => {
+    mocks.session = signedIn;
+    mocks.rpcResult = { data: null, error: { message: "rpc denied" } };
     const out = await reportConcept({ subject: "physics", conceptKey: "momentum", reason: "x" });
-    expect(out).toEqual({ error: "insert denied" });
+    expect(out).toEqual({ error: "rpc denied" });
   });
 });
