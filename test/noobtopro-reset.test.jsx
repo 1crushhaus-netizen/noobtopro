@@ -20,6 +20,7 @@ const store = vi.hoisted(() => ({
   migrateGuestToAccount: vi.fn(async () => ({ migrated: false })),
   deleteAllUserData: vi.fn(async () => ({ ok: true })),
   loadReviews: vi.fn(async () => ({ reviews: [] })),
+  loadMastery: vi.fn(async () => ({ mastery: {} })),
 }));
 vi.mock("@/lib/store", () => store);
 

@@ -15,7 +15,7 @@ import {
   defaultDifficultyForBand,
   explainRankMove,
 } from "@/lib/scoring";
-import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData, loadReviews } from "@/lib/store";
+import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData, loadReviews, loadMastery } from "@/lib/store";
 import { getSupabase, isSupabaseConfigured, signInWithProvider, signOutUser, PROVIDERS } from "@/lib/supabase";
 import Icon from "@/components/Icon";
 import Dashboard from "@/components/Dashboard";
@@ -1282,6 +1282,7 @@ export default function Noobtopro() {
             history={history}
             loadLeaderboard={loadLeaderboard}
             loadReviews={loadReviews}
+            loadMastery={loadMastery}
             onStartDiagnostic={() => { setView("practice"); beginDiagnostic(); }}
             onPractice={(s) => { setView("practice"); startPractice(s); }}
             onLearn={openLearn}

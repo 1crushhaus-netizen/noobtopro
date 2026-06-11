@@ -523,6 +523,13 @@ body {
 .np-dash-subrow { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .np-dash-subrow:last-child { margin-bottom: 0; }
 .np-dash-sublabel { width: 84px; font-size: 14px; }
+/* ---- §7 breadth gate (by-subject): gated band chip + binding-coverage line ---- */
+.np-dash-subwrap { margin-bottom: 12px; }
+.np-dash-subwrap:last-child { margin-bottom: 0; }
+.np-dash-subwrap .np-dash-subrow { margin-bottom: 4px; }
+.np-dash-subgate { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-left: 26px; }
+.np-dash-subband { font-family: var(--ui); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; color: var(--subject, var(--text)); border: 1px solid var(--line-strong); border-radius: var(--radius-pill); padding: 2px 9px; white-space: nowrap; }
+.np-dash-subgatetext { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); line-height: 1.4; }
 .np-dash-focus { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 6px; }
 .np-dash-focusrow { display: flex; align-items: center; gap: 8px; }
 /* Panel header / body split. At base width these are plain blocks (the body only
@@ -687,6 +694,8 @@ body {
 .np-hub-search:focus { border-color: var(--line-strong); background: var(--tint-2); }
 .np-hub-topic { margin: 4px 0 14px; }
 .np-hub-topiclabel { font-family: var(--mono); font-size: 11px; letter-spacing: .5px; text-transform: uppercase; color: var(--muted); margin: 10px 0 7px; }
+/* Learn tab: the §7 breadth-gate progress counter beside each rank header. */
+.np-learncount { margin-left: 8px; color: var(--muted); font-weight: 400; opacity: .85; }
 .np-concepttag.np-hub-unapproved { border-style: dashed; color: var(--muted); font-style: italic; }
 
 /* ---- mobile touch-target comfort (kept LAST so these win over the base chip/summary

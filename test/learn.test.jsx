@@ -222,6 +222,28 @@ describe("LearnTab — cross-subject root concepts (§12.2 enhancement)", () => 
   });
 });
 
+describe("LearnTab — §7 breadth-gate coverage counters on the rank headers", () => {
+  it("each populated rank header shows its mastered/total counter (0/N untouched)", async () => {
+    await renderTab();
+    expect(screen.getByText("0/21 mastered")).toBeTruthy(); // math · elementary (unique size)
+    expect(screen.getByText("0/31 mastered")).toBeTruthy(); // math · high
+    expect(screen.getByText("0/9 mastered")).toBeTruthy(); // chemistry · elementary
+  });
+
+  it("greens move the counter; non-green practice does not", async () => {
+    mocks.loadMastery.mockResolvedValue({
+      mastery: {
+        math: {
+          quadratics: { attempts: 2, greenHits: 2, lastQuality: 85, bestQuality: 90 }, // green
+          logarithms: { attempts: 1, greenHits: 1, lastQuality: 80, bestQuality: 80 }, // yellow — not counted
+        },
+      },
+    });
+    await renderTab();
+    expect(screen.getByText("1/31 mastered")).toBeTruthy(); // math · high counts only the green
+  });
+});
+
 describe("LearnTab — mastery-calibrated drill (RANKS_PLAN §6)", () => {
   it("passes the concept's masteryState to onPractice (grey when untouched)", async () => {
     const onPractice = vi.fn();

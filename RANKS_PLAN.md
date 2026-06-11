@@ -113,9 +113,19 @@ Each answer is graded on **9 reasoning-chain axes, 0–4 each**. Aggregation is 
 
 ---
 
-## 7. Curriculum & mastery (the breadth gate)
+## 7. Curriculum & mastery (the breadth gate) — 🟡 v1 SHIPPED (display-layer)
 
 This is the layer that turns "an Elo number" into "objective, rank-defined understanding."
+
+> **v1 status:** the coverage engine + gated *display* rank shipped in `lib/promotion.js`
+> (green-only `rankCoverage` per subject×rank, `gatedRankFor` walking the score-derived
+> band back to the highest rank whose lower curricula are fully mastered — the full set,
+> `RANK_COVERAGE_REQUIRED = 1`). Surfaced on the Dashboard's by-subject rows (gated band
+> chip + lock line + "binding cell" nudge) and the Learn tab's rank headers (x/N mastered).
+> Deliberately NOT yet wired into the rating path: §11.3 (soft-cap the score vs. gated
+> label — v1 behaves like Option B) and §11.5 (grandfathering — v1 has none; with no
+> mastery history the label gates down while the score is untouched) are the open owner
+> decisions that finish this section.
 
 - **Curriculum:** a defined **concept set per `(subject, rank)`** — the concepts that
   *define* that rank's level (e.g. "Elementary math = {place value, basic fractions,
