@@ -44,6 +44,7 @@ import {
   REPEAT_WINDOW_K,
 } from "@/lib/scoring";
 import { normalizeTopic } from "@/lib/taxonomy";
+import { BAND_LADDER } from "@/lib/curriculum";
 import { diagnosticSurfaceFor, diagnosticConceptFor, diagnosticQuestionFor } from "@/lib/diagnosticBank";
 import { isCurriculumConcept } from "@/lib/mastery";
 import { preGradeDock } from "@/lib/preGrade";
@@ -357,8 +358,8 @@ async function handlePractice(req, body) {
     // capped at ONE band above their server-stored level ("at-rating by selection" —
     // the generator already targets their level, so honest flows are unaffected; a
     // minted phd label on a 30-score account grades as intermediate). Deflate-only:
-    // bands at or below the learner's level are untouched.
-    const BAND_LADDER = ["beginner", "foundational", "intermediate", "advanced", "phd"];
+    // bands at or below the learner's level are untouched. (BAND_LADDER is the
+    // canonical ascending band order from lib/curriculum.js.)
     const storedBandIdx = Math.min(BAND_LADDER.length - 1, Math.floor(Math.max(0, Number(promptPrevScore) || 0) / 20));
     const tokenBandIdx = Math.max(0, BAND_LADDER.indexOf(tokenBand));
     const bandKey = BAND_LADDER[Math.min(tokenBandIdx, storedBandIdx + 1)];

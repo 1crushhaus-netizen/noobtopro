@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { groqJSON, PRACTICE_GEN_SYS } from "@/lib/groq";
 import { ORDER, clampScore } from "@/lib/scoring";
 import { topicSlugsFor, normalizeTopic } from "@/lib/taxonomy";
-import { conceptByKey, bandForRank } from "@/lib/curriculum";
+import { conceptByKey, calibratedDrillBand } from "@/lib/curriculum";
+import { masteryStateFor } from "@/lib/mastery";
+import { requireUser } from "@/lib/adminAuth";
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { pickVariety, varietyDirectiveText, sanitizeRecentQuestions, avoidListText } from "@/lib/questionVariety";
 import { normalizeReasoningSurface, capTrap, capText, normalizeDifficulty } from "@/lib/gradeInput";
 import { signQuestion } from "@/lib/questionToken";
@@ -45,7 +48,7 @@ export async function POST(req) {
     return NextResponse.json({ error: "Request body must be valid JSON." }, { status: 400 });
   }
 
-  const { kind, subject, score, weakConcepts, recentQuestions, conceptKey } = body || {};
+  const { kind, subject, score, weakConcepts, recentQuestions, conceptKey, masteryState } = body || {};
 
   try {
     if (kind === "diagnostic") {
@@ -86,6 +89,46 @@ export async function POST(req) {
     // /api/score reads them from the verified token and updates that concept's mastery.
     // An unknown/forged conceptKey is simply ignored → ordinary level-based practice.
     const drill = typeof conceptKey === "string" ? conceptByKey(subject, conceptKey) : null;
+    // MASTERY CALIBRATION (RANKS_PLAN §6 via §12.3): the drill band starts at the
+    // concept's rank band and shifts ±1 with the learner's standing on THIS concept
+    // (calibratedDrillBand — green stretches up, red drops down). The state is resolved
+    // SERVER-SIDE for signed-in callers: verified JWT → their own concept_mastery row —
+    // the client still can't pick its band (audit P1-1 posture; an invalid token just
+    // degrades to neutral, this route stays open). The body's `masteryState` hint is
+    // honored ONLY for unauthenticated callers: guest mastery lives in localStorage
+    // (already client-controlled) and guest attempts never reach the rated /api/score
+    // path, so the hint can't move any server-stored rating. Even a forged "green" is
+    // bounded: +1 band, inside the ≤1-above-stored-level clamp /api/score applies.
+    let drillState = "grey";
+    if (drill) {
+      if (req.headers.get("authorization")) {
+        const auth = await requireUser(req);
+        const sb = auth.user ? getSupabaseAdmin() : null;
+        if (sb) {
+          try {
+            const { data } = await sb
+              .from("concept_mastery")
+              .select("attempts, green_hits, last_quality, best_quality")
+              .eq("user_id", auth.user.id)
+              .eq("subject", subject)
+              .eq("concept_key", drill.key)
+              .maybeSingle();
+            if (data) {
+              drillState = masteryStateFor({
+                attempts: data.attempts,
+                greenHits: data.green_hits,
+                lastQuality: data.last_quality,
+                bestQuality: data.best_quality,
+              });
+            }
+          } catch (e) {
+            console.error("[/api/generate] concept_mastery read", e); // neutral band on a read failure
+          }
+        }
+      } else if (["green", "yellow", "red"].includes(masteryState)) {
+        drillState = masteryState;
+      }
+    }
     // Bound the concept list (count + per-item length) before it enters the
     // prompt, mirroring the free-text caps on /api/grade.
     const concepts = (Array.isArray(weakConcepts) ? weakConcepts : [])
@@ -120,7 +163,12 @@ export async function POST(req) {
     // lib/curriculum.js), not user free-text.
     const drillDirective = drill
       ? `Target this SPECIFIC concept and nothing else: "${drill.label}" (strand: ${drill.strand || "core"}). ` +
-        `Frame the question at the ${drill.rank} real-world level. The question must genuinely exercise this concept's reasoning.`
+        `Frame the question at the ${drill.rank} real-world level. The question must genuinely exercise this concept's reasoning.` +
+        (drillState === "red"
+          ? " The learner has been STRUGGLING with this concept — make it a gentler, confidence-building problem that isolates the single core idea."
+          : drillState === "green"
+            ? " The learner has MASTERED the basics here — push one notch harder than usual: a stretch problem that extends the concept."
+            : "")
       : "";
 
     const data = await groqJSON({
@@ -161,13 +209,14 @@ export async function POST(req) {
       question: capText(data.question.trim()),
     };
     // A concept drill overrides the model's free choices with the SERVER-authoritative
-    // curriculum facts: the difficulty is the concept's rank band (not the model's
-    // guess), targetConcept is the concept label, and `conceptKey` is set so it gets
-    // signed into the token → /api/score updates that concept's mastery. The grader's
-    // band-clamp (≤1 above the learner's stored level) still applies downstream.
+    // curriculum facts: the difficulty is the MASTERY-CALIBRATED band (rank band ±1 by
+    // the learner's standing, not the model's guess), targetConcept is the concept
+    // label, and `conceptKey` is set so it gets signed into the token → /api/score
+    // updates that concept's mastery. The grader's band-clamp (≤1 above the learner's
+    // stored level) still applies downstream.
     if (drill) {
       question.conceptKey = drill.key;
-      question.difficulty = bandForRank(drill.rank);
+      question.difficulty = calibratedDrillBand(drill.rank, drillState);
       question.targetConcept = drill.label.slice(0, 200);
     }
     // SIGN the served question (audit P1-1): /api/score practice only accepts a valid
