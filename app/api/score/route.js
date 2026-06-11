@@ -579,7 +579,7 @@ const tooManyDiag = (req, retryAfter) => {
 // call), and return either the next signed item or the subject's completion
 // token. Failures leave the presented token valid — the step can be resubmitted.
 async function handleDiagnosticStep(req, body) {
-  // Per-IP step budget: a full sitting is 12 graded steps; 40/min leaves retry
+  // Per-IP step budget: a full sitting is 9 graded steps; 40/min leaves retry
   // headroom while bounding a burst. (The old per-request :diag cap of 4 guarded
   // 9-grade fan-outs; a step grades exactly ONE answer.)
   const diagRl = await checkRateLimit(`${clientKey(req)}:diag`, { max: 40 });
@@ -663,7 +663,7 @@ async function handleDiagnosticStep(req, body) {
     const reasoningScore = dock ? data.reasoningScore : scoreFromRubric(rubric);
 
     // Fold the SERVER-graded entry into the signed chain. Compact keys + capped
-    // strings bound the token: 4 entries stay far under the 16 KB verify cap.
+    // strings bound the token: 3 entries stay far under the 16 KB verify cap.
     const entry = {
       i: item.id,
       d: item.band,
@@ -738,7 +738,7 @@ async function handleDiagnosticFinalize(req, body) {
     const v = verifyDiagToken(t);
     if (!v.ok) return NextResponse.json({ error: v.error }, { status: 401 });
     const st = v.state;
-    // Exactly one COMPLETED chain per subject, each with the full 4-step walk.
+    // Exactly one COMPLETED chain per subject, each with the full 3-step walk.
     if (!st.done || !ORDER.includes(st.subject) || bySubject[st.subject]) return restart();
     if (!Array.isArray(st.transcript) || st.transcript.length !== DIAG_STEPS_PER_SUBJECT) return restart();
     bySubject[st.subject] = st.transcript;

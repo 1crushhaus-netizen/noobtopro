@@ -130,9 +130,9 @@ describe("Noobtopro — signed-in practice is server-authoritative", () => {
 
 describe("Noobtopro — signed-in adaptive diagnostic is server-persisted", () => {
   // Adaptive-server stub (mirrors the route contract): tokened starters, per-step
-  // next questions, done-tokens after 4 steps, finalize on { tokens }.
+  // next questions, done-tokens after 3 steps, finalize on { tokens }.
   const SUBJECTS3 = ["math", "physics", "chemistry"];
-  const STEPS = 4;
+  const STEPS = 3;
   const diagQ = (subject, stepNo) => ({
     subject, topic: "t", difficulty: "intermediate",
     question: `${subject.toUpperCase()}-Q${stepNo}`, stepNo, stepsTotal: STEPS, token: `tok-${subject}-${stepNo}`,
@@ -183,7 +183,7 @@ describe("Noobtopro — signed-in adaptive diagnostic is server-persisted", () =
 
     await screen.findByText("Where you stand");
 
-    // 12 signed step calls + 1 finalize, EVERY one carrying the Bearer token.
+    // 9 signed step calls + 1 finalize, EVERY one carrying the Bearer token.
     const scoreCalls = fetchMock.mock.calls.filter(([p]) => p === "/api/score");
     expect(scoreCalls).toHaveLength(PRESENTED.length + 1);
     for (const [, init] of scoreCalls) expect(init.headers.Authorization).toBe("Bearer tok-123");

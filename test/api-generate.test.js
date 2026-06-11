@@ -133,14 +133,14 @@ describe("POST /api/generate — ADAPTIVE diagnostic start (curated bank, zero G
     const json = await res.json();
     expect(json.adaptive).toBe(true);
     expect(json.curated).toBe(true);
-    expect(json.stepsPerSubject).toBe(4);
+    expect(json.stepsPerSubject).toBe(3);
     expect(json.questions).toHaveLength(ORDER.length);
     for (const s of ORDER) {
       const q = json.questions.find((x) => x.subject === s);
       expect(q, s).toBeTruthy();
       expect(q.difficulty).toBe("intermediate"); // the §8 middle-band start
       expect(q.stepNo).toBe(1);
-      expect(q.stepsTotal).toBe(4);
+      expect(q.stepsTotal).toBe(3);
       expect(typeof q.question === "string" && q.question.trim().length > 0).toBe(true);
       expect(typeof q.token).toBe("string");
       // The token binds the walk state: subject, step 1, the served item, empty transcript.
