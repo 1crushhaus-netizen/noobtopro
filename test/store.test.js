@@ -58,11 +58,12 @@ describe("migrateGuestToAccount", () => {
     window.localStorage.setItem(
       KEY,
       JSON.stringify({
+        scale: 350,
         scores: {
-          math: { score: 150, weakConcepts: ["vectors", 5, "limits"], comment: "x" },
+          math: { score: 999, weakConcepts: ["vectors", 5, "limits"], comment: "x" },
           physics: { score: -3, weakConcepts: [], comment: "" },
         },
-        history: [{ type: "baseline", t: "2024-01-01T00:00:00Z", totalAfter: 200, phdAfter: 67 }],
+        history: [{ type: "baseline", t: "2024-01-01T00:00:00Z", totalAfter: 700, phdAfter: 235 }],
       })
     );
 
@@ -73,13 +74,13 @@ describe("migrateGuestToAccount", () => {
     const [fn, args] = mocks.rpc.mock.calls[0];
     expect(fn).toBe("migrate_guest_data");
     const bySubject = Object.fromEntries(args.p_scores.map((s) => [s.subject, s]));
-    expect(bySubject.math.score).toBe(100); // 150 -> clamped
+    expect(bySubject.math.score).toBe(350); // 999 -> clamped
     expect(bySubject.math.weak_concepts).toEqual(["vectors", "limits"]); // non-string dropped
     expect(bySubject.physics.score).toBe(0); // -3 -> clamped
     expect(args.p_attempts[0]).toMatchObject({ type: "baseline", created_at: "2024-01-01T00:00:00Z" });
 
     // Guest copy cleared after a successful migration.
-    expect(JSON.parse(window.localStorage.getItem(KEY))).toEqual({ scores: null, history: [] });
+    expect(JSON.parse(window.localStorage.getItem(KEY))).toEqual({ scores: null, history: [], scale: 350 });
   });
 
   it("carries the per-subject rubric profile into the migration payload (radar survives sign-in)", async () => {
@@ -159,7 +160,7 @@ describe("deleteAllUserData", () => {
     const res = await deleteAllUserData();
     expect(res.ok).toBe(true);
     expect(mocks.rpc).toHaveBeenCalledWith("delete_user_data");
-    expect(JSON.parse(window.localStorage.getItem(KEY))).toEqual({ scores: null, history: [] });
+    expect(JSON.parse(window.localStorage.getItem(KEY))).toEqual({ scores: null, history: [], scale: 350 });
   });
 
   it("throws when the delete RPC errors", async () => {
@@ -233,9 +234,10 @@ describe("loadState (guest blob sanitization)", () => {
     window.localStorage.setItem(
       KEY,
       JSON.stringify({
+        scale: 350,
         scores: {
           math: { score: "wat", weakConcepts: "vectors", comment: "x" }, // string wc, garbage score
-          physics: { score: 150, weakConcepts: ["a", 5, "b", null], comment: 42 }, // over-range, mixed wc, non-string comment
+          physics: { score: 999, weakConcepts: ["a", 5, "b", null], comment: 42 }, // over-range, mixed wc, non-string comment
           chemistry: "bogus", // non-object subject -> dropped
         },
         history: "nope", // non-array -> []
@@ -243,7 +245,7 @@ describe("loadState (guest blob sanitization)", () => {
     );
     const st = await loadState();
     expect(st.scores.math).toEqual({ score: 0, weakConcepts: [], comment: "x", rubric: null, glicko: null }); // "wat" -> 0, "vectors" -> []
-    expect(st.scores.physics).toEqual({ score: 100, weakConcepts: ["a", "b"], comment: "", rubric: null, glicko: null }); // 150 -> 100, non-strings dropped, bad comment -> ""
+    expect(st.scores.physics).toEqual({ score: 350, weakConcepts: ["a", "b"], comment: "", rubric: null, glicko: null }); // 999 -> 350, non-strings dropped, bad comment -> ""
     expect(st.scores.chemistry).toBeUndefined(); // non-object subject dropped
     expect(st.history).toEqual([]); // non-array history -> []
   });
@@ -314,6 +316,7 @@ describe("saveProgress (atomic score + attempt write)", () => {
     window.localStorage.setItem(
       KEY,
       JSON.stringify({
+        scale: 350,
         scores: {
           math: { score: 40, weakConcepts: ["a"], comment: "" },
           physics: { score: 55, weakConcepts: ["b"], comment: "" },
@@ -483,7 +486,7 @@ describe("audit-fix round (P1-4 + P2-11)", () => {
 
   it("migrate_guest_data returning FALSE (account not empty) KEEPS the guest blob (no silent data loss)", async () => {
     mocks.session = signedIn;
-    const guestBlob = { scores: { math: { score: 40, weakConcepts: [], comment: "" } }, history: [] };
+    const guestBlob = { scale: 350, scores: { math: { score: 40, weakConcepts: [], comment: "" } }, history: [] };
     window.localStorage.setItem(KEY, JSON.stringify(guestBlob));
     mocks.rpc.mockResolvedValueOnce({ data: false, error: null });
     const res = await migrateGuestToAccount();
@@ -495,11 +498,11 @@ describe("audit-fix round (P1-4 + P2-11)", () => {
 
   it("migrate_guest_data returning TRUE clears the guest blob (the happy path is unchanged)", async () => {
     mocks.session = signedIn;
-    window.localStorage.setItem(KEY, JSON.stringify({ scores: { math: { score: 40, weakConcepts: [], comment: "" } }, history: [] }));
+    window.localStorage.setItem(KEY, JSON.stringify({ scale: 350, scores: { math: { score: 40, weakConcepts: [], comment: "" } }, history: [] }));
     mocks.rpc.mockResolvedValueOnce({ data: true, error: null });
     const res = await migrateGuestToAccount();
     expect(res.migrated).toBe(true);
-    expect(JSON.parse(window.localStorage.getItem(KEY))).toEqual({ scores: null, history: [] });
+    expect(JSON.parse(window.localStorage.getItem(KEY))).toEqual({ scores: null, history: [], scale: 350 });
   });
 
   it("loadState returns the (desc-fetched) history re-reversed to chronological order", async () => {

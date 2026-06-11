@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { groqJSON, fenceGuard, DIAG_GRADE_SYS, PRACTICE_GRADE_SYS } from "@/lib/groq";
-import { clampScore, ORDER, normalizeRubric, scoreFromRubric } from "@/lib/scoring";
+import { clampSubjectScore, ORDER, normalizeRubric, scoreFromRubric } from "@/lib/scoring";
 import { preGradeDock } from "@/lib/preGrade";
 import { checkRateLimit, clientKey, chargeGlobalGroq } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType, readJsonLimited, MAX_BODY_BYTES_IMAGE } from "@/lib/requestGuard";
@@ -194,7 +194,7 @@ export async function POST(req) {
         docked: true,
       });
     }
-    const safeScore = clampScore(score) ?? 0;
+    const safeScore = clampSubjectScore(score) ?? 0;
     const data = await groqJSON({
       system: PRACTICE_GRADE_SYS,
       user:
@@ -203,7 +203,7 @@ export async function POST(req) {
         `Concept being probed:\n"""${fenceGuard(safeConcept)}"""\n` +
         `Question difficulty band: ${safeDifficulty}\n` +
         (surfaceCtx ? surfaceCtx + "\n" : "") +
-        `Learner's current level: ${safeScore}/100\n\n` +
+        `Learner's current level: ${safeScore}/350\n\n` +
         // fenceGuard (audit P2-12): learner text can't fake closing the untrusted block.
         `Learner's reasoning:\n"""${fenceGuard(work)}"""`,
       image: img.image,

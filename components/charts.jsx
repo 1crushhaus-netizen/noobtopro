@@ -11,7 +11,7 @@ import { SUBJECTS, RUBRIC_KEYS, RUBRIC_LABELS, RUBRIC_SHORT, RUBRIC_MAX } from "
    decorative for screen-reader users).
 ---------------------------------------------------------------------------- */
 
-export function LineChart({ values, yMax = 300, color = SUBJECTS.math.color }) {
+export function LineChart({ values, yMax = 1050, color = SUBJECTS.math.color }) {
   const W = 620, H = 200, padL = 36, padR = 14, padT = 16, padB = 22;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
@@ -92,10 +92,11 @@ export function BarChart({ items }) {
   );
 }
 
-export function MiniBar({ value, color }) {
+export function MiniBar({ value, color, max = 350 }) {
+  // `value` rides the 0–350 subject-score scale; normalize to a CSS percent.
   return (
     <div style={{ flex: 1, height: 8, background: "var(--tint-2)", borderRadius: 4, overflow: "hidden" }}>
-      <div style={{ width: `${Math.max(0, Math.min(100, value))}%`, height: "100%", background: color, transition: "width .6s ease" }} />
+      <div style={{ width: `${Math.max(0, Math.min(100, (value / max) * 100))}%`, height: "100%", background: color, transition: "width .6s ease" }} />
     </div>
   );
 }

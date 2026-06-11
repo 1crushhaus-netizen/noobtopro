@@ -51,22 +51,22 @@ describe("clampScore", () => {
 });
 
 describe("band", () => {
-  it("maps scores to the right band", () => {
-    expect(band(0)).toBe("Absolute beginner");
-    expect(band(19)).toBe("Absolute beginner");
-    expect(band(20)).toBe("Foundational");
-    expect(band(40)).toBe("Intermediate");
-    expect(band(60)).toBe("Advanced");
-    expect(band(80)).toBe("PhD-level");
-    expect(band(100)).toBe("PhD-level");
+  it("maps scores to the right band (70-point curriculum ranks on the 0–350 scale)", () => {
+    expect(band(0)).toBe("Elementary");
+    expect(band(69)).toBe("Elementary");
+    expect(band(70)).toBe("Middle");
+    expect(band(140)).toBe("High");
+    expect(band(210)).toBe("University");
+    expect(band(280)).toBe("Doctorate");
+    expect(band(350)).toBe("Doctorate");
   });
 
-  it("treats non-numeric input as 0, not PhD-level", () => {
+  it("treats non-numeric input as 0, not Doctorate", () => {
     // Regression: band(undefined) used to fall through every comparison and
-    // return "PhD-level".
-    expect(band(undefined)).toBe("Absolute beginner");
-    expect(band(null)).toBe("Absolute beginner");
-    expect(band(NaN)).toBe("Absolute beginner");
+    // return the top band.
+    expect(band(undefined)).toBe("Elementary");
+    expect(band(null)).toBe("Elementary");
+    expect(band(NaN)).toBe("Elementary");
   });
 });
 
@@ -106,127 +106,127 @@ describe("blend", () => {
 describe("blend (weighted Elo-style path)", () => {
   it("falls back to legacy 65/35 when opts lacks both usable signals", () => {
     // No opts read can change the legacy contract; an empty/garbage opts is inert.
-    expect(blend(70, 100, {})).toBe(81);
-    expect(blend(70, 100, { foo: 1 })).toBe(81);
-    expect(blend(70, 100, null)).toBe(81);
-    expect(blend(50, 80, { difficulty: null, reasoningScore: null })).toBe(61);
+    expect(blend(245, 350, {})).toBe(282);
+    expect(blend(245, 350, { foo: 1 })).toBe(282);
+    expect(blend(245, 350, null)).toBe(282);
+    expect(blend(175, 280, { difficulty: null, reasoningScore: null })).toBe(212);
     // Unknown difficulty string + non-numeric reasoningScore => no signal => legacy.
-    expect(blend(50, 80, { difficulty: "xyz", reasoningScore: NaN })).toBe(61); // 0.65*50 + 0.35*80
+    expect(blend(175, 280, { difficulty: "xyz", reasoningScore: NaN })).toBe(212); // 0.65*175 + 0.35*280
   });
 
   it("reasoningScore alone scales the step: a blank attempt barely moves, an excellent one moves more", () => {
-    expect(blend(50, 80, { reasoningScore: 0 })).toBe(54); // low confidence -> small move
-    expect(blend(50, 80, { reasoningScore: 50 })).toBe(59);
-    expect(blend(50, 80, { reasoningScore: 100 })).toBe(64); // high confidence -> larger move
+    expect(blend(175, 280, { reasoningScore: 0 })).toBe(190); // low confidence -> small move
+    expect(blend(175, 280, { reasoningScore: 50 })).toBe(206);
+    expect(blend(175, 280, { reasoningScore: 100 })).toBe(223); // high confidence -> larger move
     // Strictly monotonic at the extremes.
     expect(
-      Math.abs(blend(50, 80, { reasoningScore: 100 }) - 50)
-    ).toBeGreaterThan(Math.abs(blend(50, 80, { reasoningScore: 0 }) - 50));
+      Math.abs(blend(175, 280, { reasoningScore: 100 }) - 175)
+    ).toBeGreaterThan(Math.abs(blend(175, 280, { reasoningScore: 0 }) - 175));
   });
 
   it("doing well on a HARDER question is stronger upward evidence than acing an easy one", () => {
     // Fixed quality (r100), fixed upward target (50->80): up-move is non-decreasing
     // in difficulty (the core README requirement; NOT symmetric in the gap).
-    expect(blend(50, 80, { difficulty: "beginner", reasoningScore: 100 })).toBe(64);
-    expect(blend(50, 80, { difficulty: "foundational", reasoningScore: 100 })).toBe(65);
-    expect(blend(50, 80, { difficulty: "intermediate", reasoningScore: 100 })).toBe(68);
-    expect(blend(50, 80, { difficulty: "advanced", reasoningScore: 100 })).toBe(68);
-    expect(blend(50, 80, { difficulty: "phd", reasoningScore: 100 })).toBe(68);
+    expect(blend(175, 280, { difficulty: "beginner", reasoningScore: 100 })).toBe(224);
+    expect(blend(175, 280, { difficulty: "foundational", reasoningScore: 100 })).toBe(227);
+    expect(blend(175, 280, { difficulty: "intermediate", reasoningScore: 100 })).toBe(238);
+    expect(blend(175, 280, { difficulty: "advanced", reasoningScore: 100 })).toBe(238);
+    expect(blend(175, 280, { difficulty: "phd", reasoningScore: 100 })).toBe(238);
     // Acing PhD moves at least as much as acing beginner (the symmetric-info bug
     // this design must NOT have).
     expect(
-      blend(50, 80, { difficulty: "phd", reasoningScore: 100 })
+      blend(175, 280, { difficulty: "phd", reasoningScore: 100 })
     ).toBeGreaterThanOrEqual(
-      blend(50, 80, { difficulty: "beginner", reasoningScore: 100 })
+      blend(175, 280, { difficulty: "beginner", reasoningScore: 100 })
     );
   });
 
   it("realized-alpha differentiation is visible on a wider span (50 -> 100, r100)", () => {
     // alpha-cap + integer rounding collapse difficulty differences on narrow spans;
     // a wide span makes the harder-moves-more property explicit.
-    expect(blend(50, 100, { difficulty: "beginner", reasoningScore: 100 })).toBe(73); // alpha ~0.46
-    expect(blend(50, 100, { difficulty: "foundational", reasoningScore: 100 })).toBe(75);
-    expect(blend(50, 100, { difficulty: "intermediate", reasoningScore: 100 })).toBe(80); // alpha capped 0.60
-    expect(blend(50, 100, { difficulty: "phd", reasoningScore: 100 })).toBe(80);
+    expect(blend(175, 350, { difficulty: "beginner", reasoningScore: 100 })).toBe(256); // alpha ~0.46
+    expect(blend(175, 350, { difficulty: "foundational", reasoningScore: 100 })).toBe(262);
+    expect(blend(175, 350, { difficulty: "intermediate", reasoningScore: 100 })).toBe(280); // alpha capped 0.60
+    expect(blend(175, 350, { difficulty: "phd", reasoningScore: 100 })).toBe(280);
     expect(
-      blend(50, 100, { difficulty: "phd", reasoningScore: 100 })
+      blend(175, 350, { difficulty: "phd", reasoningScore: 100 })
     ).toBeGreaterThan(
-      blend(50, 100, { difficulty: "beginner", reasoningScore: 100 })
+      blend(175, 350, { difficulty: "beginner", reasoningScore: 100 })
     );
   });
 
   it("an outcome that contradicts the suggested direction is damped (Elo alignment)", () => {
     // Suggestion pushes UP to 100 but the attempt was blank on a hard item: surprise
     // is negative, so alpha shrinks and the up-move is small.
-    expect(blend(50, 100, { difficulty: "phd", reasoningScore: 0 })).toBe(57);
+    expect(blend(175, 350, { difficulty: "phd", reasoningScore: 0 })).toBe(199);
     // vs a high-quality attempt on the same hard item, which moves much more.
-    expect(blend(50, 100, { difficulty: "phd", reasoningScore: 100 })).toBe(80);
+    expect(blend(175, 350, { difficulty: "phd", reasoningScore: 100 })).toBe(280);
     expect(
-      blend(50, 100, { difficulty: "phd", reasoningScore: 0 })
-    ).toBeLessThan(blend(50, 100, { difficulty: "phd", reasoningScore: 100 }));
+      blend(175, 350, { difficulty: "phd", reasoningScore: 0 })
+    ).toBeLessThan(blend(175, 350, { difficulty: "phd", reasoningScore: 100 }));
   });
 
   it("a high-quality attempt DAMPS a downward demotion on an above-level item (D1's distinguishing behavior)", () => {
     // Suggestion pushes DOWN to 30 on a PhD (above-level) item: a high reasoningScore
     // CONTRADICTS the demotion, so the drop saturates/shrinks rather than deepening.
-    expect(blend(50, 30, { difficulty: "phd", reasoningScore: 0 })).toBe(47);
-    expect(blend(50, 30, { difficulty: "phd", reasoningScore: 100 })).toBe(47);
+    expect(blend(175, 105, { difficulty: "phd", reasoningScore: 0 })).toBe(165);
+    expect(blend(175, 105, { difficulty: "phd", reasoningScore: 100 })).toBe(165);
     expect(
-      blend(50, 30, { difficulty: "phd", reasoningScore: 100 })
-    ).toBeGreaterThanOrEqual(blend(50, 30, { difficulty: "phd", reasoningScore: 0 }));
+      blend(175, 105, { difficulty: "phd", reasoningScore: 100 })
+    ).toBeGreaterThanOrEqual(blend(175, 105, { difficulty: "phd", reasoningScore: 0 }));
   });
 
   it("botching an EASY question is stronger downward evidence than botching a brutal one", () => {
     // Demotion to 30; a poor attempt (r25) on an easy item moves DOWN more than on a
     // hard item (down-direction asymmetry grafted from the prior repo design).
-    expect(blend(50, 30, { difficulty: "beginner", reasoningScore: 25 })).toBe(43);
-    expect(blend(50, 30, { difficulty: "phd", reasoningScore: 25 })).toBe(46);
-    expect(50 - blend(50, 30, { difficulty: "beginner", reasoningScore: 25 })).toBeGreaterThan(
-      50 - blend(50, 30, { difficulty: "phd", reasoningScore: 25 })
+    expect(blend(175, 105, { difficulty: "beginner", reasoningScore: 25 })).toBe(152);
+    expect(blend(175, 105, { difficulty: "phd", reasoningScore: 25 })).toBe(162);
+    expect(175 - blend(175, 105, { difficulty: "beginner", reasoningScore: 25 })).toBeGreaterThan(
+      175 - blend(175, 105, { difficulty: "phd", reasoningScore: 25 })
     );
   });
 
   it("difficulty-only (no reasoningScore) still adjusts via neutral outcome", () => {
-    expect(blend(50, 80, { difficulty: "phd" })).toBe(64);
-    expect(blend(50, 80, { difficulty: "intermediate" })).toBe(61);
-    expect(blend(50, 80, { difficulty: "beginner" })).toBe(57);
+    expect(blend(175, 280, { difficulty: "phd" })).toBe(224);
+    expect(blend(175, 280, { difficulty: "intermediate" })).toBe(212);
+    expect(blend(175, 280, { difficulty: "beginner" })).toBe(200);
   });
 
   it("difficulty lookup is case/whitespace-insensitive and prototype-pollution-safe", () => {
-    expect(blend(50, 80, { difficulty: "PHD ", reasoningScore: 100 })).toBe(68);
-    expect(blend(50, 80, { difficulty: "  Advanced  ", reasoningScore: 100 })).toBe(
-      blend(50, 80, { difficulty: "advanced", reasoningScore: 100 })
+    expect(blend(175, 280, { difficulty: "PHD ", reasoningScore: 100 })).toBe(238);
+    expect(blend(175, 280, { difficulty: "  Advanced  ", reasoningScore: 100 })).toBe(
+      blend(175, 280, { difficulty: "advanced", reasoningScore: 100 })
     );
     // Inherited keys must NOT resolve to an anchor -> degrade to legacy 65/35.
-    expect(blend(50, 80, { difficulty: "__proto__" })).toBe(61);
-    expect(blend(50, 80, { difficulty: "constructor" })).toBe(61);
-    expect(blend(50, 80, { difficulty: "toString" })).toBe(61);
+    expect(blend(175, 280, { difficulty: "__proto__" })).toBe(212);
+    expect(blend(175, 280, { difficulty: "constructor" })).toBe(212);
+    expect(blend(175, 280, { difficulty: "toString" })).toBe(212);
   });
 
   it("reasoningScore is clamped/coerced via clampScore", () => {
-    expect(blend(50, 80, { reasoningScore: 200 })).toBe(
-      blend(50, 80, { reasoningScore: 100 })
-    ); // 64
-    expect(blend(50, 80, { reasoningScore: -10 })).toBe(
-      blend(50, 80, { reasoningScore: 0 })
-    ); // 54
-    expect(blend(50, 80, { reasoningScore: "100" })).toBe(64);
+    expect(blend(175, 280, { reasoningScore: 200 })).toBe(
+      blend(175, 280, { reasoningScore: 100 })
+    ); // 223
+    expect(blend(175, 280, { reasoningScore: -10 })).toBe(
+      blend(175, 280, { reasoningScore: 0 })
+    ); // 190
+    expect(blend(175, 280, { reasoningScore: "100" })).toBe(223);
   });
 
   it("is a strict no-op when the suggestion equals prev, regardless of weights", () => {
-    expect(blend(50, 50, { difficulty: "phd", reasoningScore: 100 })).toBe(50);
+    expect(blend(175, 175, { difficulty: "phd", reasoningScore: 100 })).toBe(175);
     expect(blend(0, 0, { difficulty: "phd", reasoningScore: 100 })).toBe(0);
-    expect(blend(100, 100, { difficulty: "beginner", reasoningScore: 0 })).toBe(100);
+    expect(blend(350, 350, { difficulty: "beginner", reasoningScore: 0 })).toBe(350);
   });
 
-  it("stays in [0, 100] at the boundaries (alpha cap prevents a full snap)", () => {
-    expect(blend(0, 100, { difficulty: "phd", reasoningScore: 100 })).toBe(60);
-    expect(blend(100, 0, { difficulty: "beginner", reasoningScore: 0 })).toBe(76);
+  it("stays in [0, 350] at the boundaries (alpha cap prevents a full snap)", () => {
+    expect(blend(0, 350, { difficulty: "phd", reasoningScore: 100 })).toBe(210);
+    expect(blend(350, 0, { difficulty: "beginner", reasoningScore: 0 })).toBe(267);
   });
 
   it("never lets a null/garbage suggestion drag the score toward zero, even with full opts", () => {
-    expect(blend(70, null, { difficulty: "phd", reasoningScore: 100 })).toBe(70);
-    expect(blend(70, "garbage", { difficulty: "beginner", reasoningScore: 0 })).toBe(70);
+    expect(blend(245, null, { difficulty: "phd", reasoningScore: 100 })).toBe(245);
+    expect(blend(245, "garbage", { difficulty: "beginner", reasoningScore: 0 })).toBe(245);
     expect(blend(undefined, null, { difficulty: "phd", reasoningScore: 100 })).toBe(0);
     // No prev seeds from the suggestion regardless of opts.
     expect(blend(undefined, 40, { difficulty: "advanced", reasoningScore: 90 })).toBe(40);
@@ -235,7 +235,7 @@ describe("blend (weighted Elo-style path)", () => {
   it("is monotonic non-decreasing in reasoningScore for an upward suggestion", () => {
     let last = -1;
     for (let r = 0; r <= 100; r += 10) {
-      const v = blend(50, 80, { difficulty: "intermediate", reasoningScore: r });
+      const v = blend(175, 280, { difficulty: "intermediate", reasoningScore: r });
       expect(v).toBeGreaterThanOrEqual(last);
       last = v;
     }
@@ -243,16 +243,16 @@ describe("blend (weighted Elo-style path)", () => {
 
   it("is monotonic non-decreasing in the suggestion at fixed weights", () => {
     let last = -1;
-    for (let s = 0; s <= 100; s += 10) {
-      const v = blend(50, s, { difficulty: "phd", reasoningScore: 100 });
+    for (let s = 0; s <= 350; s += 35) {
+      const v = blend(175, s, { difficulty: "phd", reasoningScore: 100 });
       expect(v).toBeGreaterThanOrEqual(last);
       last = v;
     }
   });
 
-  it("is robust: never NaN and always an int in [0, 100] across malformed inputs", () => {
-    const prevs = [0, 25, 50, 75, 100, undefined, null, NaN, -200, 300, 50.7];
-    const sugs = [0, 50, 100, null, undefined, "", "garbage", -5, 150, "73"];
+  it("is robust: never NaN and always an int in [0, 350] across malformed inputs", () => {
+    const prevs = [0, 88, 175, 263, 350, undefined, null, NaN, -200, 700, 175.7];
+    const sugs = [0, 175, 350, null, undefined, "", "garbage", -5, 525, "256"];
     const diffs = [
       "beginner", "intermediate", "phd", "xyz", "", null, undefined, 123,
       "PHD ", "__proto__", "constructor",
@@ -265,49 +265,49 @@ describe("blend (weighted Elo-style path)", () => {
             const v = blend(p, s, { difficulty: d, reasoningScore: r });
             expect(Number.isInteger(v)).toBe(true);
             expect(v).toBeGreaterThanOrEqual(0);
-            expect(v).toBeLessThanOrEqual(100);
+            expect(v).toBeLessThanOrEqual(350);
           }
         }
         // also two-arg / opts-null / empty-opts shapes
         for (const v of [blend(p, s), blend(p, s, null), blend(p, s, {})]) {
           expect(Number.isInteger(v)).toBe(true);
           expect(v).toBeGreaterThanOrEqual(0);
-          expect(v).toBeLessThanOrEqual(100);
+          expect(v).toBeLessThanOrEqual(350);
         }
       }
     }
   });
 
   it("defends a literal prev = NaN / out-of-range prev on every path (never NaN)", () => {
-    expect(blend(NaN, 80)).toBe(28); // NaN prev -> treated as 0 -> 0.65*0 + 0.35*80
-    expect(blend(NaN, 80, {})).toBe(28);
-    expect(blend(NaN, 80, { difficulty: "phd", reasoningScore: 100 })).toBe(48);
+    expect(blend(NaN, 280)).toBe(98); // NaN prev -> treated as 0 -> 0.65*0 + 0.35*280
+    expect(blend(NaN, 280, {})).toBe(98);
+    expect(blend(NaN, 280, { difficulty: "phd", reasoningScore: 100 })).toBe(168);
     expect(blend(NaN, null)).toBe(0); // null suggestion + NaN prev -> 0, not NaN
-    expect(blend(150, null)).toBe(100); // out-of-range prev clamped on the null-sug path
+    expect(blend(525, null)).toBe(350); // out-of-range prev clamped on the null-sug path
     expect(blend(-30, null)).toBe(0);
   });
 });
 
 describe("totalPoints / phdIndex", () => {
   const scores = {
-    math: { score: 60 },
-    physics: { score: 30 },
-    chemistry: { score: 90 },
+    math: { score: 210 },
+    physics: { score: 105 },
+    chemistry: { score: 315 },
   };
 
-  it("sums subject scores out of 300", () => {
-    expect(totalPoints(scores)).toBe(180);
+  it("sums subject scores out of 1050", () => {
+    expect(totalPoints(scores)).toBe(630);
     expect(totalPoints(null)).toBe(0);
     expect(totalPoints({})).toBe(0);
   });
 
-  it("averages subject scores to a 0-100 PhD index", () => {
-    expect(phdIndex(scores)).toBe(60);
+  it("averages subject scores to a 0-350 Doctorate index", () => {
+    expect(phdIndex(scores)).toBe(210);
     expect(phdIndex(null)).toBe(0);
   });
 
   it("tolerates missing subjects", () => {
-    expect(totalPoints({ math: { score: 50 } })).toBe(50);
+    expect(totalPoints({ math: { score: 175 } })).toBe(175);
     expect(ORDER).toEqual(["math", "physics", "chemistry"]);
   });
 
@@ -323,15 +323,15 @@ describe("totalPoints / phdIndex", () => {
     expect(typeof v).toBe("number");
   });
 
-  it("clamps out-of-range subject scores into [0, 100] before summing", () => {
-    // -50 -> 0, 250 -> 100, 50 stays 50 => 150.
+  it("clamps out-of-range subject scores into [0, 350] before summing", () => {
+    // -50 -> 0, 900 -> 350, 175 stays 175 => 525.
     expect(
       totalPoints({
         math: { score: -50 },
-        physics: { score: 250 },
-        chemistry: { score: 50 },
+        physics: { score: 900 },
+        chemistry: { score: 175 },
       })
-    ).toBe(150);
+    ).toBe(525);
   });
 
   it("treats a NaN/undefined subject score as 0", () => {
@@ -344,17 +344,17 @@ describe("totalPoints / phdIndex", () => {
     ).toBe(40);
   });
 
-  it("phdIndex stays a clean integer in [0, 100] for malformed inputs", () => {
+  it("phdIndex stays a clean integer in [0, 350] for malformed inputs", () => {
     const v = phdIndex({
-      math: { score: "60" },
-      physics: { score: 250 },
+      math: { score: "210" },
+      physics: { score: 900 },
       chemistry: { score: -10 },
     });
-    // (60 + 100 + 0) / 3 = 53.33 -> 53.
-    expect(v).toBe(53);
+    // (210 + 350 + 0) / 3 = 186.67 -> 187.
+    expect(v).toBe(187);
     expect(Number.isInteger(v)).toBe(true);
     expect(v).toBeGreaterThanOrEqual(0);
-    expect(v).toBeLessThanOrEqual(100);
+    expect(v).toBeLessThanOrEqual(350);
   });
 });
 
@@ -461,7 +461,7 @@ describe("diagnosticSubjectScore", () => {
           ]);
           expect(Number.isInteger(v)).toBe(true);
           expect(v).toBeGreaterThanOrEqual(0);
-          expect(v).toBeLessThanOrEqual(100);
+          expect(v).toBeLessThanOrEqual(350);
         }
       }
     }
@@ -678,6 +678,8 @@ describe("diagnosticPathScore (path-weighted, no full-weight floor)", () => {
       { difficulty: "phd", reasoningScore: 75, rubric },
     ];
     const seed = _seedFR(qs, { pathWeighted: true });
-    expect(seed.score).toBe(diagnosticPathScore(qs));
+    // The aggregate is a QUALITY (0–100); the seeded score lands on the 0–350
+    // subject scale (×3.5, rounded by the squash round-trip).
+    expect(seed.score).toBe(Math.round((diagnosticPathScore(qs) * 350) / 100));
   });
 });

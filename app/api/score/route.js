@@ -327,7 +327,7 @@ async function handlePractice(req, body) {
     // minted phd label on a 30-score account grades as intermediate). Deflate-only:
     // bands at or below the learner's level are untouched. (BAND_LADDER is the
     // canonical ascending band order from lib/curriculum.js.)
-    const storedBandIdx = Math.min(BAND_LADDER.length - 1, Math.floor(Math.max(0, Number(promptPrevScore) || 0) / 20));
+    const storedBandIdx = Math.min(BAND_LADDER.length - 1, Math.floor(Math.max(0, Number(promptPrevScore) || 0) / 70));
     const tokenBandIdx = Math.max(0, BAND_LADDER.indexOf(tokenBand));
     const bandKey = BAND_LADDER[Math.min(tokenBandIdx, storedBandIdx + 1)];
     const seedDifficulty = defaultDifficultyForBand(bandKey);
@@ -367,7 +367,7 @@ async function handlePractice(req, body) {
             `Concept being probed:\n"""${safeConcept}"""\n` +
             `Question difficulty band: ${safeDifficulty}\n` +
             (surfaceCtx ? surfaceCtx + "\n" : "") +
-            `Learner's current level: ${promptPrevScore}/100\n\n` +
+            `Learner's current level: ${promptPrevScore}/350\n\n` +
             // fenceGuard (audit P2-12): learner text can't fake closing the untrusted block.
             `Learner's reasoning:\n"""${fenceGuard(work)}"""`,
           image: img.image,

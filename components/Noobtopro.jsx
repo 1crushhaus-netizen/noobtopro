@@ -182,14 +182,14 @@ function revokePreview(img) {
 function Ring({ value, color, size = 96, stroke = 9, label }) {
   const r = (size - stroke) / 2;
   const circ = 2 * Math.PI * r;
-  const off = circ * (1 - Math.max(0, Math.min(100, value)) / 100);
+  const off = circ * (1 - Math.max(0, Math.min(350, value)) / 350);
   return (
     <svg
       width={size}
       height={size}
       viewBox={`0 0 ${size} ${size}`}
       role="img"
-      aria-label={`${label ? `${label}: ` : ""}Score ${Math.round(Math.max(0, Math.min(100, value)))} of 100`}
+      aria-label={`${label ? `${label}: ` : ""}Score ${Math.round(Math.max(0, Math.min(350, value)))} of 350`}
     >
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,.09)" strokeWidth={stroke} />
       <circle
@@ -1346,14 +1346,14 @@ export default function Noobtopro() {
                 <h1 className="np-h1">Stop memorizing.<br />Start thinking. Climb.</h1>
                 <p className="np-lede">
                   School makes you memorize. Most apps make you chase streaks. noobtopro does neither: it hands you real
-                  problems, reads <em>how you reason</em>, and scores each subject 0–100. Stuck? It won't hand over the
+                  problems, reads <em>how you reason</em>, and scores each subject 0–350 — Elementary to Doctorate. Stuck? It won't hand over the
                   answer — it asks the right question and teaches the one concept you're missing. For students and
                   self-learners who'd rather understand than cram.
                 </p>
                 <div className="np-steps">
                   {[
                     ["01", "Prove it", "Nine open problems — beginner, intermediate, and hard in each of math, physics, and chemistry. Explain every step, or tap “I don’t know” to skip."],
-                    ["02", "Get ranked", "Your reasoning is graded on a 5-part rubric and mapped to a 0–100 rank per subject."],
+                    ["02", "Get ranked", "Your reasoning is graded on a 9-axis rubric and mapped to a 0–350 rank per subject — Elementary up to Doctorate."],
                     ["03", "Climb", "Pick a subject. Get calibrated problems. Sound reasoning moves your score — even when the answer's wrong."],
                   ].map(([n, t, d]) => (
                     <div key={n} className="np-card np-step">
@@ -1524,7 +1524,7 @@ export default function Noobtopro() {
                       </span>
                       {pQuestion.targetConcept && <span className="np-topic">{pQuestion.targetConcept}</span>}
                       <span className="np-livescore" style={{ borderColor: SUBJECTS[pSubject].color }}>
-                        {scores[pSubject]?.score ?? 0}<span style={{ color: "var(--muted)" }}>/100</span>
+                        {scores[pSubject]?.score ?? 0}<span style={{ color: "var(--muted)" }}>/350</span>
                         {scoreDelta !== null && scoreDelta !== 0 && (
                           <span style={{ color: deltaColor(scoreDelta), marginLeft: 6 }}>
                             {scoreDelta > 0 ? "+" : ""}{scoreDelta}

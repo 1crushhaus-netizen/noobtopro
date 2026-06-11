@@ -57,11 +57,11 @@ describe("eloUpdate (item-as-opponent, NON-additive)", () => {
     const { diffDelta } = eloUpdate({ rating: 50, difficulty: 50, outcome: 0.9, attemptCount: 1 });
     expect(diffDelta).toBeLessThan(0); // difficulty drops when learners beat it
   });
-  it("keeps rating + difficulty clamped to [0,100] and never NaN", () => {
-    const a = eloUpdate({ rating: 100, difficulty: 0, outcome: 1, attemptCount: 0 });
-    expect(a.newRating).toBeLessThanOrEqual(100);
+  it("keeps rating + difficulty clamped to [0,350] and never NaN", () => {
+    const a = eloUpdate({ rating: 350, difficulty: 0, outcome: 1, attemptCount: 0 });
+    expect(a.newRating).toBeLessThanOrEqual(350);
     expect(a.newRating).toBeGreaterThanOrEqual(0);
-    const b = eloUpdate({ rating: 0, difficulty: 100, outcome: 0, attemptCount: 0 });
+    const b = eloUpdate({ rating: 0, difficulty: 350, outcome: 0, attemptCount: 0 });
     expect(b.newRating).toBeGreaterThanOrEqual(0);
     expect(Number.isFinite(a.newRating) && Number.isFinite(b.newRating)).toBe(true);
   });
@@ -76,19 +76,19 @@ describe("defaultDifficultyForBand", () => {
   it("maps bands to ascending midpoint anchors", () => {
     expect(defaultDifficultyForBand("beginner")).toBeLessThan(defaultDifficultyForBand("foundational"));
     expect(defaultDifficultyForBand("advanced")).toBeLessThan(defaultDifficultyForBand("phd"));
-    expect(defaultDifficultyForBand("nonsense")).toBe(50); // intermediate fallback
+    expect(defaultDifficultyForBand("nonsense")).toBe(175); // intermediate fallback
   });
 });
 
 describe("rankFor (5 fixed bands now, percentile-ready)", () => {
   it("maps scores to the 5 ranks by fixed bands", () => {
-    expect(rankFor(5).name).toBe("Absolute beginner");
+    expect(rankFor(5).name).toBe("Elementary");
     expect(rankFor(5).index).toBe(0);
-    expect(rankFor(30).name).toBe("Foundational");
-    expect(rankFor(50).name).toBe("Intermediate");
-    expect(rankFor(70).name).toBe("Advanced");
-    expect(rankFor(95).name).toBe("PhD-level");
-    expect(rankFor(95).index).toBe(4);
+    expect(rankFor(105).name).toBe("Middle");
+    expect(rankFor(175).name).toBe("High");
+    expect(rankFor(245).name).toBe("University");
+    expect(rankFor(330).name).toBe("Doctorate");
+    expect(rankFor(330).index).toBe(4);
     expect(RANKS).toHaveLength(5);
   });
   it("honors percentile cutoffs when supplied (architected for the later recut)", () => {
@@ -154,12 +154,12 @@ describe("gold set — deterministic dock+score+Elo pipeline", () => {
 
   const cases = [
     // A blank answer DOCKS and DROPS an established rating (anti-"idk").
-    { name: "blank docks and drops", in: { reasoning: "   ", prevRating: 60, band: "intermediate", attemptCount: 5 }, expect: { docked: true, dropped: true } },
+    { name: "blank docks and drops", in: { reasoning: "   ", prevRating: 210, band: "intermediate", attemptCount: 5 }, expect: { docked: true, dropped: true } },
     // A strong answer (high rubric) on an above-level item climbs.
-    { name: "strong on hard climbs", in: { reasoning: "I derived it via the chain rule and verified the boundary case, 2x.", prevRating: 50, band: "advanced", attemptCount: 5, modelRubric: rub(4, { computation: 3 }) }, expect: { docked: false, climbed: true } },
+    { name: "strong on hard climbs", in: { reasoning: "I derived it via the chain rule and verified the boundary case, 2x.", prevRating: 175, band: "advanced", attemptCount: 5, modelRubric: rub(4, { computation: 3 }) }, expect: { docked: false, climbed: true } },
     // A buzzword answer scores its high-weight reasoning axes 0, so the weighted-mean
     // headline is tiny — and then it loses rating at an at-level item (no reconcile needed).
-    { name: "jargon salad scores low then drops", in: { reasoning: "Quantum entropy eigen-flux resonance governs everything here obviously.", prevRating: 55, band: "intermediate", attemptCount: 10, modelRubric: rub(0, { communication: 1 }) }, expect: { docked: false, scoreAtMost: 30, dropped: true } },
+    { name: "jargon salad scores low then drops", in: { reasoning: "Quantum entropy eigen-flux resonance governs everything here obviously.", prevRating: 193, band: "intermediate", attemptCount: 10, modelRubric: rub(0, { communication: 1 }) }, expect: { docked: false, scoreAtMost: 30, dropped: true } },
   ];
 
   for (const c of cases) {

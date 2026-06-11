@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { SUBJECTS, ORDER, RANKS } from "@/lib/scoring";
 
-// Cohesive low→high colour ramp for the 5 rank tiers (Absolute beginner → PhD-level).
+// Cohesive low→high colour ramp for the 5 rank tiers (Elementary → Doctorate).
 // The top three reuse the subject palette (single source, lib/scoring.js); the two
 // low tiers are neutral grays. Hex (not var()) so it also works if read into SVG.
 const TIER_COLORS = ["#5a6472", "#7a8494", SUBJECTS.physics.color, SUBJECTS.math.color, SUBJECTS.chemistry.color];

@@ -9,8 +9,8 @@ afterEach(cleanup);
 const user = { email: "ada@example.com", user_metadata: { full_name: "Ada Lovelace" } };
 
 const scores = {
-  math: { score: 60, weakConcepts: [], comment: "" },
-  physics: { score: 30, weakConcepts: [], comment: "" },
+  math: { score: 210, weakConcepts: [], comment: "" },
+  physics: { score: 105, weakConcepts: [], comment: "" },
   chemistry: { score: 0, weakConcepts: [], comment: "" },
 };
 
@@ -23,13 +23,13 @@ const history = [
 
 const scoresWithRubric = {
   math: {
-    score: 60,
+    score: 210,
     weakConcepts: ["chain rule"],
     comment: "",
     rubric: { comprehension: 3, principle: 1, justification: 2, strategy: 2, logic: 2, execution_method: 3, computation: 4, verification: 1, communication: 3 },
   },
   physics: {
-    score: 30,
+    score: 105,
     weakConcepts: [],
     comment: "",
     rubric: { comprehension: 2, principle: 2, justification: 2, strategy: 2, logic: 2, execution_method: 2, computation: 2, verification: 2, communication: 2 },
@@ -50,13 +50,13 @@ describe("Dashboard — signed-in identity + KPIs + by-subject", () => {
 
   it("renders ONE deduped KPI cluster (total, PhD index, problems graded)", () => {
     render(<Dashboard user={user} scores={scores} history={history} onPractice={() => {}} />);
-    // total = 60+30+0 = 90; phdIndex = round(90/3) = 30; attempts = 2.
-    expect(statCard("Total points").querySelector(".np-statnum").textContent).toContain("90");
-    expect(statCard("PhD-level intelligence").querySelector(".np-statnum").textContent).toContain("30");
+    // total = 210+105+0 = 315; phdIndex = round(315/3) = 105; attempts = 2.
+    expect(statCard("Total points").querySelector(".np-statnum").textContent).toContain("315");
+    expect(statCard("Doctorate index").querySelector(".np-statnum").textContent).toContain("105");
     expect(statCard("Problems graded").querySelector(".np-statnum").textContent).toBe("2");
     // Each KPI label appears exactly once (one deduped cluster, no duplicate block).
     expect(screen.getAllByText(/Total points/i).length).toBe(1);
-    expect(screen.getAllByText(/PhD-level intelligence/i).length).toBe(1);
+    expect(screen.getAllByText(/Doctorate index/i).length).toBe(1);
     expect(screen.getAllByText(/Problems graded/i).length).toBe(1);
   });
 
@@ -69,8 +69,8 @@ describe("Dashboard — signed-in identity + KPIs + by-subject", () => {
 
   it("shows an overall rank chip from the PhD index", () => {
     render(<Dashboard user={user} scores={scores} history={history} onPractice={() => {}} />);
-    // rankFor(30) → "Foundational" band name in the identity chip (plus the KPI sub).
-    expect(screen.getAllByText(/Foundational/i).length).toBeGreaterThan(0);
+    // rankFor(105) → "Middle" band name in the identity chip (plus the by-subject chips).
+    expect(screen.getAllByText(/Middle/i).length).toBeGreaterThan(0);
   });
 });
 
@@ -86,18 +86,18 @@ describe("Dashboard — §7 curriculum breadth gate (by-subject, display-layer)"
 
   it("with no mastery data, a scored subject is GATED: first-band chip + lock explanation; the score is untouched", () => {
     render(<Dashboard user={user} scores={scores} history={history} onPractice={() => {}} />);
-    // math score 60 → depth says Advanced, but nothing is mastered → chip gated down.
-    expect(screen.getAllByText("Absolute beginner").length).toBeGreaterThan(0);
-    expect(screen.getByText(/Score at Advanced — master the 21 remaining Elementary concepts in Learn to advance/)).toBeTruthy();
-    // The score itself is NOT capped (§11.3 stays open — label gating only).
-    expect(screen.getAllByText("60").length).toBeGreaterThan(0);
+    // math score 210 → depth says University, but nothing is mastered → chip gated down.
+    expect(screen.getAllByText("Elementary").length).toBeGreaterThan(0);
+    expect(screen.getByText(/Score at University — master the 21 remaining Elementary concepts in Learn to advance/)).toBeTruthy();
+    // The score itself is NOT capped (§11.3 Option B — label gating only).
+    expect(screen.getAllByText("210").length).toBeGreaterThan(0);
   });
 
   it("loads mastery via the injected loader and UNGATES bands whose lower curricula are covered", async () => {
     const loadMastery = vi.fn(async () => ({ mastery: elementaryMathGreens() }));
-    // math depth = Foundational; physics/chemistry at 0 so no OTHER subject is gated.
+    // math depth = Middle; physics/chemistry at 0 so no OTHER subject is gated.
     const s = {
-      math: { score: 30, weakConcepts: [], comment: "" },
+      math: { score: 105, weakConcepts: [], comment: "" },
       physics: { score: 0, weakConcepts: [], comment: "" },
       chemistry: { score: 0, weakConcepts: [], comment: "" },
     };
@@ -105,12 +105,12 @@ describe("Dashboard — §7 curriculum breadth gate (by-subject, display-layer)"
     await waitFor(() => expect(loadMastery).toHaveBeenCalledTimes(1));
     // Elementary fully covered → Foundational holds ungated; the next gate is Middle's set.
     await waitFor(() => expect(screen.getByText(/Middle curriculum: 0\/23 mastered/)).toBeTruthy());
-    expect(screen.queryByText(/Score at Foundational/)).toBeNull(); // no lock line for math
+    expect(screen.queryByText(/Score at Middle/)).toBeNull(); // no lock line for math
   });
 
   it("an ungated bottom-band subject shows its own rank's coverage progress (the nudge, not a lock)", () => {
     render(<Dashboard user={user} scores={scores} history={history} onPractice={() => {}} />);
-    // chemistry score 0 → Absolute beginner, ungated → progress toward Foundational.
+    // chemistry score 0 → Elementary, ungated → progress toward Middle.
     expect(screen.getByText(/Elementary curriculum: 0\/9 mastered/)).toBeTruthy();
   });
 
@@ -199,7 +199,7 @@ describe("Dashboard — drawers (trends + answer review)", () => {
     fireEvent.click(screen.getByRole("button", { name: /see trends/i }));
     const dialog = await screen.findByRole("dialog", { name: /trends over time/i });
     expect(dialog).toBeTruthy();
-    expect(screen.getByRole("img", { name: /total points over time.*ending at 90 of 300/i })).toBeTruthy();
+    expect(screen.getByRole("img", { name: /total points over time.*ending at 90 of 1050/i })).toBeTruthy();
     expect(screen.getByRole("img", { name: /across 2 graded attempts/i })).toBeTruthy();
 
     fireEvent.keyDown(window, { key: "Escape" });
