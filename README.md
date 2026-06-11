@@ -224,7 +224,7 @@ components/
   charts.jsx           Dependency-free inline-SVG primitives (LineChart/BarChart/RadarChart/MiniBar) shared by the radar (grid) + the trends drawer
   Leaderboard.jsx      Anonymous-tiers leaderboard (lazy /api/leaderboard); rendered in the Dashboard grid
   ReviewList.jsx       "Review your answers" expandable list (lazy own attempt_reviews / guest history); rendered in the Dashboard's review drawer
-  LearnTab.jsx         The fixed-curriculum browser (subject → rank → concept chips, MASTERY-colored) + per-concept pages with root-concept navigation + the AI concept-practice drill button (increment 3)
+  LearnTab.jsx         The fixed-curriculum browser (subject → rank → concept chips, MASTERY-colored) + per-concept pages with root-concept navigation, the CURATED WRITTEN GUIDE (lib/guides — idea / worked example / self-questions, Phase D) + the AI concept-practice drill button (increment 3)
   AdminDashboard.jsx   Admin-only tab: concept approval queue + abuse warnings + reports
 lib/
   groq.js              Server-only Groq client + ALL system prompts (*_SYS)
@@ -233,6 +233,7 @@ lib/
   scoring.js           SUBJECTS/ORDER/bands + clampScore/band + UNIFIED GLICKO-2 engine (glicko2Update/updateAxisRatings → subjectScoreFromGlicko/radarFromGlicko, anti-farm repeatFactor*, itemDifficultyDelta, seedGlickoFromRubric) + 9-axis weighted scoreFromRubric/contributionBreakdown + rankFor/explainRankMove (legacy eloUpdate/blend kept for tests)
   diagnosticBank.js    CURATED 9-question placement bank (3 subjects × beginner/intermediate/hard) — served with no Groq; each question tagged with its curriculum conceptKey (mastery)
   curriculum.js        The fixed five-rank concept database (224 concepts, subject × rank) + hand-authored prerequisite graph (roots) — the Learn tab's backbone
+  guides/              CURATED written guides (Phase D, RANKS_PLAN §12.3): one module per populated subject×rank cell (224 guides — explanation + worked example + self-questions), lazily code-split via index.js; shape rules in validate.js (shared with scripts/validate-guides.mjs + test/guides.test.js)
   mastery.js           Per-concept MASTERY engine (sustained-quality flag, RANKS_PLAN §12.1): counters + green/yellow/red/grey state, curriculum allowlist; same pure logic client + server
   rateLimit.js         Durable Postgres rate limiter (per-account/per-IP; rate_limit_hit RPC) + in-memory fallback
   store.js             Data layer: Supabase when signed in, localStorage for guests
@@ -252,6 +253,7 @@ db/
   migrations/          Numbered delta migrations vs a live DB (0001a … 0012); 0001a–0011 applied to the live project (0011 = audit fix round 2), 0012 (concept_mastery) ships with the Learn-curriculum stack — apply at merge
 scripts/
   seed-concept-hub.mjs Concept Hub PUBLIC SEED (PR 4): batch-generate + publish a curated guide per of the 36 topics (run once, with keys)
+  validate-guides.mjs  Written-guide checker: curriculum coverage (no missing/orphan keys) + shape rules per lib/guides/validate.js (all cells, or one: node scripts/validate-guides.mjs math middle)
 test/                  Vitest suite (see §13)
 .github/workflows/ci.yml   CI: "Test and build" (npm test → npm run build)
 next.config.js         reactStrictMode + security headers
@@ -451,7 +453,7 @@ Key flows / handlers:
 - The dashboard's **"Work on" weak-concept tags are buttons** → they call `openLearn`.
 - `hydrate()` (run-token guarded) loads state on mount + on `SIGNED_IN`/`SIGNED_OUT`; image previews use `URL.createObjectURL` and are revoked to avoid leaks.
 
-Components: **SignIn** (provider buttons), **Dashboard** (the merged Profile+Progress tab — identity + stats + radar + leaderboard + reset, with trend-chart/answer-review drawers and a guest gate), **charts** (dependency-free inline SVG primitives), **Leaderboard**, **ReviewList**, **LearnTab** (curriculum browser + concept pages, mastery-colored chips + legend + red-concept "foundations first" nudge).
+Components: **SignIn** (provider buttons), **Dashboard** (the merged Profile+Progress tab — identity + stats + radar + leaderboard + reset, with trend-chart/answer-review drawers and a guest gate), **charts** (dependency-free inline SVG primitives), **Leaderboard**, **ReviewList**, **LearnTab** (curriculum browser + concept pages, mastery-colored chips + legend + red-concept "foundations first" nudge + the curated written guide on every concept page).
 
 ---
 
@@ -496,7 +498,8 @@ Components: **SignIn** (provider buttons), **Dashboard** (the merged Profile+Pro
 | `test/headers.test.js` | `next.config.js` security headers: **baseline CSP directives + allow-listed origins**, `X-Frame-Options: DENY` (matches `frame-ancestors`), nosniff/HSTS |
 | `test/error.test.jsx` | error-boundary logs the caught error + `reset()` on "Try again" |
 | `test/signin.test.jsx` | provider buttons, OAuth-only (no password field), enabled-provider, **env-flag (`NEXT_PUBLIC_ENABLE_*`) gating** |
-| `test/learn.test.jsx` | the curriculum Learn tab: rank-grouped chips, concept page + root navigation, Doctorate WIP note, **mastery coloring** (state classes + accessible names, legend, red-page "foundations first" warning, load-failure fallback) |
+| `test/learn.test.jsx` | the curriculum Learn tab: rank-grouped chips, concept page + root navigation, Doctorate WIP note, **mastery coloring** (state classes + accessible names, legend, red-page "foundations first" warning, load-failure fallback), the **written-guide** sections rendering on concept pages |
+| `test/guides.test.js` | the Phase-D **written guides**: loader map ↔ populated curriculum cells, full coverage (one guide per concept — 224 total, no orphans), every guide passes the shared shape rules (`lib/guides/validate.js`), `loadGuide` null paths (WIP rank / unknown subject·key / `__proto__`) |
 | `test/catalog.test.js` | `lib/catalog`: `loadTopics`/`browsePublicConcepts` (subject filter, **ILIKE wildcard escaping**, errors), `reportConcept` (guest rejected, **key normalization**, subject validation, reason cap) |
 
 **Mocking patterns:** Groq calls are mocked by stubbing global `fetch`; Supabase is mocked via `vi.mock("@/lib/...")` with `vi.hoisted`; components use `@testing-library/react`. No network or real keys are needed.

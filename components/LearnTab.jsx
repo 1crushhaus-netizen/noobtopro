@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import { SUBJECTS, ORDER } from "@/lib/scoring";
 import { RANKS, RANK_LABELS, conceptsFor, isRankWip, WIP_RANKS_NOTE, rootsFor } from "@/lib/curriculum";
 import { conceptState, MASTERY_LABELS } from "@/lib/mastery";
+import { loadGuide } from "@/lib/guides";
 import { loadMastery } from "@/lib/store";
 import { SubjectGlyph } from "@/components/ui";
 import Icon from "@/components/Icon";
@@ -14,8 +15,8 @@ import Icon from "@/components/Icon";
 // themselves clickable, so the learning path is explicit and branched. Each chip is
 // COLORED by the learner's per-concept mastery (lib/mastery.js — green mastered /
 // yellow in progress / red struggling / grey untouched; direct-only, no propagation).
-// The per-concept guide content + AI practice are added in later increments
-// (see RANKS_PLAN §12).
+// Each concept page carries its curated WRITTEN GUIDE (Phase D, RANKS_PLAN §12.3):
+// explanation + worked example + self-questions, loaded lazily from lib/guides.
 // onPractice(concept) — start an AI concept-practice drill for the given curriculum
 // concept (increment 3); busyConcept is the key currently generating (button spinner).
 export default function LearnTab({ onPractice, busyConcept = null } = {}) {
@@ -101,7 +102,7 @@ function CurriculumList({ stateFor, onOpen }) {
       <h2 className="np-h2">Learn</h2>
       <p className="np-lede" style={{ marginBottom: 12 }}>
         The full concept curriculum, organized by subject and rank — from Elementary up to Doctorate.
-        Open any concept to see its foundations and (soon) a guide and practice.
+        Open any concept for its foundations, a written guide with a worked example, and practice.
       </p>
       <MasteryLegend />
 
@@ -141,12 +142,30 @@ function CurriculumList({ stateFor, onOpen }) {
   );
 }
 
-// ---- a single concept's page: title + root-concept navigation (+ guide placeholder) ----
+// ---- a single concept's page: title + root navigation + written guide + drill ----
 function ConceptPage({ concept, state, stateFor, onOpen, onBack, onPractice, busyConcept }) {
   const { subject, key, label, rank } = concept;
   const color = SUBJECTS[subject] ? SUBJECTS[subject].color : "var(--text)";
   const roots = rootsFor(subject, key); // [{ key, label, strand, rank }]
   const generating = busyConcept === key;
+
+  // The curated written guide (Phase D, §12.3) — undefined while its subject·rank
+  // chunk loads, null when none exists (fallback hint), else the guide object.
+  const [guide, setGuide] = useState(undefined);
+  useEffect(() => {
+    let alive = true;
+    setGuide(undefined);
+    loadGuide(subject, rank, key)
+      .then((g) => {
+        if (alive) setGuide(g);
+      })
+      .catch(() => {
+        if (alive) setGuide(null); // a failed chunk load degrades to the hint
+      });
+    return () => {
+      alive = false;
+    };
+  }, [subject, rank, key]);
 
   return (
     <div className="fade-up">
@@ -204,6 +223,10 @@ function ConceptPage({ concept, state, stateFor, onOpen, onBack, onPractice, bus
         </p>
       )}
 
+      {/* The curated written guide (Phase D, §12.3): explanation, one fully worked
+          example, and self-questions — read first, then practice below. */}
+      {guide && <ConceptGuide guide={guide} color={color} />}
+
       {/* AI concept-practice drill (increment 3): an on-request question targeting THIS
           concept, graded process-first, that updates the concept's mastery coloring. */}
       <div className="np-card np-lesson">
@@ -228,11 +251,54 @@ function ConceptPage({ concept, state, stateFor, onOpen, onBack, onPractice, bus
         )}
       </div>
 
-      {/* The full written guide (explanation + worked example + self-questions) is the
-          remaining Phase-D content (RANKS_PLAN §12.3). */}
-      <p className="np-hint" style={{ marginTop: 14 }}>
-        A full written guide for this concept is coming soon.
-      </p>
+      {/* Safety net only: every populated cell ships a guide (test/guides.test.js),
+          so this shows just when a guide is genuinely absent or its chunk failed. */}
+      {guide === null && (
+        <p className="np-hint" style={{ marginTop: 14 }}>
+          A full written guide for this concept is coming soon.
+        </p>
+      )}
     </div>
+  );
+}
+
+// ---- the written guide body (Phase D, §12.3): idea → worked example → self-questions ----
+function ConceptGuide({ guide, color }) {
+  return (
+    <>
+      <div className="np-card np-lesson">
+        <div className="np-cardicon" style={{ color }}>The idea</div>
+        {guide.explanation.map((p, i) => (
+          <p key={i} className="np-lessontext" style={{ margin: i ? "10px 0 0" : 0 }}>
+            {p}
+          </p>
+        ))}
+      </div>
+
+      <div className="np-card np-lesson">
+        <div className="np-cardicon" style={{ color }}>Worked example</div>
+        <p className="np-guideproblem">{guide.example.problem}</p>
+        <ol className="np-guidesteps">
+          {guide.example.steps.map((s, i) => (
+            <li key={i}>{s}</li>
+          ))}
+        </ol>
+        <p className="np-guideanswer">
+          <strong>Answer:</strong> {guide.example.answer}
+        </p>
+      </div>
+
+      <div className="np-card np-lesson">
+        <div className="np-cardicon" style={{ color }}>Ask yourself</div>
+        <p className="np-lessontext" style={{ color: "var(--muted)", marginBottom: 10 }}>
+          Think these through before practicing — explaining your reasoning out loud counts.
+        </p>
+        <ul className="np-selfqs">
+          {guide.selfQuestions.map((q, i) => (
+            <li key={i}>{q}</li>
+          ))}
+        </ul>
+      </div>
+    </>
   );
 }
