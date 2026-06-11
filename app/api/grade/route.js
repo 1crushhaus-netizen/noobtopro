@@ -1,10 +1,9 @@
-import { NextResponse, after } from "next/server";
+import { NextResponse } from "next/server";
 import { groqJSON, fenceGuard, DIAG_GRADE_SYS, PRACTICE_GRADE_SYS } from "@/lib/groq";
 import { clampScore, ORDER, normalizeRubric, scoreFromRubric } from "@/lib/scoring";
 import { preGradeDock } from "@/lib/preGrade";
 import { checkRateLimit, clientKey, chargeGlobalGroq } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType, readJsonLimited, MAX_BODY_BYTES_IMAGE } from "@/lib/requestGuard";
-import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
 import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, normalizeFeedbackList, capSolution, normalizeErrors, normalizeSolve, reasoningSurfaceContext } from "@/lib/gradeInput";
 
@@ -14,27 +13,9 @@ export const dynamic = "force-dynamic";
 // headroom over that 60s worst case plus handler overhead.
 export const maxDuration = 90;
 
-// Auto-grow the concept hub: register the grader's (server-normalized, capped)
-// weak concepts as PENDING catalog stubs, AFTER the response so grading latency
-// is untouched. Runs only when the service-role key is set; falls back to
-// fire-and-forget outside a request scope (e.g. unit tests) so it never throws
-// into the grade path.
-function registerWeakConcepts(subject, weakConcepts) {
-  if (!ORDER.includes(subject) || !Array.isArray(weakConcepts) || weakConcepts.length === 0) return;
-  const task = async () => {
-    try {
-      const sb = getSupabaseAdmin();
-      if (sb) await sb.rpc("register_concepts", { p_subject: subject, p_concepts: weakConcepts });
-    } catch (e) {
-      console.error("[/api/grade] register_concepts", e); // best-effort; self-heals next grade
-    }
-  };
-  try {
-    after(task);
-  } catch {
-    void task();
-  }
-}
+// (The old hub AUTO-GROW — registering weak concepts as pending catalog stubs —
+// was RETIRED by owner decision 2026-06-11; see the note in /api/score. Weak
+// concepts still ship in the response for the learner's own feedback.)
 
 export async function POST(req) {
   if (isCrossSiteRequest(req)) {
@@ -177,7 +158,6 @@ export async function POST(req) {
       }
       const rubric = normalizeRubric(data.rubric);
       const weakConcepts = normalizeWeakConcepts(data.weakConcepts);
-      registerWeakConcepts(subject, weakConcepts); // auto-grow the hub (non-blocking)
       // EXPLICIT response (audit P2-2): never spread raw model JSON to the client — a
       // model-emitted `error` key made the client discard a successful grade, and an
       // object-typed note field crashed the feedback panel as a React child.
@@ -243,7 +223,6 @@ export async function POST(req) {
     // `error` key made the client discard a successful, Groq-billed grade).
     const rubric = normalizeRubric(data.rubric);
     const weakConcepts = normalizeWeakConcepts(data.weakConcepts);
-    registerWeakConcepts(subject, weakConcepts); // auto-grow the hub (non-blocking)
     const reasoningScore = scoreFromRubric(rubric); // transparent weighted mean of the axes
     return NextResponse.json({
       reasoningScore,

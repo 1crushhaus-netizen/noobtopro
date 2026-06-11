@@ -14,11 +14,14 @@
 //
 // kind:"practice"   → REQUIRES a verified user (it persists). Grades one question,
 //                     returns the coaching feedback + the trusted new score.
-// kind:"diagnostic" → auth-OPTIONAL. Grades the (≤9) answers server-side with
-//                     bounded concurrency + retry-once-on-429 + allSettled (so the
-//                     old per-question parallel client burst can't 429 the whole set). A verified
-//                     user gets the baseline persisted; a guest gets it back to
-//                     store in localStorage (no account to protect).
+// kind:"diagnostic" → auth-OPTIONAL, the ADAPTIVE placement (RANKS_PLAN §8): a STEP
+//                     ({token, reasoning, image}) grades ONE answer against the
+//                     HMAC-signed walk state and returns the next ±1-band item (or
+//                     the subject's completion token); a FINALIZE ({tokens × 3})
+//                     verifies the three signed transcripts and aggregates the
+//                     path-weighted baseline with zero Groq. A verified user gets
+//                     the baseline persisted; a guest gets it back to store in
+//                     localStorage (no account to protect).
 //
 // Same same-origin + JSON guard + per-IP rate limiting + abuse logging as the other
 // routes; diagnostic carries a stricter budget because one request fans out to many
@@ -66,25 +69,13 @@ const RETRY_DELAY_MS = 700;
 const nowIso = () => new Date().toISOString();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Auto-grow the concept hub: register the grader's (server-normalized) weak concepts
-// as PENDING catalog stubs, AFTER the response (no added grading latency). Mirrors
-// /api/grade so signed-in users feed the hub too. No-op without the service-role key.
-function registerWeakConcepts(subject, weakConcepts) {
-  if (!ORDER.includes(subject) || !Array.isArray(weakConcepts) || weakConcepts.length === 0) return;
-  const task = async () => {
-    try {
-      const sb = getSupabaseAdmin();
-      if (sb) await sb.rpc("register_concepts", { p_subject: subject, p_concepts: weakConcepts });
-    } catch (e) {
-      console.error("[/api/score] register_concepts", e); // best-effort; self-heals next grade
-    }
-  };
-  try {
-    after(task);
-  } catch {
-    void task();
-  }
-}
+// (The old hub AUTO-GROW — registering the grader's weak concepts as pending
+// catalog stubs via register_concepts — was RETIRED by owner decision
+// 2026-06-11: the curated curriculum + written guides superseded the organic
+// catalog, so the registrations only refilled the admin approval queue with
+// empty stubs. The weakness SIGNAL is unchanged: weak concepts still land on
+// the learner's scores row, the dashboard, and the feedback. The DB RPC
+// remains defined but uncalled.)
 
 // Calibrate the item-difficulty bucket for (subject, topic, band) AFTER the response —
 // an atomic, clamped nudge by the aggregate-outcome difficulty delta. Best-effort + non-blocking:
@@ -515,7 +506,6 @@ async function handlePractice(req, body) {
       const diffDelta = itemDifficultyDelta({ prevSubjectScore: saved.prevScore, itemDifficulty, aggregateOutcome: reasoningScore / 100 });
       bumpItemDifficulty(sb, subject, topicSlug, bandKey, diffDelta, seedDifficulty);
     }
-    registerWeakConcepts(subject, weakConcepts); // auto-grow the hub (non-blocking)
     // Mastery counters for a concept-tagged attempt (non-blocking). A DOCKED attempt
     // still counts — a skip/"idk" on a concept marks it red by design (§12.1).
     if (masteryKey) bumpConceptMastery(sb, uid, [{ subject, concept_key: masteryKey, quality: reasoningScore }]);
@@ -791,11 +781,6 @@ async function handleDiagnosticFinalize(req, body) {
         (a, b) => BAND_LADDER.indexOf(b.difficulty) - BAND_LADDER.indexOf(a.difficulty)
       )[0];
       scores[s] = { score: seed.score, weakConcepts, comment: (hardest && hardest.comment) || "", rubric: seed.rubric, glicko: seed.glicko };
-    }
-
-    // Auto-grow the concept hub from the baseline's weak concepts (non-blocking).
-    for (const s of ORDER) {
-      if (scores[s].weakConcepts.length) registerWeakConcepts(s, scores[s].weakConcepts);
     }
 
     // Per-concept mastery — the walk colors EXACTLY the concepts it tested
