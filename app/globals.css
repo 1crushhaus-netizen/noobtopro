@@ -506,6 +506,54 @@ body {
 
 .np-learngroup { padding: 6px 0; }
 .np-learngroup + .np-learngroup { border-top: 1px solid var(--line); margin-top: 6px; }
+
+/* ---- Learn tab shell: "up next" strip · subject tabs · search · rank accordions ---- */
+.np-upnext { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+.np-upnext-card { padding: 14px 16px; }
+.np-upnext-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+.np-upnext-subject { font-size: 14px; font-weight: 600; }
+.np-upnext-rank { margin-left: auto; font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.np-upnext-chips { display: flex; flex-direction: column; gap: 6px; }
+.np-upnext-chips .np-concepttag { width: 100%; justify-content: flex-start; }
+
+.np-learn-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+/* np-learn-search is its own class (not a hub-search selector) because
+   mobile-responsive.test.js reads the FIRST hub-search rule body in this file
+   for the 16px iOS-zoom guarantee. */
+.np-learn-search { margin-left: auto; }
+
+/* Segmented subject switcher */
+.np-seg { display: inline-flex; gap: 2px; border: 1px solid var(--line); border-radius: var(--radius-btn); padding: 3px; background: var(--tint-1); }
+.np-seg-btn { display: inline-flex; align-items: center; gap: 7px; border: none; background: none; border-radius: 6px; padding: 8px 14px; min-height: 38px; font-family: var(--ui); font-size: 13.5px; font-weight: 500; color: var(--muted); cursor: pointer; transition: color .15s ease, background .15s ease; }
+.np-seg-btn:hover { color: var(--text); }
+.np-seg-btn.active { background: var(--tint-2); color: var(--text); }
+.np-seg-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* Collapsible rank header: chevron + rank + breadth counter + mini progress bar */
+.np-rankhead { display: flex; align-items: center; gap: 10px; width: 100%; background: none; border: none; padding: 8px 2px; min-height: 44px; cursor: pointer; font-family: var(--ui); text-align: left; }
+.np-rankhead:hover .np-hub-topiclabel { color: var(--text); }
+.np-rankhead:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--radius-inset); }
+.np-rankchevron { display: inline-flex; color: var(--faint); transform: rotate(-90deg); transition: transform .15s ease; flex: none; }
+.np-rankchevron.open { transform: rotate(0deg); }
+.np-rankbar { width: 90px; height: 4px; border-radius: 2px; background: var(--tint-2); overflow: hidden; flex: none; margin-left: auto; }
+.np-rankbar-fill { display: block; height: 100%; background: var(--phys); border-radius: 2px; transition: width .4s ease; }
+
+/* Aligned concept grid (uniform rows, truncating labels — title carries the rest) */
+.np-conceptgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px; margin: 4px 0 10px 24px; }
+.np-conceptgrid .np-concepttag { width: 100%; justify-content: flex-start; }
+.np-ctlabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Legend chips double as the status filter */
+.np-filterchip { background: none; border: 1px solid transparent; border-radius: var(--radius-pill); padding: 4px 11px; min-height: 28px; cursor: pointer; transition: border-color .15s ease, background .15s ease, color .15s ease; }
+.np-filterchip:hover { background: var(--tint-1); color: var(--text); }
+.np-filterchip.active { border-color: var(--line-strong); background: var(--tint-1); color: var(--text); }
+.np-filterchip:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+@media (max-width: 680px) {
+  .np-upnext { grid-template-columns: 1fr; }
+  .np-conceptgrid { margin-left: 0; }
+  .np-learn-search { margin-left: 0; }
+}
 .np-learngrouphead {
   display: flex; align-items: center; gap: 8px; margin: 6px 0 10px;
   font-size: 14px; font-weight: 600;
