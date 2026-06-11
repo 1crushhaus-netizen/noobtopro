@@ -56,13 +56,15 @@ import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireUser } from "@/lib/adminAuth";
 import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
 import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, normalizeFeedbackList, capSolution, normalizeErrors, normalizeSolve, normalizeReasoningSurface, reasoningSurfaceContext } from "@/lib/gradeInput";
+import { withNumericVerification, makeRegrade } from "@/lib/numericVerify";
 
 export const dynamic = "force-dynamic";
 // Bound a hung request explicitly (audit P2-10): the Groq fetch carries a 30s abort,
 // and every path here grades AT MOST ONE answer per request (practice, or one
 // adaptive-diagnostic step — the old 9-grade batch fan-out is gone), with at most a
-// primary + one 429 retry. 90s leaves real headroom over that worst case.
-export const maxDuration = 90;
+// primary + one 429 retry + (rarely) one numeric-verifier corrective re-grade.
+// 120s leaves headroom over that 3-call worst case.
+export const maxDuration = 120;
 
 const RETRY_DELAY_MS = 700;
 
@@ -357,23 +359,22 @@ async function handlePractice(req, body) {
         );
       }
     }
-    const data = dock
-      ? dock
-      : await gradeOne({
-          system: PRACTICE_GRADE_SYS,
-          user:
-            `Subject: ${subject}\n` +
-            `Question:\n"""${safeQuestion}"""\n` +
-            `Concept being probed:\n"""${safeConcept}"""\n` +
-            `Question difficulty band: ${safeDifficulty}\n` +
-            (surfaceCtx ? surfaceCtx + "\n" : "") +
-            `Learner's current level: ${promptPrevScore}/350\n\n` +
-            // fenceGuard (audit P2-12): learner text can't fake closing the untrusted block.
-            `Learner's reasoning:\n"""${fenceGuard(work)}"""`,
-          image: img.image,
-          imageRequired: imageOnly, // audit P1-3: never text-grade the placeholder for an image-only answer
-          maxTokens: 3000, // room for the grader's solve block + strengths/improvements + typed errors + worked solution
-        });
+    const gradeArgs = {
+      system: PRACTICE_GRADE_SYS,
+      user:
+        `Subject: ${subject}\n` +
+        `Question:\n"""${safeQuestion}"""\n` +
+        `Concept being probed:\n"""${safeConcept}"""\n` +
+        `Question difficulty band: ${safeDifficulty}\n` +
+        (surfaceCtx ? surfaceCtx + "\n" : "") +
+        `Learner's current level: ${promptPrevScore}/350\n\n` +
+        // fenceGuard (audit P2-12): learner text can't fake closing the untrusted block.
+        `Learner's reasoning:\n"""${fenceGuard(work)}"""`,
+      image: img.image,
+      imageRequired: imageOnly, // audit P1-3: never text-grade the placeholder for an image-only answer
+      maxTokens: 3000, // room for the grader's solve block + strengths/improvements + typed errors + worked solution
+    };
+    const data = dock ? dock : await gradeOne(gradeArgs);
 
     // Grader-output gate (audit P2-1): a parseable response WITHOUT a usable rubric is
     // an upstream failure — fail retryably instead of zero-filling a real attempt and
@@ -382,25 +383,45 @@ async function handlePractice(req, body) {
       throw new Error("grader returned no usable rubric");
     }
 
-    const attemptRubric = normalizeRubric(data?.rubric);
+    // NUMERIC VERIFICATION (lib/numericVerify.js): sandbox-recompute the grader's
+    // own `solve.check` arithmetic. A PROVEN-wrong grade re-grades ONCE via the
+    // shared budget-charged makeRegrade (vision never re-fired; a denied budget or
+    // failed retry falls back to field-level correction — a learner's successful
+    // grade is never 429'd after the fact).
+    let graded = data;
+    let verification = { status: "skipped", value: null, changed: false };
+    if (!dock) {
+      const v = await withNumericVerification(data, {
+        regrade: makeRegrade({
+          image: img.image,
+          system: PRACTICE_GRADE_SYS,
+          charge: chargeGlobalGroq,
+          call: (system) => gradeOne({ ...gradeArgs, system }),
+        }),
+      });
+      graded = v.data;
+      verification = v.verification;
+    }
+
+    const attemptRubric = normalizeRubric(graded?.rubric);
     // 3) The headline is the TRANSPARENT weighted mean of the rubric axes (process-first,
     //    path-independent — final-answer correctness never enters here). A dock carries its
     //    own forced low score (DOCK_SCORE), so use it directly rather than the all-zero mean.
-    const reasoningScore = dock ? data.reasoningScore : scoreFromRubric(attemptRubric);
-    const weakConcepts = normalizeWeakConcepts(data?.weakConcepts);
+    const reasoningScore = dock ? graded.reasoningScore : scoreFromRubric(attemptRubric);
+    const weakConcepts = normalizeWeakConcepts(graded?.weakConcepts);
     // Post-grade feedback: what was good, how to reach 100, the grader's own worked
     // solution (compute-first) used to type the learner's errors, the typed error list,
     // and — only on a SUBSTANTIVE (non-docked) attempt — the full worked solution. A dock
     // returns workedSolution="" and no errors/solve, so a non-attempt can't extract the answer.
-    const strengths = normalizeFeedbackList(data?.strengths);
-    const improvements = normalizeFeedbackList(data?.improvements);
-    const workedSolution = dock ? "" : capSolution(data?.workedSolution);
-    const solve = dock ? null : normalizeSolve(data?.solve);
-    const errors = dock ? [] : normalizeErrors(data?.errors);
-    const finalAnswerMatches = dock ? false : data?.finalAnswerMatches === true;
-    const correctnessNote = typeof data?.correctnessNote === "string" ? data.correctnessNote.slice(0, 2000) : "";
-    const socraticHint = typeof data?.socraticHint === "string" ? data.socraticHint.slice(0, 2000) : "";
-    const microLesson = typeof data?.microLesson === "string" ? data.microLesson.slice(0, 2000) : "";
+    const strengths = normalizeFeedbackList(graded?.strengths);
+    const improvements = normalizeFeedbackList(graded?.improvements);
+    const workedSolution = dock ? "" : capSolution(graded?.workedSolution);
+    const solve = dock ? null : normalizeSolve(graded?.solve);
+    const errors = dock ? [] : normalizeErrors(graded?.errors);
+    const finalAnswerMatches = dock ? false : graded?.finalAnswerMatches === true;
+    const correctnessNote = typeof graded?.correctnessNote === "string" ? graded.correctnessNote.slice(0, 2000) : "";
+    const socraticHint = typeof graded?.socraticHint === "string" ? graded.socraticHint.slice(0, 2000) : "";
+    const microLesson = typeof graded?.microLesson === "string" ? graded.microLesson.slice(0, 2000) : "";
 
     // 4-6) UNIFIED GLICKO-2 update + persist, under OPTIMISTIC CONCURRENCY (audit
     //    P2-4/P2-5/P2-7). Each pass reads the user's scores FRESH (post-grade), computes
@@ -473,7 +494,7 @@ async function handlePractice(req, body) {
           target_concept: safeConcept,
           difficulty: safeDifficulty,
           rubric: attemptRubric,
-          feedback: { strengths, improvements, workedSolution, correctnessNote, socraticHint, microLesson, solve, errors, finalAnswerMatches },
+          feedback: { strengths, improvements, workedSolution, correctnessNote, socraticHint, microLesson, solve, errors, finalAnswerMatches, verification },
         },
         p_expected_updated_at: prev ? prev.updatedAt : null,
         p_check_conflict: true,
@@ -516,6 +537,7 @@ async function handlePractice(req, body) {
       solve, // the grader's own worked solution (compute-first; null on a dock)
       errors, // typed error taxonomy (Socratic prompts on reasoning errors)
       finalAnswerMatches, // diagnostic only — did the learner's final answer match the grader's
+      verification, // the numeric verifier's verdict on the grader's own arithmetic
       strengths, // what the answer did well
       improvements, // specific, actionable steps to reach 100
       workedSolution, // full solution, revealed post-grade (empty on a dock)
@@ -639,28 +661,43 @@ async function handleDiagnosticStep(req, body) {
     // Reasoning-surface context resolved SERVER-SIDE from the bank by the signed
     // item id — like every other grading fact here, never from the request body.
     const surfaceCtx = reasoningSurfaceContext(item.reasoningSurface || null, item.trap || "");
-    const data = dock
-      ? dock
-      : await gradeOne({
-          system: DIAG_GRADE_SYS,
-          user:
-            `Subject: ${item.subject}\n` +
-            `Question difficulty band: ${item.band}\n` +
-            (surfaceCtx ? surfaceCtx + "\n" : "") +
-            `Question:\n"""${capText(item.question)}"""\n\n` +
-            // fenceGuard (audit P2-12): learner text can't fake closing the block.
-            `Learner's reasoning:\n"""${fenceGuard(reasoning)}"""`,
-          image: img.image,
-          imageRequired: imageOnly,
-          maxTokens: 1800, // grader's solve block + 9-axis rubric + typed errors
-        });
+    const gradeArgs = {
+      system: DIAG_GRADE_SYS,
+      user:
+        `Subject: ${item.subject}\n` +
+        `Question difficulty band: ${item.band}\n` +
+        (surfaceCtx ? surfaceCtx + "\n" : "") +
+        `Question:\n"""${capText(item.question)}"""\n\n` +
+        // fenceGuard (audit P2-12): learner text can't fake closing the block.
+        `Learner's reasoning:\n"""${fenceGuard(reasoning)}"""`,
+      image: img.image,
+      imageRequired: imageOnly,
+      maxTokens: 1800, // grader's solve block + 9-axis rubric + typed errors
+    };
+    const data = dock ? dock : await gradeOne(gradeArgs);
     // Grader-output gate (audit P2-1): no usable rubric → retryable failure, never
     // a zero entry in the signed chain.
     if (!dock && (!data || typeof data !== "object" || !data.rubric || typeof data.rubric !== "object")) {
       throw new Error("grader returned no usable rubric");
     }
-    const rubric = normalizeRubric(data?.rubric);
-    const reasoningScore = dock ? data.reasoningScore : scoreFromRubric(rubric);
+    // NUMERIC VERIFICATION (lib/numericVerify.js): same sandbox check as practice —
+    // the diagnostic's computation axis feeds the placement score and band routing,
+    // so a grader arithmetic error here mis-routes the walk. Same budget/vision
+    // guards via the shared makeRegrade.
+    let checked = data;
+    if (!dock) {
+      const v = await withNumericVerification(data, {
+        regrade: makeRegrade({
+          image: img.image,
+          system: DIAG_GRADE_SYS,
+          charge: chargeGlobalGroq,
+          call: (system) => gradeOne({ ...gradeArgs, system }),
+        }),
+      });
+      checked = v.data;
+    }
+    const rubric = normalizeRubric(checked?.rubric);
+    const reasoningScore = dock ? checked.reasoningScore : scoreFromRubric(rubric);
 
     // Fold the SERVER-graded entry into the signed chain. Compact keys + capped
     // strings bound the token: 3 entries stay far under the 16 KB verify cap.
@@ -669,8 +706,8 @@ async function handleDiagnosticStep(req, body) {
       d: item.band,
       s: reasoningScore,
       r: rubric,
-      w: normalizeWeakConcepts(data?.weakConcepts).slice(0, 8).map((c) => c.slice(0, 60)),
-      c: typeof data?.comment === "string" ? data.comment.slice(0, 280) : "",
+      w: normalizeWeakConcepts(checked?.weakConcepts).slice(0, 8).map((c) => c.slice(0, 60)),
+      c: typeof checked?.comment === "string" ? checked.comment.slice(0, 280) : "",
     };
     const transcript = [...st.transcript, entry];
     const graded = { subject: item.subject, difficulty: item.band, reasoningScore };
