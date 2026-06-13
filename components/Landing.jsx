@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Icon from "@/components/Icon";
 import ThemeToggle from "@/components/ThemeToggle";
 import { SubjectGlyph } from "@/components/ui";
@@ -9,12 +9,18 @@ import { ORDER, SUBJECTS } from "@/lib/scoring";
 /* =============================================================================
    Landing — the public marketing page (Polar-style: terse, mechanism-forward,
    noobtopro's own greyscale skin). Rendered as an early return from
-   components/Noobtopro.jsx for guests on the intro stage (stage === "intro" &&
-   !chrome). All CTAs call back into the live app handlers passed as props:
-     - onProveIt  → beginDiagnostic (starts the adaptive placement)
-     - onSignIn   → openSignIn / the not-configured note
-   so clicking through transitions the host state machine out of "intro" and
-   this page stops rendering. Styles live in the .np-lp-* layer in globals.css.
+   components/Noobtopro.jsx for guests on the intro stage. All CTAs call back
+   into the live app handlers passed as props (onProveIt / onSignIn).
+
+   Motion (the "Dynamic" preset, dependency-free):
+   - Hero entrance + headline-underline "draw" + glow "breathe" are pure CSS
+     animations that run on load (ungated, so they never flash).
+   - Everything below the fold reveals on scroll via ONE IntersectionObserver
+     that adds `.is-in` to [data-reveal]/[data-revealbar] elements; the hidden
+     state is gated behind `.is-armed` (added on mount) so the page is fully
+     visible with JS disabled. The 0–350 ranks bar fills left→right on reveal.
+   - All of it is transform/opacity only and inherits the global
+     prefers-reduced-motion kill-switch in globals.css. Styles: .np-lp-* layer.
    ========================================================================== */
 
 // A small check glyph for the pricing rows (Icon.jsx has no "check").
@@ -111,11 +117,49 @@ export default function Landing({
   onDismissAuthNote,
 }) {
   const [openFaq, setOpenFaq] = useState(-1);
+  const [armed, setArmed] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
+  const rootRef = useRef(null);
+
+  // Scroll-reveal + nav-condense wiring. Runs after first paint, so the page
+  // renders fully visible first (JS-off / crawler safe) and only then arms the
+  // hidden-until-revealed state.
+  useEffect(() => {
+    setArmed(true);
+    const root = rootRef.current;
+    let obs;
+    if (root) {
+      const targets = root.querySelectorAll("[data-reveal],[data-revealbar]");
+      if ("IntersectionObserver" in window) {
+        obs = new IntersectionObserver(
+          (entries) => {
+            for (const e of entries) {
+              if (e.isIntersecting) {
+                e.target.classList.add("is-in");
+                obs.unobserve(e.target);
+              }
+            }
+          },
+          { rootMargin: "0px 0px -10% 0px", threshold: 0.01 }
+        );
+        targets.forEach((el) => obs.observe(el));
+      } else {
+        targets.forEach((el) => el.classList.add("is-in"));
+      }
+    }
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      if (obs) obs.disconnect();
+      window.removeEventListener("scroll", onScroll);
+    };
+  }, []);
 
   return (
-    <div className="np-lp">
+    <div className={"np-lp" + (armed ? " is-armed" : "")} ref={rootRef}>
       {/* ----------------------------- nav ----------------------------- */}
-      <header className="np-lp-nav">
+      <header className={"np-lp-nav" + (scrolled ? " is-scrolled" : "")}>
         <div className="np-lp-navinner">
           <a className="np-brand np-lp-brand" href="#top">
             noob<span className="np-arrow">→</span>topro
@@ -163,7 +207,8 @@ export default function Landing({
         <div className="np-lp-container">
           <span className="np-lp-eyebrow">Reasoning-first STEM assessment</span>
           <h1 className="np-lp-h1">
-            Memorize nothing.<br /><em>Understand everything.</em>
+            <span className="np-lp-h1line">Memorize nothing.</span>
+            <span className="np-lp-h1line"><em>Understand everything.</em></span>
           </h1>
           <p className="np-lp-sub">
             Real problems in math, physics, and chemistry, graded on how you reason — not what you
@@ -191,13 +236,13 @@ export default function Landing({
       {/* ------------------------- how it works ------------------------- */}
       <section className="np-lp-section" id="how">
         <div className="np-lp-container">
-          <div className="np-lp-head np-lp-head--center">
+          <div className="np-lp-head np-lp-head--center" data-reveal>
             <span className="np-lp-eyebrow">How it works</span>
             <h2 className="np-lp-h2">Prove it. Get ranked. Climb.</h2>
           </div>
           <div className="np-lp-grid3">
-            {STEPS.map(([n, t, d]) => (
-              <div key={n} className="np-card np-lp-feat">
+            {STEPS.map(([n, t, d], i) => (
+              <div key={n} className="np-card np-lp-feat" data-reveal style={{ "--ri": i }}>
                 <div className="np-lp-step-n">{n}</div>
                 <div className="np-lp-feat-t">{t}</div>
                 <div className="np-lp-feat-d">{d}</div>
@@ -210,7 +255,7 @@ export default function Landing({
       {/* --------------------------- the engine -------------------------- */}
       <section className="np-lp-section np-lp-section--alt" id="engine">
         <div className="np-lp-container">
-          <div className="np-lp-head">
+          <div className="np-lp-head" data-reveal>
             <span className="np-lp-eyebrow">The engine</span>
             <h2 className="np-lp-h2">Reasoning is the unit of measurement.</h2>
             <p className="np-lp-lede">
@@ -219,8 +264,8 @@ export default function Landing({
             </p>
           </div>
           <div className="np-lp-grid3">
-            {ENGINE.map(([ic, t, d]) => (
-              <div key={t} className="np-card np-lp-feat">
+            {ENGINE.map(([ic, t, d], i) => (
+              <div key={t} className="np-card np-lp-feat" data-reveal style={{ "--ri": i }}>
                 <div className="np-lp-feat-ic"><Icon name={ic} size={18} /></div>
                 <div className="np-lp-feat-t">{t}</div>
                 <div className="np-lp-feat-d">{d}</div>
@@ -228,9 +273,11 @@ export default function Landing({
             ))}
           </div>
           <div className="np-lp-axiswrap">
-            <span className="np-lp-eyebrow">The nine reasoning axes</span>
+            <span className="np-lp-eyebrow" data-reveal>The nine reasoning axes</span>
             <div className="np-lp-axes">
-              {AXES.map((a) => <span key={a} className="np-chip np-lp-axis">{a}</span>)}
+              {AXES.map((a, i) => (
+                <span key={a} className="np-chip np-lp-axis" data-reveal style={{ "--ri": i }}>{a}</span>
+              ))}
             </div>
           </div>
         </div>
@@ -239,7 +286,7 @@ export default function Landing({
       {/* ----------------------------- ranks ----------------------------- */}
       <section className="np-lp-section" id="ranks">
         <div className="np-lp-container">
-          <div className="np-lp-head np-lp-head--center">
+          <div className="np-lp-head np-lp-head--center" data-reveal>
             <span className="np-lp-eyebrow">Ranks</span>
             <h2 className="np-lp-h2">One scale, 0 to 350.</h2>
             <p className="np-lp-lede np-lp-lede--center">
@@ -247,14 +294,14 @@ export default function Landing({
               The label is earned per subject — and it never stops moving.
             </p>
           </div>
-          <div className="np-lp-scale" aria-hidden="true">
+          <div className="np-lp-scale" aria-hidden="true" data-revealbar>
             {SEG_OPACITY.map((o, i) => (
-              <div key={i} className="np-lp-seg" style={{ background: "var(--text)", opacity: o }} />
+              <div key={i} className="np-lp-seg" style={{ background: "var(--text)", opacity: o, "--si": i }} />
             ))}
           </div>
           <div className="np-lp-ranks">
-            {RANKS.map(([name, range]) => (
-              <div key={name} className="np-lp-rank">
+            {RANKS.map(([name, range], i) => (
+              <div key={name} className="np-lp-rank" data-reveal style={{ "--ri": i }}>
                 <div className="np-lp-rank-name">{name}</div>
                 <div className="np-lp-rank-range">{range}</div>
               </div>
@@ -266,13 +313,13 @@ export default function Landing({
       {/* ---------------------------- subjects --------------------------- */}
       <section className="np-lp-section np-lp-section--alt">
         <div className="np-lp-container">
-          <div className="np-lp-head np-lp-head--center">
+          <div className="np-lp-head np-lp-head--center" data-reveal>
             <span className="np-lp-eyebrow">Subjects</span>
             <h2 className="np-lp-h2">Three subjects. Same rigor.</h2>
           </div>
           <div className="np-lp-grid3">
-            {ORDER.map((k) => (
-              <div key={k} className="np-card np-lp-subj">
+            {ORDER.map((k, i) => (
+              <div key={k} className="np-card np-lp-subj" data-reveal style={{ "--ri": i }}>
                 <div className="np-lp-subj-head">
                   <SubjectGlyph subject={k} size={24} />
                   <span className="np-lp-subj-name">{SUBJECTS[k].label}</span>
@@ -288,7 +335,7 @@ export default function Landing({
       {/* ---------------------------- pricing ---------------------------- */}
       <section className="np-lp-section" id="pricing">
         <div className="np-lp-container">
-          <div className="np-lp-head np-lp-head--center">
+          <div className="np-lp-head np-lp-head--center" data-reveal>
             <span className="np-lp-eyebrow">Pricing</span>
             <h2 className="np-lp-h2">Free to find your level.</h2>
             <p className="np-lp-lede np-lp-lede--center">
@@ -297,7 +344,7 @@ export default function Landing({
             </p>
           </div>
           <div className="np-lp-price">
-            <div className="np-card np-lp-plan">
+            <div className="np-card np-lp-plan" data-reveal style={{ "--ri": 0 }}>
               <div className="np-lp-plan-name">Free</div>
               <div className="np-lp-plan-price">$0<small> / forever</small></div>
               <div className="np-lp-plan-tag">Everything you need to find where you stand.</div>
@@ -310,7 +357,7 @@ export default function Landing({
                 {busy ? "Setting up…" : "Start free"}
               </button>
             </div>
-            <div className="np-card np-lp-plan np-lp-plan--pro">
+            <div className="np-card np-lp-plan np-lp-plan--pro" data-reveal style={{ "--ri": 1 }}>
               <span className="np-lp-badge">Soon</span>
               <div className="np-lp-plan-name">Pro</div>
               <div className="np-lp-plan-price">Coming soon</div>
@@ -331,24 +378,30 @@ export default function Landing({
       {/* ------------------------------ faq ------------------------------ */}
       <section className="np-lp-section np-lp-section--alt">
         <div className="np-lp-container">
-          <div className="np-lp-head np-lp-head--center">
+          <div className="np-lp-head np-lp-head--center" data-reveal>
             <span className="np-lp-eyebrow">FAQ</span>
             <h2 className="np-lp-h2">The short version.</h2>
           </div>
           <div className="np-lp-faq">
             {FAQ.map(([q, a], i) => {
               const open = openFaq === i;
+              const qid = `np-faq-q-${i}`;
+              const aid = `np-faq-a-${i}`;
               return (
-                <div key={q} className={"np-lp-faq-item" + (open ? " open" : "")}>
+                <div key={q} className={"np-lp-faq-item" + (open ? " open" : "")} data-reveal>
                   <button
+                    id={qid}
                     className="np-lp-faq-q"
                     aria-expanded={open}
+                    aria-controls={aid}
                     onClick={() => setOpenFaq(open ? -1 : i)}
                   >
                     <span>{q}</span>
                     <Icon name="chevron" size={18} />
                   </button>
-                  {open && <div className="np-lp-faq-a">{a}</div>}
+                  <div id={aid} role="region" aria-labelledby={qid} className="np-lp-faq-aw" aria-hidden={!open}>
+                    <div className="np-lp-faq-a">{a}</div>
+                  </div>
                 </div>
               );
             })}
@@ -359,11 +412,11 @@ export default function Landing({
       {/* --------------------------- closing cta -------------------------- */}
       <section className="np-lp-cta">
         <div className="np-lp-container">
-          <h2 className="np-lp-h2">Find out where you actually stand.</h2>
-          <p className="np-lp-lede np-lp-lede--center">
+          <h2 className="np-lp-h2" data-reveal style={{ "--ri": 0 }}>Find out where you actually stand.</h2>
+          <p className="np-lp-lede np-lp-lede--center" data-reveal style={{ "--ri": 1 }}>
             Nine problems. No memorizing. Just your reasoning, measured.
           </p>
-          <button className="np-btn np-primary np-big" onClick={onProveIt} disabled={busy}>
+          <button className="np-btn np-primary np-big" onClick={onProveIt} disabled={busy} data-reveal style={{ "--ri": 2 }}>
             {busy ? "Setting up your problems…" : "Get my rank"} {!busy && <Icon name="arrow" size={18} />}
           </button>
         </div>

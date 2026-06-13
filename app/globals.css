@@ -988,6 +988,97 @@ summary.np-cardicon { min-height: 44px; }
 .np-lp-foot-copy { margin-left: auto; font-size: 12px; color: var(--faint); }
 @media (max-width: 640px) { .np-lp-foot-copy { margin-left: 0; } }
 
+/* =============================================================================
+   Landing motion layer (the "Dynamic" preset, dependency-free). transform/
+   opacity only; the global prefers-reduced-motion block below neutralizes all
+   of it (plus the explicit reduce overrides at the end of this block). Scroll
+   reveals are gated behind `.is-armed` (added by JS on mount) so the page is
+   fully visible with JS disabled / to crawlers. Hover lifts use the independent
+   `translate` property so they never fight the reveal's `transform`.
+   ========================================================================== */
+.np-lp { --ease: cubic-bezier(.2, .7, .2, 1); }
+
+/* Scroll-reveal for everything below the fold. */
+.is-armed [data-reveal] {
+  opacity: 0;
+  transform: translateY(18px);
+  transition: opacity .6s var(--ease), transform .6s var(--ease), translate .2s var(--ease);
+  transition-delay: calc(var(--ri, 0) * 70ms);
+}
+.is-armed [data-reveal].is-in { opacity: 1; transform: none; }
+
+/* Hero entrance — runs on load (ungated, so it never flashes visible→hidden). */
+@keyframes npRise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+.np-lp-h1line { display: block; }
+.np-lp-hero .np-lp-eyebrow,
+.np-lp-hero .np-lp-h1line,
+.np-lp-hero .np-lp-sub,
+.np-lp-hero .np-lp-herocta,
+.np-lp-hero .np-lp-herometa { animation: npRise .6s var(--ease) both; }
+.np-lp-hero .np-lp-eyebrow { animation-delay: .04s; }
+.np-lp-hero .np-lp-h1line:nth-child(1) { animation-delay: .12s; }
+.np-lp-hero .np-lp-h1line:nth-child(2) { animation-delay: .24s; }
+.np-lp-hero .np-lp-sub { animation-delay: .42s; }
+.np-lp-hero .np-lp-herocta { animation-delay: .54s; }
+.np-lp-hero .np-lp-herometa { animation-delay: .64s; }
+
+/* Headline underline "draws" in after the second line lands. */
+.np-lp-h1 em {
+  text-decoration: none;
+  background-image: linear-gradient(var(--line-strong), var(--line-strong));
+  background-repeat: no-repeat;
+  background-position: 0 100%;
+  background-size: 100% 2px;
+  padding-bottom: 3px;
+}
+@keyframes npUnderline { from { background-size: 0% 2px; } to { background-size: 100% 2px; } }
+.np-lp-hero .np-lp-h1 em { animation: npUnderline .55s var(--ease) both; animation-delay: .72s; }
+
+/* Hero glow slowly breathes. */
+@keyframes npGlowBreathe {
+  0% { opacity: .7; transform: translateX(-50%) scale(1); }
+  50% { opacity: 1; transform: translateX(-50%) scale(1.06); }
+  100% { opacity: .7; transform: translateX(-50%) scale(1); }
+}
+.np-lp-glow { animation: npGlowBreathe 9s ease-in-out infinite; }
+
+/* Nav condenses + firms up once you scroll past the hero. */
+.np-lp-nav { transition: background .25s ease, box-shadow .25s ease; }
+.np-lp-navinner { transition: padding .25s var(--ease); }
+.np-lp-nav.is-scrolled { background: color-mix(in srgb, var(--bg) 92%, transparent); box-shadow: 0 1px 0 var(--line); }
+.np-lp-nav.is-scrolled .np-lp-navinner { padding-top: 8px; padding-bottom: 8px; }
+
+/* Card hover lift (uses `translate`, independent of the reveal `transform`). */
+.np-lp-feat, .np-lp-subj, .np-lp-plan { transition: translate .2s var(--ease), border-color .2s ease, background .2s ease; }
+.np-lp-feat:hover, .np-lp-subj:hover { translate: 0 -3px; border-color: var(--line-strong); }
+.np-lp-plan:hover { border-color: var(--line-strong); }
+.np-lp-feat-ic { transition: background .2s ease; }
+.np-lp-feat:hover .np-lp-feat-ic { background: var(--tint-2); }
+
+/* Primary-button arrow nudges on hover. */
+.np-lp .np-primary svg { transition: transform .18s var(--ease); }
+.np-lp .np-primary:hover svg { transform: translateX(3px); }
+
+/* The 0–350 ladder fills left→right when the bar scrolls into view. */
+.is-armed .np-lp-scale .np-lp-seg {
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform .7s var(--ease);
+  transition-delay: calc(var(--si, 0) * 90ms + 120ms);
+}
+.is-armed .np-lp-scale.is-in .np-lp-seg { transform: scaleX(1); }
+
+/* FAQ answers expand/collapse smoothly (grid-rows trick; answer stays in the DOM). */
+.np-lp-faq-aw { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .3s var(--ease); }
+.np-lp-faq-item.open .np-lp-faq-aw { grid-template-rows: 1fr; }
+.np-lp-faq-aw > .np-lp-faq-a { overflow: hidden; min-height: 0; }
+
+/* Honor reduced motion: never leave content hidden if the observer is skipped. */
+@media (prefers-reduced-motion: reduce) {
+  [data-reveal] { opacity: 1 !important; transform: none !important; }
+  .np-lp-scale .np-lp-seg { transform: scaleX(1) !important; }
+}
+
 /* ---- reduced motion: collapse every animation/transition to an instant ---- */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
