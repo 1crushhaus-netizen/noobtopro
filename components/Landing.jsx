@@ -399,9 +399,9 @@ export default function Landing({
                     <span>{q}</span>
                     <Icon name="chevron" size={18} />
                   </button>
-                  <div id={aid} role="region" aria-labelledby={qid} className="np-lp-faq-aw" aria-hidden={!open}>
-                    <div className="np-lp-faq-a">{a}</div>
-                  </div>
+                  {open && (
+                    <div id={aid} role="region" aria-labelledby={qid} className="np-lp-faq-a">{a}</div>
+                  )}
                 </div>
               );
             })}

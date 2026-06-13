@@ -1068,10 +1068,10 @@ summary.np-cardicon { min-height: 44px; }
 }
 .is-armed .np-lp-scale.is-in .np-lp-seg { transform: scaleX(1); }
 
-/* FAQ answers expand/collapse smoothly (grid-rows trick; answer stays in the DOM). */
-.np-lp-faq-aw { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .3s var(--ease); }
-.np-lp-faq-item.open .np-lp-faq-aw { grid-template-rows: 1fr; }
-.np-lp-faq-aw > .np-lp-faq-a { overflow: hidden; min-height: 0; }
+/* FAQ answer fades/slides in on open. It is conditionally rendered (absent from
+   the DOM while collapsed), so a closed item cannot leak a clipped line. */
+@keyframes npFaqOpen { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.np-lp-faq-a { animation: npFaqOpen .24s var(--ease) both; }
 
 /* Honor reduced motion: never leave content hidden if the observer is skipped. */
 @media (prefers-reduced-motion: reduce) {
