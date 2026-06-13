@@ -218,6 +218,7 @@ app/
     admin/action/route.js POST: admin actions — approve/hide/delete a guide; resolve events/reports
 components/
   Noobtopro.jsx        THE app — one big client component; stage×view state machine
+  Landing.jsx          The public marketing landing page (the `stage === "intro"` screen): mechanism-forward, Polar-style long-scroll (hero · how-it-works · the engine + 9 axes · ranks · subjects · Free-vs-Pro pricing · FAQ · footer), full-bleed via an early return from Noobtopro.jsx; reuses the .np-lp-* layer in globals.css; CTAs call straight into beginDiagnostic / openSignIn
   Icon.jsx             Shared inline-SVG icon set (used by Noobtopro + Dashboard)
   SignIn.jsx           OAuth sign-in menu (provider buttons; no email/password)
   Dashboard.jsx        THE merged "Dashboard" tab (was Profile + Progress): identity + KPIs + by-subject (with the §7 BREADTH-GATED band chip + binding-coverage line per subject) + reasoning radar + leaderboard + recent rank-moves in one no-scroll bento grid; trend charts + answer review open in slide-over drawers; guest gate (blurred preview + sign-in prompt)
@@ -442,7 +443,7 @@ Like `/api/score`, these require a verified token, but additionally an **admin**
 
 The entire app is one big client component, **`components/Noobtopro.jsx`**, driven by two independent state variables:
 
-- **`stage`**: `intro | signin | diagnostic | scoring | dashboard | practice` — *where you are in the core flow.* (Note: `stage === "dashboard"` is the practice-flow "Where you stand" screen, distinct from the `view === "dashboard"` **tab** below.)
+- **`stage`**: `intro | signin | diagnostic | scoring | dashboard | practice` — *where you are in the core flow.* (Note: `stage === "dashboard"` is the practice-flow "Where you stand" screen, distinct from the `view === "dashboard"` **tab** below.) **`stage === "intro"` early-returns the full-bleed marketing `Landing.jsx`** (bypassing the constrained app shell) for anyone unranked — guest *or* signed-in-no-scores; gating on the stage (not on `chrome`) keeps the tree stable across the async sign-in load. A ranked user is sent straight to `dashboard` by `hydrate()`, so they never see it.
 - **`view`**: `practice | learn | dashboard` — *which tab is selected.* (+ `admin` for allow-listed admins.) The former separate **`progress`** and **`profile`** views were **merged into one `dashboard`** tab.
 
 The render switch resolves in this order: `stage === "signin"` (sign-in menu, full-screen) → `view === "admin"` (AdminDashboard) → `view === "dashboard"` (**Dashboard** — the merged Profile+Progress tab) → `view === "learn"` (LearnTab) → else the **Practice flow** (the `stage` machine: intro → diagnostic → scoring loader → dashboard "Where you stand" → practice Q&A + feedback).
