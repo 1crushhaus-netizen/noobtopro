@@ -16,7 +16,8 @@ import { ORDER, SUBJECTS } from "@/lib/scoring";
    - Hero entrance + headline-underline "draw" + glow "breathe" are pure CSS
      animations that run on load (ungated, so they never flash).
    - Everything below the fold reveals on scroll via ONE IntersectionObserver
-     that adds `.is-in` to [data-reveal]/[data-revealbar] elements; the hidden
+     that sets a `data-inview` attr on [data-reveal]/[data-revealbar] elements
+     (an attribute, not a class, so it survives React re-renders); the hidden
      state is gated behind `.is-armed` (added on mount) so the page is fully
      visible with JS disabled. The 0–350 ranks bar fills left→right on reveal.
    - All of it is transform/opacity only and inherits the global
@@ -135,7 +136,10 @@ export default function Landing({
           (entries) => {
             for (const e of entries) {
               if (e.isIntersecting) {
-                e.target.classList.add("is-in");
+                // Mark revealed with a data ATTRIBUTE, not a class: React never
+                // touches attributes absent from the JSX, so this survives a
+                // re-render that rewrites className (e.g. toggling a FAQ open).
+                e.target.setAttribute("data-inview", "");
                 obs.unobserve(e.target);
               }
             }
@@ -144,7 +148,7 @@ export default function Landing({
         );
         targets.forEach((el) => obs.observe(el));
       } else {
-        targets.forEach((el) => el.classList.add("is-in"));
+        targets.forEach((el) => el.setAttribute("data-inview", ""));
       }
     }
     const onScroll = () => setScrolled(window.scrollY > 8);
