@@ -163,12 +163,12 @@ export default function Landing({
         <div className="np-lp-container">
           <span className="np-lp-eyebrow">Reasoning-first STEM assessment</span>
           <h1 className="np-lp-h1">
-            It grades <em>how you reason</em><br />— not whether you guessed right.
+            Memorize nothing.<br /><em>Understand everything.</em>
           </h1>
           <p className="np-lp-sub">
-            Real problems in math, physics, and chemistry. noobtopro reads your reasoning on a
-            9-axis rubric and ranks each subject 0–350 — Elementary to Doctorate. A wrong answer
-            with sound reasoning beats a lucky guess.
+            Real problems in math, physics, and chemistry, graded on how you reason — not what you
+            recall. noobtopro pinpoints your level, then gives you a structured path from where you
+            are to Doctorate-level mastery.
           </p>
           <div className="np-lp-herocta">
             <button className="np-btn np-primary np-big" onClick={onProveIt} disabled={busy}>
