@@ -49,12 +49,12 @@ import { normalizeTopic } from "@/lib/taxonomy";
 import { BAND_LADDER } from "@/lib/curriculum";
 import { diagnosticItemById, pickDiagnosticItem, nextDiagBand, DIAG_STEPS_PER_SUBJECT } from "@/lib/diagnosticBank";
 import { isCurriculumConcept } from "@/lib/mastery";
-import { preGradeDock } from "@/lib/preGrade";
-import { checkRateLimit, clientKey, chargeGlobalGroq } from "@/lib/rateLimit";
+import { preGradeDock, injectionDock } from "@/lib/preGrade";
+import { checkRateLimit, clientKey, chargeGlobalGroq, refundGlobalGroq } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType, readJsonLimited, MAX_BODY_BYTES_IMAGE } from "@/lib/requestGuard";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireUser } from "@/lib/adminAuth";
-import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
+import { reportInjection, reportRateLimit, shouldDockForInjection } from "@/lib/abuseDetection";
 import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, normalizeFeedbackList, capSolution, normalizeErrors, normalizeSolve, normalizeReasoningSurface, reasoningSurfaceContext } from "@/lib/gradeInput";
 import { withNumericVerification, makeRegrade } from "@/lib/numericVerify";
 
@@ -238,7 +238,9 @@ async function handlePractice(req, body) {
   // SERVER-issued payload (re-normalized defensively), not the client.
   const surfaceCtx = reasoningSurfaceContext(normalizeReasoningSurface(issued.reasoningSurface), issued.trap);
 
-  reportInjection({
+  // Capture the scan: a HIGH-confidence injection (audit P2-3) also DOCKS the attempt
+  // (below) so a successful injection can't inflate the persisted rating to all-4s.
+  const injectionScan = reportInjection({
     req,
     route: "/api/score",
     subject,
@@ -275,6 +277,14 @@ async function handlePractice(req, body) {
   // below (never client-supplied), so tagging can only ever color a concept with an
   // honestly-graded attempt — it can't inflate a rating.
   const masteryKey = isCurriculumConcept(subject, issued.conceptKey) ? issued.conceptKey : null;
+
+  // GLOBAL Groq budget refund bookkeeping (audit P2-2 fix): chargeGlobalGroq charges
+  // the platform-wide window BEFORE the grade; if the charged Groq call never succeeds
+  // (an upstream failure), refund it in the catch so an outage doesn't keep over-
+  // throttling everyone for the rest of the window. chargedImg mirrors the image charge.
+  let chargedGroq = 0;
+  let chargedImg = 0;
+  let gradeSucceeded = false;
 
   try {
     // Cheap PRE-GRADE replay check (review P3): the authoritative jti dedupe lives in
@@ -346,7 +356,13 @@ async function handlePractice(req, body) {
     //    Skip the dock when a photo is attached — preGradeDock only inspects TEXT, so an
     //    image-only answer (worked notes in the photo, empty text box) is a substantive
     //    submission that must reach the vision grader, not be docked to a non-attempt.
-    const dock = img.image ? null : preGradeDock(capText(reasoning)); // cap before the dock (bounded regex/Set work)
+    // INJECTION AUTO-DOCK (audit P2-3): a HIGH-confidence injection docks REGARDLESS of
+    // an attached image — the injection rides in TEXT, so a photo can't shield it.
+    const dock = shouldDockForInjection(injectionScan)
+      ? injectionDock()
+      : img.image
+        ? null
+        : preGradeDock(capText(reasoning)); // cap before the dock (bounded regex/Set work)
     if (!dock) {
       // GLOBAL Groq budget (audit P2-3): the per-IP/per-account caps are the fairness
       // layer; this platform-wide window bounds total spend under IP rotation.
@@ -358,6 +374,8 @@ async function handlePractice(req, body) {
           { status: 429, headers: { "Retry-After": String(glob.retryAfter) } }
         );
       }
+      chargedGroq = 1;
+      chargedImg = img.image ? 1 : 0;
     }
     const gradeArgs = {
       system: PRACTICE_GRADE_SYS,
@@ -382,6 +400,9 @@ async function handlePractice(req, body) {
     if (!dock && (!data || typeof data !== "object" || !data.rubric || typeof data.rubric !== "object")) {
       throw new Error("grader returned no usable rubric");
     }
+    // The charged Groq grade produced a usable result — no refund owed even if a later
+    // (persist/verify) step fails. Any numeric-verifier re-grade charges its own token.
+    gradeSucceeded = true;
 
     // NUMERIC VERIFICATION (lib/numericVerify.js): sandbox-recompute the grader's
     // own `solve.check` arithmetic. A PROVEN-wrong grade re-grades ONCE via the
@@ -556,6 +577,13 @@ async function handlePractice(req, body) {
       masteryUpdates: masteryKey ? [{ subject, conceptKey: masteryKey, quality: reasoningScore }] : [],
     });
   } catch (e) {
+    // Refund the pre-charged global Groq budget when the charged grade did NOT
+    // succeed (audit P2-2 fix): an upstream outage shouldn't keep the slot consumed
+    // for the rest of the window and over-throttle everyone. A grade that succeeded
+    // (then a persist/verify failure) keeps its charge — the Groq spend really happened.
+    if (!gradeSucceeded && chargedGroq > 0) {
+      await refundGlobalGroq(chargedGroq, { img: chargedImg });
+    }
     console.error("[/api/score practice]", e);
     return NextResponse.json({ error: "Grading is temporarily unavailable. Please try again." }, { status: 500 });
   }
@@ -640,9 +668,18 @@ async function handleDiagnosticStep(req, body) {
   // Image-only answer: the photo IS the answer — a vision failure must fail the
   // step (retryable) rather than text-grade the placeholder (audit P1-3).
   const imageOnly = !!img.image && !hasText;
+  // Flag (+ capture) prompt-injection in the step's reasoning. A HIGH-confidence
+  // injection (audit P2-3) DOCKS the step — a successful injection here could otherwise
+  // inflate the placement quality and mis-route the band walk upward.
+  const injectionScan = reportInjection({ req, route: "/api/score", subject: item.subject, text: hasText ? reasoning : "" });
   // Deterministic dock on the RAW answer — a blank / "idk" / off-topic step is
-  // graded low with NO Groq call (the §8 walk then descends a band, by design).
-  const dock = img.image ? null : preGradeDock(capText(body.reasoning));
+  // graded low with NO Groq call (the §8 walk then descends a band, by design). A
+  // HIGH-confidence injection docks regardless of an attached image (it rides in text).
+  const dock = shouldDockForInjection(injectionScan)
+    ? injectionDock()
+    : img.image
+      ? null
+      : preGradeDock(capText(body.reasoning));
 
   if (img.image) {
     // The costliest Groq path (multimodal) stays under the same :img budget as
@@ -650,12 +687,18 @@ async function handleDiagnosticStep(req, body) {
     const imgRl = await checkRateLimit(`${clientKey(req)}:img`, { max: 10 });
     if (!imgRl.ok) return tooManyDiag(req, imgRl.retryAfter);
   }
+  // GLOBAL Groq budget refund bookkeeping (audit P2-2 fix): refund the pre-charged
+  // token if the charged grade never succeeds (an upstream outage).
+  let chargedGroq = 0;
+  let chargedImg = 0;
+  let gradeSucceeded = false;
   if (!dock) {
     // GLOBAL Groq budget (audit P2-3): one token per LIVE grade; docks are free.
     const glob = await chargeGlobalGroq(1, { img: img.image ? 1 : 0 });
     if (!glob.ok) return tooManyDiag(req, glob.retryAfter);
+    chargedGroq = 1;
+    chargedImg = img.image ? 1 : 0;
   }
-  reportInjection({ req, route: "/api/score", subject: item.subject, text: hasText ? reasoning : "" });
 
   try {
     // Reasoning-surface context resolved SERVER-SIDE from the bank by the signed
@@ -680,6 +723,8 @@ async function handleDiagnosticStep(req, body) {
     if (!dock && (!data || typeof data !== "object" || !data.rubric || typeof data.rubric !== "object")) {
       throw new Error("grader returned no usable rubric");
     }
+    gradeSucceeded = true; // the charged grade produced a usable result — no refund owed
+
     // NUMERIC VERIFICATION (lib/numericVerify.js): same sandbox check as practice —
     // the diagnostic's computation axis feeds the placement score and band routing,
     // so a grader arithmetic error here mis-routes the walk. Same budget/vision
@@ -741,6 +786,11 @@ async function handleDiagnosticStep(req, body) {
       },
     });
   } catch (e) {
+    // Refund the pre-charged global budget when the charged grade never succeeded
+    // (audit P2-2 fix) — an outage shouldn't keep throttling the whole platform.
+    if (!gradeSucceeded && chargedGroq > 0) {
+      await refundGlobalGroq(chargedGroq, { img: chargedImg });
+    }
     console.error("[/api/score diagnostic step]", e);
     return NextResponse.json({ error: "Grading is temporarily unavailable. Please try again." }, { status: 500 });
   }

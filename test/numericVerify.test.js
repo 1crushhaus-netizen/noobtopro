@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   safeEvaluate,
   parseAnswer,
+  parseValues,
   numericallyEqual,
   formatVerified,
   checkSolve,
@@ -115,6 +116,30 @@ describe("parseAnswer — one stated answer to one machine value", () => {
   });
 });
 
+describe("parseValues — multi-root + percent candidate sets (FIX 5)", () => {
+  it("returns a one-element set for a single clean value", () => {
+    expect(parseValues("x = 7")).toEqual([7]);
+    expect(parseValues("3/4")).toEqual([0.75]);
+  });
+
+  it("splits multi-root answers and parses each root", () => {
+    expect(parseValues("x = 3 or x = -2").sort()).toEqual([-2, 3]);
+    expect(parseValues("3, -2").sort()).toEqual([-2, 3]);
+    expect(parseValues("x = 5 and x = 9").sort()).toEqual([5, 9]);
+  });
+
+  it("emits BOTH legitimate readings of a bare percentage", () => {
+    expect(parseValues("25%").sort((a, b) => a - b)).toEqual([0.25, 25]);
+    expect(parseValues("p = 75%").sort((a, b) => a - b)).toEqual([0.75, 75]);
+  });
+
+  it("returns [] when nothing parses (fail open)", () => {
+    expect(parseValues("")).toEqual([]);
+    expect(parseValues("no numeric answer")).toEqual([]);
+    expect(parseValues(null)).toEqual([]);
+  });
+});
+
 describe("numericallyEqual — unit-aware tolerant comparison", () => {
   it("compares across compatible unit prefixes via SI, null on incompatible dimensions", () => {
     expect(numericallyEqual(val("40 kN * 1 s"), val("40000 N s"))).toBe(true);
@@ -195,6 +220,31 @@ describe("applyLearnerCorrection — raise-only, evidence-bounded", () => {
     const r = applyLearnerCorrection({ value: 5, learnerAnswer: "5", finalAnswerMatches: true, rubric: ok, errors: [] });
     expect(r.changed).toBe(false);
     expect(r.rubric).toBe(ok);
+  });
+
+  it("FIX 5: a MULTI-ROOT answer matches when the verified value is ONE of the roots (raise-only)", () => {
+    // verified root = 3; the learner listed both correct roots — credit the match.
+    const r = applyLearnerCorrection({ value: 3, learnerAnswer: "x = 3 or x = -2", finalAnswerMatches: false, rubric, errors });
+    expect(r.finalAnswerMatches).toBe(true);
+    expect(r.rubric.computation).toBe(4);
+    expect(r.errors).toEqual([{ type: "conceptual", what: "wrong principle" }]); // slip dropped
+  });
+
+  it("FIX 5: a multi-root answer with NO matching root is a real mismatch (flag only, never lowers)", () => {
+    const r = applyLearnerCorrection({ value: 3, learnerAnswer: "x = 5 or x = 9", finalAnswerMatches: true, rubric, errors });
+    expect(r.finalAnswerMatches).toBe(false);
+    expect(r.rubric).toBe(rubric); // raise-only: never lowers
+    expect(r.errors).toBe(errors);
+  });
+
+  it("FIX 5: a PERCENTAGE answer matches the verified value under either reading", () => {
+    // verified fraction 0.25; learner wrote "25%" — the same magnitude under a percent reading.
+    const r1 = applyLearnerCorrection({ value: 0.25, learnerAnswer: "25%", finalAnswerMatches: false, rubric, errors });
+    expect(r1.finalAnswerMatches).toBe(true);
+    expect(r1.rubric.computation).toBe(4);
+    // verified percent number 25; learner wrote "25%" — also matches.
+    const r2 = applyLearnerCorrection({ value: 25, learnerAnswer: "25%", finalAnswerMatches: false, rubric, errors });
+    expect(r2.finalAnswerMatches).toBe(true);
   });
 });
 

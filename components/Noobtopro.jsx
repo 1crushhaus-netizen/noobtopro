@@ -165,10 +165,6 @@ const loadLeaderboard = () => authApi("/api/leaderboard", {});
 // repeat across a ±1 walk, so it can't key anything).
 const qid = (q) => (q ? `${q.subject}:${q.stepNo}` : "");
 
-// NEXT_PUBLIC_* is inlined at build time. When "true", the Learn tab becomes the
-// browsable Concept Hub (full catalog); otherwise it stays the weak-concept picker.
-const HUB_ENABLED = process.env.NEXT_PUBLIC_ENABLE_CONCEPT_HUB === "true";
-
 // Object URLs created for image previews must be revoked or they leak memory
 // for the life of the page. Safe to call with a missing/blob-less image.
 function revokePreview(img) {
@@ -341,6 +337,128 @@ function Loader({ subject }) {
   );
 }
 
+// The DEEP-LINKED concept guide (FIX 1): when a "Learn this" link from the
+// dashboard radar, a review row, or a weak-concept chip is tapped, openLearn fetches
+// the shared /api/learn guide into learnContent — this renders THAT guide (overview,
+// key ideas, why it works, pitfalls, Socratic questions, and the bundled "try this"
+// practice question) instead of the generic curriculum browser. "Browse the full
+// library" clears the concept to fall back to <LearnTab>. Reuses the .np-lesson card
+// system shared with LearnTab's ConceptGuide so the two surfaces read identically.
+function LearnConceptGuide({ concept, content, busy, error, onPractice, onBrowse, onRetry }) {
+  const subject = concept && concept.subject;
+  const color = SUBJECTS[subject] ? SUBJECTS[subject].color : "var(--text)";
+  const browseLink = (
+    <button type="button" className="np-ghost" onClick={onBrowse}>
+      <Icon name="back" size={15} /> Browse the full library
+    </button>
+  );
+
+  if (busy) {
+    return (
+      <div className="fade-up">
+        {browseLink}
+        <div className="np-card fade-up" role="status" aria-live="polite" style={{ textAlign: "center", padding: "48px 24px" }}>
+          <div className="np-pulse" style={{ fontFamily: "var(--mono)", fontSize: 13, letterSpacing: 1, color: "var(--muted)" }}>
+            {subject ? subject.toUpperCase() : "LEARN"}
+          </div>
+          <div style={{ fontFamily: "var(--display)", fontSize: 22, marginTop: 10 }}>Building your concept guide…</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !content) {
+    return (
+      <div className="fade-up">
+        {browseLink}
+        <div className="np-card np-lesson" role="alert">
+          <div className="np-cardicon" style={{ color: "var(--danger)" }}>Couldn’t load this concept</div>
+          <p className="np-lessontext">{error || "The concept guide is unavailable right now."}</p>
+          <button type="button" className="np-btn np-secondary" style={{ marginTop: 10 }} onClick={onRetry}>Try again</button>
+        </div>
+      </div>
+    );
+  }
+
+  const tryThis = content.tryThisQuestion || null;
+  return (
+    <div className="fade-up">
+      {browseLink}
+
+      <div className="np-qmeta" style={{ marginTop: 14, marginBottom: 12 }}>
+        <SubjectGlyph subject={subject} />
+        <span className="np-metaline">{SUBJECTS[subject] ? SUBJECTS[subject].label.toUpperCase() : ""}</span>
+      </div>
+      <h2 className="np-h1" style={{ fontSize: "clamp(26px, 4vw, 38px)", color }}>{content.concept}</h2>
+
+      {content.overview && (
+        <div className="np-card np-lesson">
+          <div className="np-cardicon" style={{ color }}>Overview</div>
+          <p className="np-lessontext">{content.overview}</p>
+        </div>
+      )}
+
+      {Array.isArray(content.keyIdeas) && content.keyIdeas.length > 0 && (
+        <div className="np-card np-lesson">
+          <div className="np-cardicon" style={{ color }}>Key ideas</div>
+          <ul className="np-selfqs">
+            {content.keyIdeas.map((idea, i) => <li key={i}>{idea}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {content.whyItWorks && (
+        <div className="np-card np-lesson">
+          <div className="np-cardicon" style={{ color }}>Why it works</div>
+          <p className="np-lessontext">{content.whyItWorks}</p>
+        </div>
+      )}
+
+      {Array.isArray(content.pitfalls) && content.pitfalls.length > 0 && (
+        <div className="np-card np-lesson">
+          <div className="np-cardicon" style={{ color }}>Common pitfalls</div>
+          <ul className="np-selfqs">
+            {content.pitfalls.map((p, i) => <li key={i}>{p}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {Array.isArray(content.socraticQuestions) && content.socraticQuestions.length > 0 && (
+        <div className="np-card np-lesson">
+          <div className="np-cardicon" style={{ color }}>Ask yourself</div>
+          <p className="np-lessontext" style={{ color: "var(--muted)", marginBottom: 10 }}>
+            Think these through before practicing. Explaining your reasoning out loud counts.
+          </p>
+          <ul className="np-selfqs">
+            {content.socraticQuestions.map((q, i) => <li key={i}>{q}</li>)}
+          </ul>
+        </div>
+      )}
+
+      <div className="np-card np-lesson">
+        <div className="np-cardicon" style={{ color }}>Practice this concept</div>
+        {content.tryThis && (
+          <p className="np-lessontext" style={{ color: "var(--muted)", marginBottom: 12 }}>{content.tryThis}</p>
+        )}
+        {tryThis && onPractice ? (
+          <button
+            type="button"
+            className="np-btn np-primary np-btn--subject"
+            style={{ "--subject": color }}
+            onClick={() => onPractice(subject, tryThis)}
+          >
+            Practice this concept
+          </button>
+        ) : (
+          <p className="np-hint" style={{ margin: 0 }}>
+            A practice question for this concept is coming soon. Explore the full library below in the meantime.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ----------------------------- app ----------------------------- */
 export default function Noobtopro() {
   const [stage, setStage] = useState("intro"); // intro | signin | diagnostic | scoring | dashboard | practice
@@ -375,10 +493,9 @@ export default function Noobtopro() {
   const [learnBusy, setLearnBusy] = useState(false);
   const [learnError, setLearnError] = useState("");
   // The active "try this" practice question for the open concept ({question,
-  // targetConcept, difficulty}) — seeded from the cached guide, replaceable via
-  // "Regenerate" (session-only). And a flag for that regenerate request.
+  // targetConcept, difficulty, token}) — the bundled guide question wired to the
+  // deep-link's "Practice this concept" button (FIX 1).
   const [learnQuestion, setLearnQuestion] = useState(null);
-  const [learnRegen, setLearnRegen] = useState(false);
   // The curriculum concept key currently generating an AI practice drill (increment 3) —
   // drives the concept-page button's spinner; null when idle.
   const [drillBusy, setDrillBusy] = useState(null);
@@ -671,6 +788,17 @@ export default function Noobtopro() {
   // returns, so answering naturally interleaves subjects and hides grading
   // latency); a stale run is superseded via diagRun.
   async function beginDiagnostic() {
+    // FIX 6: a re-baseline OVERWRITES the signed-in user's accumulated scores (the
+    // diagnostic finalize upserts all three subjects — README §17). Confirm before
+    // discarding existing progress; on cancel, do nothing (no navigation, no fetch).
+    // Guests aren't gated (their scores are local + this is their normal first run);
+    // a signed-in user with NO scores yet is taking their first diagnostic, so no prompt.
+    if (user && scores && typeof window !== "undefined" && typeof window.confirm === "function") {
+      const ok = window.confirm(
+        "Re-taking the diagnostic will replace your current scores with a fresh baseline. Your accumulated progress will be lost. Continue?"
+      );
+      if (!ok) return;
+    }
     setError("");
     setDiagError("");
     setBusy(true);
@@ -864,7 +992,6 @@ export default function Noobtopro() {
     setLearnConcept({ subject, concept });
     setLearnError("");
     setLearnQuestion(null);
-    setLearnRegen(false); // clear any "Generating…" inherited from a prior concept's in-flight regenerate
 
     const key = `${subject}::${concept}`;
     const cached = learnCacheRef.current[key];
@@ -1429,7 +1556,21 @@ export default function Noobtopro() {
             onOverlayActiveChange={setOverlayActive}
           />
         ) : view === "learn" && scores ? (
-          <LearnTab onPractice={startConceptDrill} busyConcept={drillBusy} />
+          // FIX 1: a deep-linked "Learn this" concept (learnConcept set) renders the
+          // fetched /api/learn guide; otherwise the generic curriculum browser.
+          learnConcept ? (
+            <LearnConceptGuide
+              concept={learnConcept}
+              content={learnContent}
+              busy={learnBusy}
+              error={learnError}
+              onPractice={startPracticeWithQuestion}
+              onBrowse={() => { setLearnConcept(null); setLearnError(""); }}
+              onRetry={() => openLearn(learnConcept.subject, learnConcept.concept)}
+            />
+          ) : (
+            <LearnTab onPractice={startConceptDrill} busyConcept={drillBusy} />
+          )
         ) : (
           <>
             {/* INTRO */}

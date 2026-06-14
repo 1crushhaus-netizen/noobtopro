@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { groqJSON, fenceGuard, DIAG_GRADE_SYS, PRACTICE_GRADE_SYS } from "@/lib/groq";
 import { clampSubjectScore, ORDER, normalizeRubric, scoreFromRubric } from "@/lib/scoring";
-import { preGradeDock } from "@/lib/preGrade";
-import { checkRateLimit, clientKey, chargeGlobalGroq } from "@/lib/rateLimit";
+import { preGradeDock, injectionDock } from "@/lib/preGrade";
+import { checkRateLimit, clientKey, chargeGlobalGroq, refundGlobalGroq } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType, readJsonLimited, MAX_BODY_BYTES_IMAGE } from "@/lib/requestGuard";
-import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
+import { reportInjection, reportRateLimit, shouldDockForInjection } from "@/lib/abuseDetection";
 import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, normalizeFeedbackList, capSolution, normalizeErrors, normalizeSolve, reasoningSurfaceContext } from "@/lib/gradeInput";
 import { withNumericVerification, makeRegrade } from "@/lib/numericVerify";
 
@@ -76,7 +76,9 @@ export async function POST(req) {
   }
 
   // Flag (don't block) obvious prompt-injection in the learner's reasoning/concept.
-  reportInjection({
+  // Capture the scan: a HIGH-confidence injection (audit P2-3) also DOCKS the attempt
+  // (below) — logging alone let a successful injection inflate the rubric to all-4s.
+  const injectionScan = reportInjection({
     req,
     route: "/api/grade",
     subject,
@@ -108,7 +110,14 @@ export async function POST(req) {
   // (worked notes in the photo, empty text box) must reach the vision grader.
   // Cap before the dock so its regex/Set work is bounded even on a large body (the
   // dock's verdict is unchanged — 12k chars is far more than any blank/idk/gibberish test needs).
-  const dock = img.image ? null : preGradeDock(capText(reasoning));
+  // INJECTION AUTO-DOCK (audit P2-3): a HIGH-confidence injection docks REGARDLESS of an
+  // attached image — the injection rides in TEXT (reasoning/question/concept), so a photo
+  // can't shield it; skipping the LLM grade is exactly what neutralizes the inflation.
+  const dock = shouldDockForInjection(injectionScan)
+    ? injectionDock()
+    : img.image
+      ? null
+      : preGradeDock(capText(reasoning));
 
   // Image-only submission: the photo IS the answer — a vision failure must fail
   // retryably rather than text-grade the placeholder string (audit P1-3).
@@ -117,6 +126,12 @@ export async function POST(req) {
   // GLOBAL Groq budget (audit P2-3): the per-IP cap is rotation-defeatable on this
   // unauthenticated route; the platform-wide window bounds total spend. Docked
   // answers cost nothing and skip the charge.
+  // Refund bookkeeping (audit P2-2 fix): if the charged grade never succeeds (an
+  // upstream outage), refund the slot in the catch so an outage doesn't keep
+  // over-throttling everyone for the rest of the window.
+  let chargedGroq = 0;
+  let chargedImg = 0;
+  let gradeSucceeded = false;
   if (!dock) {
     const glob = await chargeGlobalGroq(1, { img: img.image ? 1 : 0 });
     if (!glob.ok) {
@@ -126,6 +141,8 @@ export async function POST(req) {
         { status: 429, headers: { "Retry-After": String(glob.retryAfter) } }
       );
     }
+    chargedGroq = 1;
+    chargedImg = img.image ? 1 : 0;
   }
 
   try {
@@ -161,6 +178,7 @@ export async function POST(req) {
       if (!data || typeof data !== "object" || !data.rubric || typeof data.rubric !== "object") {
         throw new Error("grader returned no usable rubric");
       }
+      gradeSucceeded = true; // the charged grade produced a usable result — no refund owed
       // NUMERIC VERIFICATION (lib/numericVerify.js): sandbox-recompute the grader's
       // own arithmetic; a proven-wrong grade re-grades once via the shared
       // budget-charged makeRegrade (vision never re-fired; every failure falls open).
@@ -237,6 +255,7 @@ export async function POST(req) {
     if (!data || typeof data !== "object" || !data.rubric || typeof data.rubric !== "object") {
       throw new Error("grader returned no usable rubric");
     }
+    gradeSucceeded = true; // the charged grade produced a usable result — no refund owed
     // NUMERIC VERIFICATION (lib/numericVerify.js): sandbox-recompute the grader's
     // own arithmetic; a proven-wrong grade re-grades once via the shared
     // budget-charged makeRegrade (vision never re-fired; every failure falls open).
@@ -272,6 +291,13 @@ export async function POST(req) {
       weakConcepts,
     });
   } catch (e) {
+    // Refund the pre-charged global Groq budget when the charged grade did NOT succeed
+    // (audit P2-2 fix): an upstream outage shouldn't keep the slot consumed for the rest
+    // of the window and over-throttle everyone. A grade that succeeded then failed
+    // downstream keeps its charge — the Groq spend really happened.
+    if (!gradeSucceeded && chargedGroq > 0) {
+      await refundGlobalGroq(chargedGroq, { img: chargedImg });
+    }
     // Log server-side; return a generic message so upstream Groq status/body
     // detail (keys, quota state, model IDs) never leaks to the client.
     console.error("[/api/grade]", e);

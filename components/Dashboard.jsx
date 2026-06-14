@@ -458,6 +458,13 @@ export default function Dashboard({
           <button className="np-btn np-secondary np-dash-actbtn" onClick={() => setDrawer("reviews")}>
             Review your answers <Icon name="arrow" size={16} />
           </button>
+          {/* Re-take the diagnostic to re-baseline. The replace-your-scores confirmation
+              lives in beginDiagnostic (FIX 6) so it fires from every entry point. */}
+          {onStartDiagnostic && (
+            <button className="np-btn np-secondary np-dash-actbtn" onClick={onStartDiagnostic}>
+              Re-take diagnostic <Icon name="arrow" size={16} />
+            </button>
+          )}
           <button
             className="np-btn np-danger np-dash-actbtn"
             style={{ marginLeft: "auto" }}

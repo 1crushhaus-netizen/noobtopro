@@ -63,7 +63,14 @@ export default function Leaderboard({ loadLeaderboard, scrollRegion }) {
   const you = overall && overall.you;
   const total = overall ? Number(overall.total) || 0 : 0;
   const youBand = you && Number.isInteger(you.band) ? you.band : null;
-  const topPct = you && total >= 2 ? Math.max(1, Math.round(((you.above + 1) / total) * 100)) : null;
+  // FIX 8: an UNVERIFIED caller (a freshly-migrated guest score) gets a PROVISIONAL
+  // placement — no real rank/percentile until N=5 server-graded attempts are earned.
+  const provisional = !!(you && you.provisional);
+  const gradedNeeded = provisional ? Math.max(0, Number(you.needed) || 0) : 0;
+  // A real percentile only exists for a VERIFIED caller (the server omits `above` when provisional).
+  const topPct = you && !provisional && total >= 2 && Number.isFinite(Number(you.above))
+    ? Math.max(1, Math.round(((you.above + 1) / total) * 100))
+    : null;
 
   return (
     <div className="np-card">
@@ -91,7 +98,14 @@ export default function Leaderboard({ loadLeaderboard, scrollRegion }) {
             </div>
             <RankDistribution tracks={tracks} rankLabels={RANKS} />
             <div className="np-statsub" style={{ marginTop: 8 }}>
-              {youBand != null ? (
+              {provisional ? (
+                // FIX 8: a migrated guest score is shown but UNRANKED until verified.
+                <>
+                  Your placement is <strong style={{ color: "var(--text)" }}>provisional</strong>. Complete{" "}
+                  {gradedNeeded > 0 ? <>{gradedNeeded} more graded {gradedNeeded === 1 ? "attempt" : "attempts"}</> : "a few graded attempts"}{" "}
+                  to join the leaderboard.
+                </>
+              ) : youBand != null ? (
                 <>
                   You're <strong style={{ color: "var(--text)" }}>{RANKS[youBand]}</strong> overall
                   {topPct != null ? <> — top {topPct}%</> : null} of {total} ranked

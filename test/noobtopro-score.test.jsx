@@ -22,6 +22,7 @@ const store = vi.hoisted(() => ({
   migrateGuestToAccount: vi.fn(async () => ({ migrated: false })),
   deleteAllUserData: vi.fn(async () => ({ ok: true })),
   loadMastery: vi.fn(async () => ({ mastery: {} })),
+  loadReviews: vi.fn(async () => ({ reviews: [] })),
 }));
 vi.mock("@/lib/store", () => store);
 
@@ -125,6 +126,111 @@ describe("Noobtopro — signed-in practice is server-authoritative", () => {
     // ...and NOT to the grade-only route, and NOT to the local (guest) save path.
     expect(fetchMock.mock.calls.some(([p]) => p === "/api/grade")).toBe(false);
     expect(store.saveProgress).not.toHaveBeenCalled();
+  });
+});
+
+describe("Noobtopro — Learn deep-link renders the fetched concept guide (FIX 1)", () => {
+  const GUIDE = {
+    subject: "math",
+    concept: "x",
+    topic: "algebra_functions",
+    overview: "An overview of the concept x.",
+    keyIdeas: ["First key idea", "Second key idea"],
+    whyItWorks: "It works because of this derivation and mechanism.",
+    socraticQuestions: ["What if the input doubles?"],
+    pitfalls: ["A common mistake to avoid"],
+    tryThis: "Try this practice problem.",
+    tryThisQuestion: { question: "Solve for x.", targetConcept: "x", difficulty: "intermediate", token: "tok-learn-1" },
+    cached: false,
+  };
+
+  it("opening 'Learn this' from the dashboard renders the concept guide (overview / why it works), NOT the generic curriculum list", async () => {
+    const fetchMock = vi.fn(async (path) => {
+      if (path === "/api/admin/me") return jsonRes({ isAdmin: false });
+      if (path === "/api/learn") return jsonRes(GUIDE);
+      return jsonRes({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<Noobtopro />);
+    fireEvent.click(await screen.findByRole("button", { name: /^Dashboard$/i }));
+    // The radar panel surfaces the weak concept with a "Learn this" action.
+    fireEvent.click(await screen.findByRole("button", { name: /learn this/i }));
+
+    // The fetched guide renders its sections — proof the deep-link does NOT fall
+    // through to the generic <LearnTab> curriculum browser.
+    expect(await screen.findByText("An overview of the concept x.")).toBeTruthy();
+    expect(screen.getByText("Why it works")).toBeTruthy();
+    expect(screen.getByText("It works because of this derivation and mechanism.")).toBeTruthy();
+    expect(screen.getByText("First key idea")).toBeTruthy();
+    // The "Practice this concept" button is wired to the bundled try-this question.
+    expect(screen.getByRole("button", { name: /practice this concept/i })).toBeTruthy();
+    // It fetched the guide exactly once (no wasted second call), and it is the guide
+    // surface — NOT the curriculum browser's "Search concepts" box.
+    expect(fetchMock.mock.calls.filter(([p]) => p === "/api/learn")).toHaveLength(1);
+    expect(screen.queryByRole("searchbox", { name: /search concepts/i })).toBeNull();
+  });
+
+  it("'Browse the full library' clears the concept and shows the curriculum browser", async () => {
+    const fetchMock = vi.fn(async (path) => {
+      if (path === "/api/admin/me") return jsonRes({ isAdmin: false });
+      if (path === "/api/learn") return jsonRes(GUIDE);
+      return jsonRes({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<Noobtopro />);
+    fireEvent.click(await screen.findByRole("button", { name: /^Dashboard$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /learn this/i }));
+    await screen.findByText("An overview of the concept x.");
+    fireEvent.click(screen.getByRole("button", { name: /browse the full library/i }));
+    // Now the generic LearnTab curriculum browser is shown (its search box appears).
+    expect(await screen.findByRole("searchbox", { name: /search concepts/i })).toBeTruthy();
+  });
+});
+
+describe("Noobtopro — re-baseline confirmation (FIX 6)", () => {
+  it("a signed-in user WITH scores must confirm before re-taking (cancel does nothing)", async () => {
+    // SCORES is loaded in beforeEach → the user lands on the ranked Dashboard.
+    const fetchMock = vi.fn(async (path) => {
+      if (path === "/api/admin/me") return jsonRes({ isAdmin: false });
+      if (path === "/api/generate") throw new Error("diagnostic must not start on cancel");
+      return jsonRes({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const confirmSpy = vi.fn(() => false); // user CANCELS
+    vi.stubGlobal("confirm", confirmSpy);
+
+    render(<Noobtopro />);
+    // Open the Dashboard tab (the ranked home base) where the re-take action lives.
+    fireEvent.click(await screen.findByRole("button", { name: /^Dashboard$/i }));
+    const retake = await screen.findByRole("button", { name: /re-take diagnostic/i });
+    fireEvent.click(retake);
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(confirmSpy.mock.calls[0][0]).toMatch(/replace your current scores/i);
+    // Cancel → no diagnostic generation, still on the dashboard.
+    expect(fetchMock.mock.calls.some(([p]) => p === "/api/generate")).toBe(false);
+    expect(screen.getByText("Where you stand")).toBeTruthy();
+  });
+
+  it("confirming proceeds to start the diagnostic", async () => {
+    const fetchMock = vi.fn(async (path) => {
+      if (path === "/api/admin/me") return jsonRes({ isAdmin: false });
+      if (path === "/api/generate") {
+        return jsonRes({ adaptive: true, stepsPerSubject: 3, curated: true, questions: ["math", "physics", "chemistry"].map((s) => ({ subject: s, topic: "t", difficulty: "intermediate", question: `${s.toUpperCase()}-Q1`, stepNo: 1, stepsTotal: 3, token: `tok-${s}-1` })) });
+      }
+      return jsonRes({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("confirm", vi.fn(() => true)); // user CONFIRMS
+
+    render(<Noobtopro />);
+    fireEvent.click(await screen.findByRole("button", { name: /^Dashboard$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /re-take diagnostic/i }));
+    // The diagnostic started — its first question is on screen.
+    await screen.findByText("MATH-Q1");
+    expect(fetchMock.mock.calls.some(([p]) => p === "/api/generate")).toBe(true);
   });
 });
 

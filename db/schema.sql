@@ -28,12 +28,26 @@ create table if not exists public.scores (
   -- SOURCE OF TRUTH from which `score` (RUBRIC_WEIGHTS-weighted aggregate, via
   -- subjectScoreFromGlicko) and `rubric` (0–4 radar) are derived. Opaque; NULL until seeded.
   glicko jsonb,
+  -- FIX 8 (guest score laundering, migration 0016). server_graded counts SERVER-GRADED
+  -- attempts written through save_progress_for for THIS (user, subject); verified flips
+  -- true once that count reaches LEADERBOARD_VERIFY_MIN (5). A guest score migrated on
+  -- first sign-in lands verified=false / server_graded=0, so a client-computed (editable
+  -- localStorage) score is VISIBLE to the user but EXCLUDED from the leaderboard until it
+  -- is earned back through real server-graded practice. A baseline write does NOT count
+  -- (it is the placement, not a practice attempt).
+  server_graded int not null default 0,
+  verified boolean not null default false,
   updated_at timestamptz not null default now(),
   primary key (user_id, subject)
 );
 -- Add the rubric/glicko columns to an already-provisioned scores table (idempotent).
 alter table public.scores add column if not exists rubric jsonb;
 alter table public.scores add column if not exists glicko jsonb;
+-- FIX 8: server_graded / verified (idempotent; default false so existing rows that
+-- have NOT been re-verified through the new counting path are excluded from the
+-- leaderboard until they earn 5 server-graded attempts).
+alter table public.scores add column if not exists server_graded int not null default 0;
+alter table public.scores add column if not exists verified boolean not null default false;
 
 create table if not exists public.attempts (
   id bigint generated always as identity primary key,
@@ -194,6 +208,29 @@ as $$
      );
 $$;
 
+-- ---- FIX 8: reset a migrated guest glicko's per-axis RD to the seed max ---------
+-- A guest score is CLIENT-computed in editable localStorage; a hand-edited blob could
+-- claim a LOW rating deviation (rd), which would make the laundered seed resist
+-- correction by later server-graded attempts (low rd = "high confidence"). On
+-- migration we keep the guest RATING (visible to the user) but reset every axis's rd to
+-- GLICKO_RD0 (350, the seed max in lib/scoring.js) so the placement stays maximally
+-- correctable. Preserves rating + vol; rd hard-set to 350. NULL passes through as NULL.
+create or replace function public._reset_glicko_rd(j jsonb)
+returns jsonb
+language sql
+immutable
+set search_path = public
+as $$
+  select case
+    when jsonb_typeof(j) <> 'object' then null
+    else (
+      select jsonb_object_agg(ax.key, ax.value || jsonb_build_object('rd', 350))
+      from jsonb_each(j) ax
+      where jsonb_typeof(ax.value) = 'object'
+    )
+  end;
+$$;
+
 -- ---- RPC: atomic guest -> account migration (called on first sign-in) ------
 -- SECURITY DEFINER: the scores/attempts tables are now SELECT-only under RLS
 -- (server-authoritative scoring), so this function must run with definer rights to
@@ -240,7 +277,7 @@ begin
     return false;  -- account already has data; nothing to migrate
   end if;
 
-  insert into public.scores (user_id, subject, score, weak_concepts, comment, rubric, glicko, updated_at)
+  insert into public.scores (user_id, subject, score, weak_concepts, comment, rubric, glicko, server_graded, verified, updated_at)
   select uid,
          s->>'subject',
          greatest(0, least(350, coalesce(case when pg_input_is_valid(s->>'score', 'numeric') then round((s->>'score')::numeric) end, 0)))::int,
@@ -255,7 +292,13 @@ begin
          case when jsonb_typeof(s->'rubric') = 'object' then s->'rubric' else null end,
          -- Audit P2-6: the glicko blob is guest-asserted — admit only a bounded,
          -- numerically sane per-axis map (else null → lazy-seed from the score).
-         case when public._valid_glicko(s->'glicko') then s->'glicko' else null end,
+         -- FIX 8: reset every axis's RD to the seed max so a low-rd laundered seed
+         -- can't resist correction by later server-graded attempts.
+         case when public._valid_glicko(s->'glicko') then public._reset_glicko_rd(s->'glicko') else null end,
+         -- FIX 8: a migrated guest score is UNVERIFIED with zero server-graded attempts —
+         -- VISIBLE to the user but excluded from the leaderboard until earned back.
+         0,
+         false,
          now()
   from jsonb_array_elements(coalesce(p_scores, '[]'::jsonb)) as s
   where s->>'subject' in ('math', 'physics', 'chemistry')
@@ -472,6 +515,9 @@ declare
   v_jti text;
   v_subject text;
   v_current timestamptz;
+  -- FIX 8: a graded PRACTICE attempt (type 'attempt') counts toward verification;
+  -- a baseline (the diagnostic placement) does not. 1 → increment server_graded.
+  v_graded_inc int;
 begin
   if p_user is null then
     raise exception 'user required';
@@ -515,7 +561,15 @@ begin
     raise exception 'too many score rows';
   end if;
 
-  insert into public.scores (user_id, subject, score, weak_concepts, comment, rubric, glicko, updated_at)
+  -- FIX 8: only a SERVER-GRADED practice attempt advances verification. A baseline
+  -- (re)placement and a pure score upsert do NOT count (a baseline never makes an
+  -- account verified by itself — verification is earned through real practice).
+  v_graded_inc := case
+    when p_attempt is not null and jsonb_typeof(p_attempt) = 'object'
+         and coalesce(p_attempt->>'type', 'attempt') = 'attempt'
+    then 1 else 0 end;
+
+  insert into public.scores (user_id, subject, score, weak_concepts, comment, rubric, glicko, server_graded, verified, updated_at)
   select p_user,
          s->>'subject',
          greatest(0, least(350, coalesce(case when pg_input_is_valid(s->>'score', 'numeric') then round((s->>'score')::numeric) end, 0)))::int,
@@ -529,6 +583,9 @@ begin
          left(coalesce(s->>'comment', ''), 2000),
          case when jsonb_typeof(s->'rubric') = 'object' then s->'rubric' else null end,
          case when jsonb_typeof(s->'glicko') = 'object' then s->'glicko' else null end,
+         -- New row: starts at this write's graded increment; verified once it reaches 5.
+         v_graded_inc,
+         v_graded_inc >= 5,
          now()
   from jsonb_array_elements(coalesce(p_scores, '[]'::jsonb)) as s
   where s->>'subject' in ('math', 'physics', 'chemistry')
@@ -538,6 +595,11 @@ begin
         comment = excluded.comment,
         rubric = excluded.rubric,
         glicko = excluded.glicko,
+        -- FIX 8: accumulate server-graded attempts and flip verified once >= 5. Stays
+        -- monotonic — a baseline re-placement (v_graded_inc 0) never resets the count,
+        -- and once verified the flag stays true (>= 5 can only grow).
+        server_graded = public.scores.server_graded + excluded.server_graded,
+        verified = (public.scores.server_graded + excluded.server_graded) >= 5,
         updated_at = excluded.updated_at;
 
   -- Append the attempt (skip if no usable attempt was supplied). Validate type +
@@ -1031,6 +1093,35 @@ $$;
 revoke all on function public.rate_limit_hit(text, int, int) from public, anon, authenticated;
 grant execute on function public.rate_limit_hit(text, int, int) to service_role;
 
+-- FIX 8 / audit P2-2: REFUND n hits to a bucket's CURRENT window (floored at 0).
+-- chargeGlobalGroq charges the global Groq budget BEFORE grading; when the charged
+-- grade does NOT succeed (an upstream outage) the route refunds the slot so an outage
+-- doesn't keep over-throttling the whole platform for the rest of the window. No-op when
+-- the bucket is absent or its window already rolled (the hits there are irrelevant).
+-- SECURITY DEFINER + service-role only, exactly like rate_limit_hit.
+create or replace function public.rate_limit_refund(p_bucket text, p_n int)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_now timestamptz := now();
+  v_n int := greatest(0, coalesce(p_n, 0));
+begin
+  if p_bucket is null or p_bucket = '' or v_n = 0 then
+    return;
+  end if;
+  update public.rate_limits
+     set hits = greatest(0, hits - v_n),
+         updated_at = v_now
+   where bucket = left(p_bucket, 200)
+     and reset_at > v_now; -- only the live window; an expired one resets on next hit anyway
+end;
+$$;
+revoke all on function public.rate_limit_refund(text, int) from public, anon, authenticated;
+grant execute on function public.rate_limit_refund(text, int) to service_role;
+
 -- ---- item-as-opponent Elo: self-calibrating question difficulty ------------
 -- The rating engine (lib/scoring.js) treats each QUESTION as the rated opponent. Its
 -- difficulty lives on the same 0–100 scale as the learner's per-subject rating and is
@@ -1088,12 +1179,17 @@ grant execute on function public.bump_item_difficulty(text, text, text, numeric,
 -- The Profile leaderboard exposes NO names, NO email, NO per-attempt rows — only the
 -- aggregate distribution across the 5 fixed ranks (per subject + 'overall', the rounded
 -- mean of a user's subject scores) PLUS the caller's own band/score and how many ranked
--- users sit strictly above them (for a "top X%" readout). Qualifying users = those with
--- >=1 scores row (completed a diagnostic). Because scores is SELECT-own under RLS, this
--- cross-user aggregate needs definer rights; it is SERVICE-ROLE ONLY and invoked by the
--- JWT-verified /api/leaderboard route with the caller's uid — so it never trusts a
--- client identity and adds NO authenticated_security_definer advisor. The per-band counts
--- are exactly what a future percentile-recut tiering would consume (architected for it).
+-- users sit strictly above them (for a "top X%" readout). Because scores is SELECT-own
+-- under RLS, this cross-user aggregate needs definer rights; it is SERVICE-ROLE ONLY and
+-- invoked by the JWT-verified /api/leaderboard route with the caller's uid — so it never
+-- trusts a client identity and adds NO authenticated_security_definer advisor. The
+-- per-band counts are exactly what a future percentile-recut tiering would consume.
+--
+-- FIX 8 (guest score laundering): only VERIFIED rows (server_graded >= 5, set by
+-- save_progress_for) feed the distribution counts and ranking. A migrated guest score is
+-- unverified, so a client-edited localStorage seed can NOT inflate the leaderboard. The
+-- caller's own 'you' is returned PROVISIONAL (no real rank — just their visible band/score
+-- + how many more graded attempts they owe) until their row is verified.
 create or replace function public.leaderboard_tiers(p_uid uuid)
 returns jsonb
 language sql
@@ -1101,14 +1197,17 @@ stable
 security definer
 set search_path = public
 as $$
-  with base as (
-    select subject::text as track, user_id, score from public.scores
+  with verified_scores as (
+    -- Only verified rows count toward the cross-user distribution + ranking.
+    select user_id, subject, score from public.scores where verified = true
+  ),
+  base as (
+    select subject::text as track, user_id, score from verified_scores
     union all
-    -- 'overall' = mean over ALL THREE subjects (sum/3), matching lib/scoring.js phdIndex:
-    -- a missing subject counts as 0 rather than being dropped, so a 1–2-subject user can't
-    -- out-rank a 3-subject user (and can't game it by only scoring their best subject).
+    -- 'overall' = mean over ALL THREE subjects (sum/3), matching lib/scoring.js phdIndex.
+    -- Computed over VERIFIED rows only; a user with no verified rows simply doesn't appear.
     select 'overall'::text as track, user_id, round(sum(score) / 3.0)::int as score
-      from public.scores group by user_id
+      from verified_scores group by user_id
   ),
   banded as (
     select track, user_id, score,
@@ -1125,21 +1224,60 @@ as $$
       count(*) as total
     from banded group by track
   ),
+  -- The caller's OWN rows (verified AND unverified) so a provisional user still sees
+  -- their band/score; per-subject verification + remaining graded attempts ride along.
+  my_subjects as (
+    select subject::text as track, score,
+      case when score < 70 then 0 when score < 140 then 1 when score < 210 then 2 when score < 280 then 3 else 4 end as bidx,
+      verified, greatest(0, 5 - server_graded) as needed
+    from public.scores where user_id = p_uid
+  ),
+  my_overall as (
+    select 'overall'::text as track,
+      round(sum(score) / 3.0)::int as score,
+      case when round(sum(score) / 3.0)::int < 70 then 0 when round(sum(score) / 3.0)::int < 140 then 1
+           when round(sum(score) / 3.0)::int < 210 then 2 when round(sum(score) / 3.0)::int < 280 then 3 else 4 end as bidx,
+      -- The overall row is verified only when EVERY subject row is verified.
+      bool_and(verified) as verified,
+      greatest(0, max(5 - server_graded)) as needed
+    from public.scores where user_id = p_uid
+    having count(*) > 0  -- no 'overall you' for a caller with zero scores rows
+  ),
   me as (
-    select track, score, bidx from banded where user_id = p_uid
+    select track, score, bidx, verified, needed from my_subjects
+    union all
+    select track, score, bidx, verified, needed from my_overall
+  ),
+  tracks as (
+    select track from counts union select track from me
   ),
   per_track as (
-    select c.track,
+    select t.track,
       jsonb_build_object(
-        'counts', jsonb_build_array(c.c0, c.c1, c.c2, c.c3, c.c4),
-        'total', c.total,
-        'you', case when m.track is null then null else jsonb_build_object(
+        'counts', jsonb_build_array(coalesce(c.c0,0), coalesce(c.c1,0), coalesce(c.c2,0), coalesce(c.c3,0), coalesce(c.c4,0)),
+        'total', coalesce(c.total, 0),
+        'you', case
+          when m.track is null then null
+          -- VERIFIED caller → a real position (band + rank-above among verified users).
+          when m.verified then jsonb_build_object(
             'band', m.bidx,
             'score', m.score,
-            'above', (select count(*) from banded b where b.track = c.track and b.score > m.score)
-          ) end
+            'above', (select count(*) from banded b where b.track = t.track and b.score > m.score),
+            'provisional', false
+          )
+          -- UNVERIFIED caller → PROVISIONAL: their visible band/score, no real rank, and
+          -- how many more server-graded attempts unlock the leaderboard.
+          else jsonb_build_object(
+            'band', m.bidx,
+            'score', m.score,
+            'provisional', true,
+            'needed', m.needed
+          )
+        end
       ) as obj
-    from counts c left join me m on m.track = c.track
+    from tracks t
+    left join counts c on c.track = t.track
+    left join me m on m.track = t.track
   )
   select coalesce(jsonb_object_agg(track, obj), '{}'::jsonb) from per_track;
 $$;
