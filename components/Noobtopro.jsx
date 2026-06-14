@@ -24,6 +24,7 @@ import LearnTab from "@/components/LearnTab";
 import AdminDashboard from "@/components/AdminDashboard";
 import ScoreBreakdown, { ErrorList, hasReasoningError } from "@/components/ScoreBreakdown";
 import ThemeToggle from "@/components/ThemeToggle";
+import Landing from "@/components/Landing";
 import { SubjectGlyph, deltaColor } from "@/components/ui";
 
 /* ----------------------------- helpers ----------------------------- */
@@ -1248,6 +1249,29 @@ export default function Noobtopro() {
   // grid; the not-ranked empty state keeps normal page scroll so a short viewport
   // can't clip its "Prove it" CTA.
   const dashLock = view === "dashboard" && user && scores;
+
+  // The public marketing landing page IS the intro stage now. It renders for anyone
+  // on "intro" (guest OR a signed-in user who hasn't been ranked yet) — gating on the
+  // stage rather than on `chrome` keeps the tree stable across the async sign-in load
+  // (otherwise setUser would swap Landing→shell mid-interaction and detach the CTA).
+  // Its CTAs call straight into the live handlers, so "Prove it"/"Sign in" move the
+  // state machine off "intro" and this branch stops matching. A ranked user is sent
+  // to "dashboard" by hydrate(), so they never land here.
+  if (stage === "intro" && view !== "dashboard" && view !== "learn" && view !== "admin") {
+    return (
+      <Landing
+        user={user}
+        busy={busy}
+        onProveIt={beginDiagnostic}
+        onSignIn={() => (isSupabaseConfigured ? openSignIn() : setShowAuthNote(true))}
+        error={error}
+        onDismissError={() => setError("")}
+        showAuthNote={showAuthNote}
+        onDismissAuthNote={() => setShowAuthNote(false)}
+      />
+    );
+  }
+
   return (
     <div className="np-root">
       {showSaveModal && !user && (

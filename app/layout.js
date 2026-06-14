@@ -4,9 +4,9 @@ import { GeistMono } from "geist/font/mono";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 
 export const metadata = {
-  title: "noobtopro — prove what you know",
+  title: "noobtopro: prove what you know",
   description:
-    "Real problems in math, physics, and chemistry. Your reasoning is graded — not just the answer. Get ranked from Elementary to Doctorate, then climb.",
+    "Real problems in math, physics, and chemistry. Your reasoning is graded, not just the answer. Get ranked from Elementary to Doctorate, then climb.",
 };
 
 // viewport-fit=cover lets the app paint into the notch/home-indicator area; the
