@@ -223,8 +223,8 @@ export default function Landing({
         <div className="np-lp-container">
           <span className="np-lp-eyebrow">Reasoning-first STEM assessment</span>
           <h1 className="np-lp-h1">
-            <span className="np-lp-h1line">Memorize nothing.</span>
-            <span className="np-lp-h1line"><em>Understand everything.</em></span>
+            <span className="np-lp-h1line">Memorize nothing</span>
+            <span className="np-lp-h1line"><em>Understand everything</em></span>
           </h1>
           <p className="np-lp-sub">
             Real problems in math, physics, and chemistry, graded on how you reason, not what you
@@ -254,7 +254,7 @@ export default function Landing({
         <div className="np-lp-container">
           <div className="np-lp-head np-lp-head--center" data-reveal>
             <span className="np-lp-eyebrow">How it works</span>
-            <h2 className="np-lp-h2">Prove it. Get ranked. Climb.</h2>
+            <h2 className="np-lp-h2">Prove it → Get ranked → Climb</h2>
           </div>
           <div className="np-lp-grid3">
             {STEPS.map(([n, t, d], i) => (
@@ -273,7 +273,7 @@ export default function Landing({
         <div className="np-lp-container">
           <div className="np-lp-head" data-reveal>
             <span className="np-lp-eyebrow">The engine</span>
-            <h2 className="np-lp-h2">Reasoning is the unit of measurement.</h2>
+            <h2 className="np-lp-h2">Reasoning is the unit of measurement</h2>
             <p className="np-lp-lede">
               Most apps check the final answer. noobtopro models the path you took to get there,
               and that is what it scores, calibrates, and ranks.
@@ -304,7 +304,7 @@ export default function Landing({
         <div className="np-lp-container">
           <div className="np-lp-head np-lp-head--center" data-reveal>
             <span className="np-lp-eyebrow">Ranks</span>
-            <h2 className="np-lp-h2">One scale, 0 to 350.</h2>
+            <h2 className="np-lp-h2">One scale: 0 to 350</h2>
             <p className="np-lp-lede np-lp-lede--center">
               Every subject lives on the same 0–350 scale, split into five curriculum ranks.
               The label is earned per subject, and it never stops moving.
@@ -331,7 +331,7 @@ export default function Landing({
         <div className="np-lp-container">
           <div className="np-lp-head np-lp-head--center" data-reveal>
             <span className="np-lp-eyebrow">Subjects</span>
-            <h2 className="np-lp-h2">Three subjects. Same rigor.</h2>
+            <h2 className="np-lp-h2">Three subjects, same rigor</h2>
           </div>
           <div className="np-lp-grid3">
             {ORDER.map((k, i) => (
