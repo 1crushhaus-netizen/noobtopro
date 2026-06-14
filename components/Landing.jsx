@@ -353,7 +353,7 @@ export default function Landing({
         <div className="np-lp-container">
           <div className="np-lp-head np-lp-head--center" data-reveal>
             <span className="np-lp-eyebrow">Pricing</span>
-            <h2 className="np-lp-h2">Free to find your level.</h2>
+            <h2 className="np-lp-h2">Free to find your level</h2>
             <p className="np-lp-lede np-lp-lede--center">
               The diagnostic, your rank, and the concept library are free, forever.
               Pro lifts the practice limits when you’re ready to climb fast.
