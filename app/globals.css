@@ -1072,6 +1072,15 @@ summary.np-cardicon { min-height: 44px; }
    the DOM while collapsed), so a closed item cannot leak a clipped line. */
 @keyframes npFaqOpen { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 .np-lp-faq-a { animation: npFaqOpen .24s var(--ease) both; }
+/* Rich FAQ answer (structured: intro + numbered steps + notes). Tailwind preflight
+   strips list markers/margins, so they are restored explicitly here. */
+.np-lp-faq-a p { margin: 0 0 11px; }
+.np-lp-faq-a p:last-child { margin-bottom: 0; }
+.np-lp-faq-a ol { list-style: decimal; margin: 0 0 12px; padding-left: 20px; }
+.np-lp-faq-a li { margin-bottom: 9px; padding-left: 3px; }
+.np-lp-faq-a li:last-child { margin-bottom: 0; }
+.np-lp-faq-a li::marker { color: var(--faint); }
+.np-lp-faq-a strong { color: var(--text); font-weight: 600; }
 
 /* Honor reduced motion: never leave content hidden if the observer is skipped. */
 @media (prefers-reduced-motion: reduce) {

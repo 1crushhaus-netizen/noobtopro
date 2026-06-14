@@ -7,7 +7,7 @@ import { SubjectGlyph } from "@/components/ui";
 import { ORDER, SUBJECTS } from "@/lib/scoring";
 
 /* =============================================================================
-   Landing — the public marketing page (Polar-style: terse, mechanism-forward,
+   Landing: the public marketing page (Polar-style: terse, mechanism-forward,
    noobtopro's own greyscale skin). Rendered as an early return from
    components/Noobtopro.jsx for guests on the intro stage. All CTAs call back
    into the live app handlers passed as props (onProveIt / onSignIn).
@@ -36,26 +36,26 @@ function Check() {
 
 const STEPS = [
   ["01", "Prove it",
-    "An adaptive placement walks nine graded steps across math, physics, and chemistry, drawn from a curated, standardized bank. Explain each step — or tap “I don’t know” to skip."],
+    "An adaptive placement walks nine graded steps across math, physics, and chemistry, drawn from a curated, standardized bank. Explain each step, or tap “I don’t know” to skip."],
   ["02", "Get ranked",
     "Your reasoning maps to a 0–350 rank per subject, Elementary to Doctorate. One honest pass places you anywhere on the true range."],
   ["03", "Climb",
-    "Pick a subject and get problems calibrated to your level. Sound reasoning moves your score — even when the final answer is wrong."],
+    "Pick a subject and get problems calibrated to your level. Sound reasoning moves your score, even when the final answer is wrong."],
 ];
 
 const ENGINE = [
   ["target", "Reasoning-first grading",
-    "The grader solves the problem itself, types every flaw, then scores your reasoning path independently of the final answer. A clean arithmetic slip costs almost nothing; a broken inference costs heavily — even when the answer is right."],
+    "The grader solves the problem itself, types every flaw, then scores your reasoning path independently of the final answer. A clean arithmetic slip costs almost nothing; a broken inference costs heavily, even when the answer is right."],
   ["grid", "9-axis chain-link rubric",
     "Every answer is scored 0–4 on nine axes and drawn as a radar, so you see exactly where the reasoning holds and where it breaks."],
   ["refresh", "Unified Glicko-2 ranking",
     "Each axis is a difficulty-adjusted rating judged against the question’s level. Beating a hard problem climbs; acing an easy one barely moves you. Score, radar, and leaderboard never disagree."],
   ["shield", "Built to resist gaming",
-    "Jargon-salad scores single digits. Farming one topic damps your gains. Scoring is server-authoritative over an HMAC-signed step chain — you can’t forge a grade or skip a step."],
+    "Jargon-salad scores single digits. Farming one topic damps your gains. Scoring is server-authoritative over an HMAC-signed step chain, so you can’t forge a grade or skip a step."],
   ["clip", "Photo-of-work grading",
     "Snap a photo of your handwritten solution. A vision model reads your steps and grades the reasoning, with a graceful text fallback."],
   ["bulb", "Learn, don’t leak",
-    "Stuck? It won’t hand you the answer — it asks the right question and teaches the one concept you’re missing, with the proof or derivation behind it."],
+    "Stuck? It won’t hand you the answer; it asks the right question and teaches the one concept you’re missing, with the proof or derivation behind it."],
 ];
 
 const AXES = [
@@ -95,16 +95,28 @@ const PRO_FEATURES = [
 ];
 
 const FAQ = [
-  ["Does a wrong answer really score higher?",
-    "Yes. Sound reasoning on the right method beats a lucky number with none — the grader scores the path, not just the destination. The final answer is graded separately and weighted lightly."],
+  ["How are my answers evaluated?", (
+    <>
+      <p>Your reasoning is graded, not whether the final number is right. The pipeline is deterministic and server-authoritative:</p>
+      <ol>
+        <li><strong>Screen.</strong> Blank, “I don’t know,” off-topic, or gibberish answers are caught by a deterministic check (no model call) and scored 0.</li>
+        <li><strong>The grader solves it first.</strong> A fixed model, run at temperature 0 (identical work gives an identical score), works the problem itself: principle, step-by-step solution with units, and a calculator expression the server re-evaluates to verify the arithmetic, before it judges your work.</li>
+        <li><strong>It types every flaw.</strong> Comparing your work to its own solution, it labels each error conceptual, strategic, reasoning, execution-slip, or communication, using its own computed numbers to tell a slip from a broken inference.</li>
+        <li><strong>It scores nine axes 0–4, path-independently.</strong> A matching final answer can’t raise an axis; a non-matching one can’t lower a sound chain.</li>
+        <li><strong>The server computes the score</strong> (the model emits none) as a transparent weighted sum: Principle ×5, Justification ×4, Logic ×4, Strategy ×3, Verification ×3, Comprehension ×2, Method ×2, Computation ×1, Communication ×1. The weights total 25, so it lands on 0–100 and every axis contributes weight × value points. Computation’s weight of 1 means a pure arithmetic slip costs 4 points or less; the conceptual axes (Principle plus Justification = 9) and Logic dominate.</li>
+      </ol>
+      <p><strong>Anti-gaming:</strong> a name-dropped formula or jargon with no valid derivation scores 0 on Principle, Justification, and Logic; length never raises a score.</p>
+      <p><strong>Score to rank:</strong> each axis is a Glicko-2 rating and the question is the rated opponent (its difficulty is its rating on the same 0–350 scale). Your axis ratings update against it, then combine, by the same weights, into your 0–350 subject rank, and difficulty self-calibrates from how everyone performs on each item.</p>
+    </>
+  )],
   ["Do I need an account?",
-    "No. The whole flow runs as a guest in your browser. Sign in to keep your rank across devices — your guest progress carries over automatically on first sign-in."],
+    "No. The whole flow runs as a guest in your browser. Sign in to keep your rank across devices, and your guest progress carries over automatically on first sign-in."],
   ["How is my rank calculated?",
     "Nine per-axis Glicko-2 ratings per subject, each judged against the problem’s difficulty, aggregated into a single 0–350 score. Difficulty self-calibrates from how the whole population performs on each item."],
   ["Which subjects are covered?",
-    "Mathematics, physics, and chemistry today — each spanning Elementary through Doctorate level."],
+    "Mathematics, physics, and chemistry today, each spanning Elementary through Doctorate level."],
   ["Can I trust the rank?",
-    "It’s built to be. Server-authoritative scoring, a signed diagnostic chain, and anti-farm damping make the number hard to game — and meaningful to share."],
+    "It’s built to be. Server-authoritative scoring, a signed diagnostic chain, and anti-farm damping make the number hard to game, and meaningful to share."],
 ];
 
 export default function Landing({
@@ -215,7 +227,7 @@ export default function Landing({
             <span className="np-lp-h1line"><em>Understand everything.</em></span>
           </h1>
           <p className="np-lp-sub">
-            Real problems in math, physics, and chemistry, graded on how you reason — not what you
+            Real problems in math, physics, and chemistry, graded on how you reason, not what you
             recall. noobtopro pinpoints your level, then gives you a structured path from where you
             are to Doctorate-level mastery.
           </p>
@@ -263,7 +275,7 @@ export default function Landing({
             <span className="np-lp-eyebrow">The engine</span>
             <h2 className="np-lp-h2">Reasoning is the unit of measurement.</h2>
             <p className="np-lp-lede">
-              Most apps check the final answer. noobtopro models the path you took to get there —
+              Most apps check the final answer. noobtopro models the path you took to get there,
               and that is what it scores, calibrates, and ranks.
             </p>
           </div>
@@ -295,7 +307,7 @@ export default function Landing({
             <h2 className="np-lp-h2">One scale, 0 to 350.</h2>
             <p className="np-lp-lede np-lp-lede--center">
               Every subject lives on the same 0–350 scale, split into five curriculum ranks.
-              The label is earned per subject — and it never stops moving.
+              The label is earned per subject, and it never stops moving.
             </p>
           </div>
           <div className="np-lp-scale" aria-hidden="true" data-revealbar>
