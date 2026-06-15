@@ -575,20 +575,27 @@ body {
    DISTINCT leading glyph (✓ / … / !) so hue alone never carries the meaning
    (WCAG 1.4.1). */
 .np-concepttag--green,
+.np-concepttag--assumed,
 .np-concepttag--yellow,
 .np-concepttag--red { gap: 7px; }
 .np-concepttag--green::before,
+.np-concepttag--assumed::before,
 .np-concepttag--yellow::before,
 .np-concepttag--red::before {
   font-weight: 700; font-size: 11px; line-height: 1; flex: none;
 }
 .np-concepttag--green::before  { content: "✓"; }
+.np-concepttag--assumed::before { content: "✓"; }
 .np-concepttag--yellow::before { content: "…"; }
 .np-concepttag--red::before    { content: "!"; }
 .np-concepttag--green  { border-color: var(--phys);   color: var(--phys);   background: var(--phys-soft); }
+/* Assumed (inferred, not demonstrated): the mastered green, but HOLLOW + dashed so
+   it reads as tentative — distinct from earned solid green at a glance. */
+.np-concepttag--assumed { border-color: var(--phys); border-style: dashed; color: var(--phys); background: transparent; }
 .np-concepttag--yellow { border-color: var(--math);   color: var(--math);   background: var(--math-soft); }
 .np-concepttag--red    { border-color: var(--danger-border); color: var(--danger); background: var(--danger-soft); }
 .np-concepttag--green:hover  { border-color: var(--phys);   background: var(--phys-soft); }
+.np-concepttag--assumed:hover { border-color: var(--phys); background: var(--phys-soft); }
 .np-concepttag--yellow:hover { border-color: var(--math);   background: var(--math-soft); }
 .np-concepttag--red:hover    { border-color: var(--danger); background: var(--danger-soft); }
 
@@ -600,12 +607,14 @@ body {
 }
 .np-masterylegend-item::before { font-weight: 700; font-size: 11px; line-height: 1; flex: none; content: "·"; }
 .np-masterylegend--green::before  { content: "✓"; color: var(--phys); }
+.np-masterylegend--assumed::before { content: "✓"; color: var(--phys); opacity: 0.55; }
 .np-masterylegend--yellow::before { content: "…"; color: var(--math); }
 .np-masterylegend--red::before    { content: "!"; color: var(--danger); }
 
 /* Concept-page mastery status line + the "build the foundations first" card. */
 .np-masterystatus { font-size: 13.5px; margin: -4px 0 14px; color: var(--muted); }
 .np-masterystatus--green  { color: var(--phys); }
+.np-masterystatus--assumed { color: var(--phys); opacity: 0.8; font-style: italic; }
 .np-masterystatus--yellow { color: var(--math); }
 .np-masterystatus--red    { color: var(--danger); }
 .np-masterywarn { border-color: var(--danger-border); margin-bottom: 16px; }

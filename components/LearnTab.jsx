@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { SUBJECTS, ORDER } from "@/lib/scoring";
 import { RANKS, RANK_LABELS, conceptsFor, isRankWip, WIP_RANKS_NOTE, rootsFor, crossRootsFor } from "@/lib/curriculum";
-import { conceptState, MASTERY_LABELS } from "@/lib/mastery";
+import { conceptState, assumedMasteredKeys, MASTERY_LABELS } from "@/lib/mastery";
 import { rankCoverage } from "@/lib/promotion";
 import { loadGuide } from "@/lib/guides";
 import { loadMastery } from "@/lib/store";
@@ -54,7 +54,21 @@ export default function LearnTab({ onPractice, busyConcept = null, openConcept =
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openConcept]);
 
-  const stateFor = (subject, key) => conceptState(mastery, subject, key);
+  // Per-subject set of elementary concepts INFERRED as mastered from the learner's
+  // demonstrated work (assumedMasteredKeys) — recomputed only when mastery changes.
+  const assumed = useMemo(() => {
+    const m = {};
+    for (const subject of ORDER) m[subject] = assumedMasteredKeys(mastery, subject);
+    return m;
+  }, [mastery]);
+
+  // Effective display state: a direct attempt always wins; an untouched (grey)
+  // elementary concept that's a prerequisite of demonstrated work shows as "assumed".
+  const stateFor = (subject, key) => {
+    const s = conceptState(mastery, subject, key);
+    if (s === "grey" && assumed[subject] && assumed[subject].has(key)) return "assumed";
+    return s;
+  };
 
   if (selected) {
     return (
@@ -100,6 +114,7 @@ function ConceptChip({ subject, concept, state, onOpen, titleExtra, namePrefix }
 // the concept chips, so the legend teaches the encoding while it filters.
 const FILTER_STATES = [
   ["green", "Mastered"],
+  ["assumed", "Assumed"],
   ["yellow", "In progress"],
   ["red", "Struggling"],
   ["grey", "Not attempted"],
@@ -154,7 +169,7 @@ function UpNext({ mastery, stateFor, onOpen }) {
         const rank = currentRankFor(mastery, subject);
         const next = conceptsFor(subject, rank)
           .map((c) => ({ ...c, state: stateFor(subject, c.key) }))
-          .filter((c) => c.state !== "green")
+          .filter((c) => c.state !== "green" && c.state !== "assumed") // mastered (earned or assumed) isn't "up next"
           .sort((a, b) => (PRIORITY[a.state] ?? 3) - (PRIORITY[b.state] ?? 3))
           .slice(0, 3);
         return (
