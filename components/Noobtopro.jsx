@@ -17,12 +17,21 @@ import {
 } from "@/lib/scoring";
 import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData, loadReviews, loadMastery } from "@/lib/store";
 import { getSupabase, isSupabaseConfigured, signInWithProvider, signOutUser, PROVIDERS } from "@/lib/supabase";
+import dynamic from "next/dynamic";
 import Icon from "@/components/Icon";
-import Dashboard from "@/components/Dashboard";
 import SignIn from "@/components/SignIn";
-import LearnTab from "@/components/LearnTab";
-import AdminDashboard from "@/components/AdminDashboard";
 import ScoreBreakdown, { ErrorList, hasReasoningError } from "@/components/ScoreBreakdown";
+
+// PERF (INP / First Load JS): the Dashboard, Learn, and Admin views are only ever
+// mounted AFTER the user navigates to them — the landing, the adaptive diagnostic,
+// and the practice flow never render them. Statically importing them forced every
+// first-time visitor to download, parse, and hydrate all of that code (plus their
+// own deps: charts, the leaderboard, the curriculum browser) on the critical path,
+// inflating main-thread time and Interaction-to-Next-Paint. Code-splitting them
+// into on-demand chunks keeps the initial `/` bundle to just the landing + flow.
+const Dashboard = dynamic(() => import("@/components/Dashboard"), { loading: () => <Loader subject="dashboard" /> });
+const LearnTab = dynamic(() => import("@/components/LearnTab"), { loading: () => <Loader subject="learn" /> });
+const AdminDashboard = dynamic(() => import("@/components/AdminDashboard"), { loading: () => <Loader subject="admin" /> });
 import Landing from "@/components/Landing";
 import TopNav from "@/components/TopNav";
 import { useScrolled } from "@/components/useReveal";
