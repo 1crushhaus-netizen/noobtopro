@@ -12,6 +12,7 @@ const store = vi.hoisted(() => ({
   deleteAllUserData: vi.fn(async () => ({ ok: true })),
   loadMastery: vi.fn(async () => ({ mastery: {} })),
   loadReviews: vi.fn(async () => ({ reviews: [] })),
+  loadSubscription: vi.fn(async () => ({ subscription: null })),
 }));
 vi.mock("@/lib/store", () => store);
 vi.mock("@/lib/supabase", () => ({

@@ -298,6 +298,9 @@ export default function Dashboard({
   user,
   scores,
   history = [],
+  isPro = false,
+  proEnabled = false,
+  upgradeBusy = false,
   loadLeaderboard,
   loadReviews,
   loadMastery,
@@ -306,10 +309,16 @@ export default function Dashboard({
   onLearn,
   onReset,
   onSignIn,
+  onUpgrade,
+  onManageSubscription,
   onClose,
   onOverlayActiveChange,
 }) {
   const [imgFailed, setImgFailed] = useState(false);
+  // Pro features (trends over time + answer history) are locked only when the paid tier
+  // is live AND this user isn't subscribed. A Pro subscriber is never locked; a
+  // deployment that doesn't sell Pro (proEnabled=false) keeps everything open as before.
+  const proLocked = proEnabled && !isPro;
   // Which slide-over drawer is open: null | "charts" | "reviews".
   const [drawer, setDrawer] = useState(null);
   // Tasteful staggered scroll-reveal for the bento's main panels (shared hook).
@@ -421,7 +430,14 @@ export default function Dashboard({
     <div className={"fade-up np-dash-frame" + (armed ? " is-armed" : "")} ref={revealRef}>
       <div className="np-pagehead np-dash-pagehead">
         <span className="np-eyebrow--mono">Where you stand</span>
-        <h2 className="np-h2">Your dashboard</h2>
+        <h2 className="np-h2">
+          Your dashboard
+          {isPro && (
+            <span className="np-dash-rankchip" style={{ marginLeft: 10, verticalAlign: "middle" }} title="You're a Pro subscriber">
+              Pro
+            </span>
+          )}
+        </h2>
         <p className="np-lede">Your scores, reasoning profile, rank, and recent progress, all in one place.</p>
       </div>
       <div className="np-dash">
@@ -437,12 +453,28 @@ export default function Dashboard({
           <RecentMoves history={history} />
         </div>
         <div className="np-dash-actions">
-          <button className="np-btn np-secondary np-dash-actbtn" onClick={() => setDrawer("charts")}>
-            See trends <Icon name="arrow" size={16} />
-          </button>
-          <button className="np-btn np-secondary np-dash-actbtn" onClick={() => setDrawer("reviews")}>
-            Review your answers <Icon name="arrow" size={16} />
-          </button>
+          {/* Trends-over-time + answer history are PRO features — but ONLY when the paid
+              tier is live (proEnabled). When locked, the buttons show a lock and open the
+              upgrade flow instead of the drawer (the drawer's data is never fetched for
+              them). When Pro isn't sold (proEnabled=false) they behave exactly as before. */}
+          {proLocked ? (
+            <button className="np-btn np-secondary np-dash-actbtn" onClick={onUpgrade} title="Pro feature — upgrade to unlock">
+              <Icon name="lock" size={14} /> See trends
+            </button>
+          ) : (
+            <button className="np-btn np-secondary np-dash-actbtn" onClick={() => setDrawer("charts")}>
+              See trends <Icon name="arrow" size={16} />
+            </button>
+          )}
+          {proLocked ? (
+            <button className="np-btn np-secondary np-dash-actbtn" onClick={onUpgrade} title="Pro feature — upgrade to unlock">
+              <Icon name="lock" size={14} /> Review your answers
+            </button>
+          ) : (
+            <button className="np-btn np-secondary np-dash-actbtn" onClick={() => setDrawer("reviews")}>
+              Review your answers <Icon name="arrow" size={16} />
+            </button>
+          )}
           {/* Re-take the diagnostic to re-baseline. The replace-your-scores confirmation
               lives in beginDiagnostic (FIX 6) so it fires from every entry point. */}
           {onStartDiagnostic && (
@@ -450,9 +482,20 @@ export default function Dashboard({
               Re-take diagnostic <Icon name="arrow" size={16} />
             </button>
           )}
+          {/* Pro status / upgrade. Only shown once the paid tier is live; Pro subscribers
+              get "Manage subscription", free users get the upgrade CTA. */}
+          {isPro ? (
+            <button className="np-btn np-secondary np-dash-actbtn" style={{ marginLeft: "auto" }} onClick={onManageSubscription} disabled={upgradeBusy}>
+              <Icon name="spark" size={14} /> {upgradeBusy ? "Opening…" : "Manage subscription"}
+            </button>
+          ) : proEnabled ? (
+            <button className="np-btn np-primary np-dash-actbtn" style={{ marginLeft: "auto" }} onClick={onUpgrade} disabled={upgradeBusy}>
+              <Icon name="spark" size={14} /> {upgradeBusy ? "Starting…" : "Upgrade to Pro"}
+            </button>
+          ) : null}
           <button
             className="np-btn np-danger np-dash-actbtn"
-            style={{ marginLeft: "auto" }}
+            style={isPro || proEnabled ? undefined : { marginLeft: "auto" }}
             onClick={() => {
               if (window.confirm("This permanently deletes all your scores and history. Continue?")) onReset && onReset();
             }}

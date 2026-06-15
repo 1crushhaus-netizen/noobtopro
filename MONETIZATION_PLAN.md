@@ -1,13 +1,34 @@
 # noobtopro — Monetization Plan: the paid "Pro" tier (Polar.sh)
 
-**Status: FOUNDATION SCAFFOLDED.** This change lays the entitlement groundwork only — the
-`subscriptions` table + `upsert_subscription` RPC (`db/schema.sql`, migration `0017`), the
-server-side gate helpers (`lib/entitlements.js`), and the `POLAR_*` env scaffolding
-(`.env.example`). **It changes nothing a user sees.** The checkout flow, the Polar webhook,
-the enforced free limit, and the UI wiring are the follow-up steps below.
+**Status: IMPLEMENTED (pending config + a sandbox verification pass).** The full Pro loop is
+built: the entitlement foundation (the `subscriptions` table + `upsert_subscription` RPC in
+`db/schema.sql` / migration `0017`, the `lib/entitlements.js` gate) PLUS the checkout route
+(`app/api/checkout`), the signature-verified Polar webhook (`app/api/webhooks/polar` →
+`lib/polarWebhook.js`), the customer portal (`app/api/portal`), the server-enforced gates
+(free daily practice cap + Pro-only photo grading in `app/api/score` & `app/api/grade`), and
+the UI (Landing `$9.99/mo` card, Dashboard Pro badge + Manage/Upgrade + the trends/history
+gate, the 402 upgrade nudge). The `@polar-sh/sdk` is wired through `lib/polar.js`.
 
-The marketing for Pro is already live (`components/Landing.jsx` — the Free vs Pro pricing
-section, the "Join the waitlist" CTA). This plan turns that promise into a working product.
+**It is INERT until configured.** Deny-by-default: the gates only bite when Pro is actually
+sellable (`POLAR_ACCESS_TOKEN` + `POLAR_PRODUCT_ID_PRO` set), and the client only shows Pro UI
+when `NEXT_PUBLIC_PRO_ENABLED=true`. So nothing a user sees changes until the owner flips those
+on. **Decided pricing: $9.99/month, monthly-only, built against Polar SANDBOX first.**
+
+### What's left to go live (owner / config — no more app code)
+1. **Create the Pro product in Polar (sandbox)** → copy its id to `POLAR_PRODUCT_ID_PRO`.
+   (A monthly `$9.99` recurring product. This is the one step that needs the Polar dashboard
+   or the Polar MCP `polar_products_create`.)
+2. **Set the env** in Vercel (Sensitive): `POLAR_ACCESS_TOKEN`, `POLAR_SERVER=sandbox`,
+   `POLAR_PRODUCT_ID_PRO`, `POLAR_SUCCESS_URL=https://<domain>/?checkout=success`,
+   `NEXT_PUBLIC_PRO_ENABLED=true`. (`SUPABASE_SERVICE_ROLE_KEY` is already required.)
+3. **Create the webhook endpoint** in Polar → `https://<domain>/api/webhooks/polar`, subscribe
+   the `subscription.*` events → put its signing secret in `POLAR_WEBHOOK_SECRET`.
+4. **Apply migration `0017`** to Supabase (the `subscriptions` table + `upsert_subscription`).
+5. **Verify the sandbox loop** (test card → webhook flips the row → gates open; cancel → close),
+   then create the production product, set `POLAR_SERVER=production` + prod token/secret, redeploy.
+
+The marketing for Pro was already live (`components/Landing.jsx`); this change turns that
+promise into a working product.
 
 ---
 
