@@ -109,7 +109,7 @@ describe("LearnTab — concept page + root navigation", () => {
     openConcept("Stoichiometry");
     expect(screen.getByRole("heading", { name: "Stoichiometry" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /back to concepts/i }));
-    expect(screen.getByRole("heading", { name: "Learn" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "The concept library" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Place value & the base-ten system" })).toBeTruthy();
   });
 });
@@ -131,11 +131,11 @@ describe("LearnTab — mastery coloring (RANKS_PLAN §12.1)", () => {
     // The colored concepts live in collapsed ranks — expand Middle and High first.
     fireEvent.click(screen.getByRole("button", { name: /^Middle / }));
     fireEvent.click(screen.getByRole("button", { name: /^High / }));
-    const green = screen.getByRole("button", { name: /^Quadratic functions & equations — Mastered/i });
+    const green = screen.getByRole("button", { name: /^Quadratic functions & equations: Mastered/i });
     expect(green.className).toContain("np-concepttag--green");
-    const yellow = screen.getByRole("button", { name: /Algebraic expressions — In progress/i });
+    const yellow = screen.getByRole("button", { name: /Algebraic expressions: In progress/i });
     expect(yellow.className).toContain("np-concepttag--yellow");
-    const red = screen.getByRole("button", { name: /Ratios & unit rates — Struggling/i });
+    const red = screen.getByRole("button", { name: /Ratios & unit rates: Struggling/i });
     expect(red.className).toContain("np-concepttag--red");
     // An untouched concept keeps its plain accessible name and no state class.
     const grey = screen.getByRole("button", { name: "Place value & the base-ten system" });
@@ -154,7 +154,7 @@ describe("LearnTab — mastery coloring (RANKS_PLAN §12.1)", () => {
       mastery: { math: { quadratics: { attempts: 1, greenHits: 0, lastQuality: 10, bestQuality: 10 } } },
     });
     await renderTab();
-    openConcept("Quadratic functions", /Quadratic functions & equations — Struggling/i);
+    openConcept("Quadratic functions", /Quadratic functions & equations: Struggling/i);
     expect(screen.getByText(/build the foundations first/i)).toBeTruthy();
     expect(screen.getByText(/root concepts below/i)).toBeTruthy();
     expect(screen.getByText(/understand these first/i)).toBeTruthy(); // the roots card is right there
@@ -163,7 +163,7 @@ describe("LearnTab — mastery coloring (RANKS_PLAN §12.1)", () => {
   it("a green concept's page shows the mastered status line and NO warning", async () => {
     mocks.loadMastery.mockResolvedValue({ mastery: MASTERY });
     await renderTab();
-    openConcept("Quadratic functions", /Quadratic functions & equations — Mastered/i);
+    openConcept("Quadratic functions", /Quadratic functions & equations: Mastered/i);
     expect(screen.getByText(/clear understanding shown/i)).toBeTruthy();
     expect(screen.queryByText(/build the foundations first/i)).toBeNull();
   });
@@ -257,7 +257,7 @@ describe("LearnTab — cross-subject root concepts (§12.2 enhancement)", () => 
     });
     await renderTab();
     openConcept("Acids & bases", "Acids & bases (intro)"); // chemistry · high → math logarithms
-    const chip = screen.getByRole("button", { name: /Mathematics: Logarithms & logarithmic functions — Mastered/i });
+    const chip = screen.getByRole("button", { name: /Mathematics: Logarithms & logarithmic functions: Mastered/i });
     expect(chip.className).toContain("np-concepttag--green");
   });
 
@@ -306,7 +306,7 @@ describe("LearnTab — mastery-calibrated drill (RANKS_PLAN §6)", () => {
     });
     const onPractice = vi.fn();
     await act(async () => { render(<LearnTab onPractice={onPractice} />); });
-    openConcept("Quadratic functions", /Quadratic functions & equations — Mastered/i);
+    openConcept("Quadratic functions", /Quadratic functions & equations: Mastered/i);
     expect(screen.getByText(/stretch question one notch up/i)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /practice this concept/i }));
     expect(onPractice.mock.calls[0][0]).toMatchObject({ key: "quadratics", masteryState: "green" });
@@ -317,7 +317,7 @@ describe("LearnTab — mastery-calibrated drill (RANKS_PLAN §6)", () => {
       mastery: { math: { quadratics: { attempts: 1, greenHits: 0, lastQuality: 10, bestQuality: 10 } } },
     });
     await renderTab();
-    openConcept("Quadratic functions", /Quadratic functions & equations — Struggling/i);
+    openConcept("Quadratic functions", /Quadratic functions & equations: Struggling/i);
     expect(screen.getByText(/one notch gentler/i)).toBeTruthy();
   });
 });

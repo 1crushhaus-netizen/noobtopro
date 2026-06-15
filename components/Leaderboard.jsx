@@ -19,7 +19,7 @@ const TRACK_DEFS = [
   ...ORDER.map((k) => ({ key: k, label: SUBJECTS[k].label, color: SUBJECTS[k].color, glyph: SUBJECTS[k].glyph })),
 ];
 
-export default function Leaderboard({ loadLeaderboard, scrollRegion }) {
+export default function Leaderboard({ loadLeaderboard }) {
   const [tiers, setTiers] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -77,10 +77,10 @@ export default function Leaderboard({ loadLeaderboard, scrollRegion }) {
       <div className="np-dash-cardhead">
         <div className="np-charttitle" style={{ marginBottom: 6 }}>Leaderboard</div>
         <div className="np-chartsub" style={{ marginBottom: 0 }}>
-          How everyone ranked is distributed across the five ranks — anonymous by design. The dot on each curve is you.
+          How everyone ranked is distributed across the five ranks, anonymous by design. The dot on each curve is you.
         </div>
       </div>
-      <div className="np-dash-cardbody" tabIndex={scrollRegion ? 0 : undefined} role="region" aria-label="Leaderboard rankings">
+      <div className="np-dash-cardbody" role="region" aria-label="Leaderboard rankings">
         {loading ? (
           <p className="np-statsub" role="status" aria-live="polite">Loading the leaderboard…</p>
         ) : error ? (
@@ -108,7 +108,7 @@ export default function Leaderboard({ loadLeaderboard, scrollRegion }) {
               ) : youBand != null ? (
                 <>
                   You're <strong style={{ color: "var(--text)" }}>{RANKS[youBand]}</strong> overall
-                  {topPct != null ? <> — top {topPct}%</> : null} of {total} ranked
+                  {topPct != null ? <>, top {topPct}%</> : null} of {total} ranked
                 </>
               ) : (
                 "Complete the diagnostic to take your place."
@@ -116,7 +116,7 @@ export default function Leaderboard({ loadLeaderboard, scrollRegion }) {
             </div>
           </>
         ) : (
-          <p className="np-statsub">No ranked learners yet — be the first.</p>
+          <p className="np-statsub">No ranked learners yet. Be the first.</p>
         )}
       </div>
     </div>

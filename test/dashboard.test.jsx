@@ -95,7 +95,7 @@ describe("Dashboard — §7 curriculum breadth gate (by-subject, display-layer)"
     render(<Dashboard user={user} scores={scores} history={history} onPractice={() => {}} />);
     // math score 210 → depth says University, but nothing is mastered → chip gated down.
     expect(screen.getAllByText("Elementary").length).toBeGreaterThan(0);
-    expect(screen.getByText(/Score at University — master the 21 remaining Elementary concepts in Learn to advance/)).toBeTruthy();
+    expect(screen.getByText(/Score at University: master the 21 remaining Elementary concepts in Learn to advance/)).toBeTruthy();
     // The score itself is NOT capped (§11.3 Option B — label gating only).
     expect(screen.getAllByText("210").length).toBeGreaterThan(0);
   });

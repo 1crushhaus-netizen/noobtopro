@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState } from "react";
 import Icon from "@/components/Icon";
-import ThemeToggle from "@/components/ThemeToggle";
+import TopNav from "@/components/TopNav";
+import { useScrollReveal, useScrolled } from "@/components/useReveal";
 import { SubjectGlyph } from "@/components/ui";
 import { ORDER, SUBJECTS } from "@/lib/scoring";
 
@@ -184,47 +185,11 @@ export default function Landing({
   onDismissAuthNote,
 }) {
   const [openFaq, setOpenFaq] = useState(null);
-  const [armed, setArmed] = useState(false);
-  const [scrolled, setScrolled] = useState(false);
-  const rootRef = useRef(null);
-
-  // Scroll-reveal + nav-condense wiring. Runs after first paint, so the page
-  // renders fully visible first (JS-off / crawler safe) and only then arms the
-  // hidden-until-revealed state.
-  useEffect(() => {
-    setArmed(true);
-    const root = rootRef.current;
-    let obs;
-    if (root) {
-      const targets = root.querySelectorAll("[data-reveal],[data-revealbar]");
-      if ("IntersectionObserver" in window) {
-        obs = new IntersectionObserver(
-          (entries) => {
-            for (const e of entries) {
-              if (e.isIntersecting) {
-                // Mark revealed with a data ATTRIBUTE, not a class: React never
-                // touches attributes absent from the JSX, so this survives a
-                // re-render that rewrites className (e.g. toggling a FAQ open).
-                e.target.setAttribute("data-inview", "");
-                obs.unobserve(e.target);
-              }
-            }
-          },
-          { rootMargin: "0px 0px -10% 0px", threshold: 0.01 }
-        );
-        targets.forEach((el) => obs.observe(el));
-      } else {
-        targets.forEach((el) => el.setAttribute("data-inview", ""));
-      }
-    }
-    const onScroll = () => setScrolled(window.scrollY > 8);
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      if (obs) obs.disconnect();
-      window.removeEventListener("scroll", onScroll);
-    };
-  }, []);
+  // Scroll-reveal + nav-condense, via the shared motion hooks (one source of
+  // truth with the signed-in app). The reveal arms after first paint, so the
+  // page renders fully visible first (JS-off / crawler safe).
+  const { ref: rootRef, armed } = useScrollReveal();
+  const scrolled = useScrolled();
 
   // FAQPage JSON-LD for answer engines (AI Overviews, ChatGPT, Perplexity). Built from
   // the plain-text answers; characters that could break out of <script> are unicode-
@@ -242,31 +207,19 @@ export default function Landing({
   return (
     <div className={"np-lp" + (armed ? " is-armed" : "")} ref={rootRef}>
       <script type="application/ld+json">{faqLd}</script>
-      {/* ----------------------------- nav ----------------------------- */}
-      <header className={"np-lp-nav" + (scrolled ? " is-scrolled" : "")}>
-        <div className="np-lp-navinner">
-          <a className="np-brand np-lp-brand" href="#top">
-            noob<span className="np-arrow">→</span>topro
-          </a>
-          <nav className="np-lp-navlinks" aria-label="Sections">
-            <a href="#how">How it works</a>
-            <a href="#engine">The engine</a>
-            <a href="#ranks">Ranks</a>
-            <a href="#pricing">Pricing</a>
-          </nav>
-          <div className="np-lp-navactions">
-            <ThemeToggle />
-            {!user && (
-              <button className="np-signinbtn np-lp-navsignin" onClick={onSignIn}>
-                <Icon name="login" size={16} /> Sign in
-              </button>
-            )}
-            <button className="np-btn np-primary np-lp-navcta" onClick={onProveIt} disabled={busy}>
-              {busy ? "Setting up…" : "Get started"}
-            </button>
-          </div>
-        </div>
-      </header>
+      {/* ----------------------------- nav (shared TopNav) ----------------------------- */}
+      <TopNav
+        scrolled={scrolled}
+        brandHref="#top"
+        links={[
+          { label: "How it works", href: "#how" },
+          { label: "The engine", href: "#engine" },
+          { label: "Ranks", href: "#ranks" },
+          { label: "Pricing", href: "#pricing" },
+        ]}
+        signIn={!user ? { onClick: onSignIn, label: "Sign in" } : undefined}
+        cta={{ label: busy ? "Setting up…" : "Get started", onClick: onProveIt, disabled: busy }}
+      />
 
       {(error || showAuthNote) && (
         <div className="np-lp-container np-lp-banners">
@@ -521,7 +474,7 @@ export default function Landing({
       {/* ----------------------------- footer ----------------------------- */}
       <footer className="np-lp-foot">
         <div className="np-lp-footinner">
-          <a className="np-brand np-lp-brand" href="#top">
+          <a className="np-brand np-topnav-brand" href="#top">
             noob<span className="np-arrow">→</span>topro
           </a>
           <span className="np-lp-foot-tag">Prove what you know. Climb from noob to pro.</span>
