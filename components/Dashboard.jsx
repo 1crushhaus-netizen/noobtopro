@@ -267,7 +267,7 @@ function RecentMoves({ history }) {
     .map((a) => ({ subject: a.subject, delta: Math.round(a.delta || 0), rationale: a.rationale }));
 
   return (
-    <div className="np-card np-dash-panel">
+    <div className="np-card np-dash-panel np-dash-moves">
       <div className="np-dash-cardhead">
         <div className="np-charttitle" style={{ marginBottom: 4 }}>Why your rank moved</div>
         <div className="np-chartsub" style={{ marginBottom: 0 }}>Your latest graded attempts, and why each gained or cost points.</div>
@@ -431,10 +431,10 @@ export default function Dashboard({
         <RadarPanel scores={scores} onPractice={onPractice} onLearn={onLearn} />
         <div className="np-dash-mid" data-reveal style={{ "--ri": 1 }}>
           <BySubject scores={scores} mastery={mastery} onPractice={onPractice} />
-          <RecentMoves history={history} />
+          <Leaderboard loadLeaderboard={loadLeaderboard} />
         </div>
         <div className="np-dash-lead" data-reveal style={{ "--ri": 2 }}>
-          <Leaderboard loadLeaderboard={loadLeaderboard} />
+          <RecentMoves history={history} />
         </div>
         <div className="np-dash-actions">
           <button className="np-btn np-secondary np-dash-actbtn" onClick={() => setDrawer("charts")}>

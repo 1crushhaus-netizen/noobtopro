@@ -703,6 +703,9 @@ body {
 .np-dash-focus { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 6px; }
 .np-dash-focusrow { display: flex; align-items: center; gap: 8px; }
 .np-dash-cardhead { margin-bottom: 10px; }
+/* "Why your rank moved" can run long; it sits in the right column and scrolls
+   internally so it never stretches the page (head stays fixed, the list scrolls). */
+.np-dash-moves .np-dash-cardbody { max-height: 460px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding-right: 4px; }
 
 /* ---- dashboard slide-over drawers (trends + answer review) ---- */
 .np-drawer-backdrop {
