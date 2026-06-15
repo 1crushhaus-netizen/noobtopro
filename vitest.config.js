@@ -11,6 +11,8 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["test/**/*.test.{js,jsx}"],
+    // Resets the jsdom URL between tests (see test/setup.js); harmless in node.
+    setupFiles: ["./test/setup.js"],
   },
   resolve: {
     alias: { "@": root },
