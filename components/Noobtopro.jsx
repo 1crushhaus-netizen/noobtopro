@@ -443,6 +443,12 @@ function LearnConceptGuide({ concept, content, busy, error, onPractice, onBrowse
   );
 }
 
+// The app-shell view tabs that map 1:1 onto a URL hash (#practice / #learn /
+// #dashboard / #admin). Kept distinct from the marketing landing's section anchors
+// (#top / #how / #engine / #ranks / #pricing) so the two uses of the hash never
+// collide.
+const VIEW_HASHES = ["practice", "learn", "dashboard", "admin"];
+
 /* ----------------------------- app ----------------------------- */
 export default function Noobtopro() {
   const [stage, setStage] = useState("intro"); // intro | signin | diagnostic | scoring | dashboard | practice
@@ -600,6 +606,30 @@ export default function Noobtopro() {
     answersRef.current = answers;
     pImgRef.current = pImg;
   });
+
+  // Keep the URL hash in sync with the active app view, so the address bar shows
+  // where you are — #dashboard on the Dashboard, not a stale landing anchor like
+  // #pricing left over from the marketing nav — and so #practice / #learn /
+  // #dashboard deep-link straight into that tab. The view tabs are
+  // <button onClick={setView}> (TopNav) which never touched the URL, and nothing
+  // read it back; these two effects close that gap. The marketing landing's own
+  // section anchors (#how, #engine, #ranks, #pricing) are left untouched — they
+  // only apply while the landing is mounted (stage "intro" on a practice-ish view).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const h = window.location.hash.replace(/^#/, "");
+    if (VIEW_HASHES.includes(h)) setView(h);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    // Mirror the render gate for the marketing landing: while it's showing, the hash
+    // belongs to its section anchors, so don't overwrite it.
+    const landingShown = stage === "intro" && view !== "dashboard" && view !== "learn" && view !== "admin";
+    if (landingShown || stage === "signin") return;
+    const desired = `#${view}`;
+    if (window.location.hash !== desired) window.history.replaceState(null, "", desired);
+  }, [view, stage]);
 
   // Ask the server whether the signed-in user is an admin (deny-by-default). The
   // result only REVEALS the Admin tab — every admin action re-verifies server-side.
