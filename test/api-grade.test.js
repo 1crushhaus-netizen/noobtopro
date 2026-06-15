@@ -376,8 +376,11 @@ describe("POST /api/grade — model output is normalized", () => {
     expect(res.status).toBe(200);
     // Inspect the body actually sent to Groq: the reasoning must be capped well
     // below 50k chars (cap is 12k) so the prompt can't blow past the context window.
+    // The bounded curriculum concept list (weakConceptPromptBlock) is part of the
+    // prompt now, so the ceiling allows for it while still proving the learner's
+    // free-text is capped (12k, not the ~76k `giant`).
     const sentBody = fetchMock.mock.calls[0][1].body;
-    expect(sentBody.length).toBeLessThan(20_000);
+    expect(sentBody.length).toBeLessThan(30_000);
   });
 });
 
@@ -545,16 +548,20 @@ describe("POST /api/grade — difficulty band threading (diagnostic)", () => {
       subject: "math",
       score: 150, // a stray model score is now IGNORED — the headline is derived from the rubric
       rubric: RUBRIC_100, // all-4 → scoreFromRubric = 100
-      weakConcepts: ["limits", "  ", "epsilon-delta"],
+      // The grader now reports weakConcepts as CURRICULUM KEYS (chosen from the
+      // injected list); the route resolves them, drops blanks, and dedupes.
+      weakConcepts: ["limits_continuity", "  ", "derivatives"],
       comment: "ok",
     });
     const res = await POST(req(diagnosticBody({ difficulty: "advanced" })));
     expect(res.status).toBe(200);
-    // The captured upstream prompt carries the difficulty band line.
+    // The captured upstream prompt carries the difficulty band line AND the
+    // curriculum concepts the grader picks weakConcepts from (by key).
     expect(sentUserMessage(fetchMock)).toMatch(/difficulty band: advanced/i);
+    expect(sentUserMessage(fetchMock)).toMatch(/Curriculum concepts/i);
     const json = await res.json();
     expect(json.score).toBe(100); // = scoreFromRubric(all-4)
-    expect(json.weakConcepts).toEqual(["limits", "epsilon-delta"]); // blank dropped
+    expect(json.weakConcepts).toEqual(["limits_continuity", "derivatives"]); // keys; blank dropped
   });
 
   it("normalizes a missing difficulty to (unspecified) in the diagnostic prompt", async () => {

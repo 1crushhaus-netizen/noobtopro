@@ -17,6 +17,7 @@ import {
 } from "@/lib/scoring";
 import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData, loadReviews, loadMastery } from "@/lib/store";
 import { getSupabase, isSupabaseConfigured, signInWithProvider, signOutUser, PROVIDERS } from "@/lib/supabase";
+import { resolveConceptKey, conceptByKey, conceptLabel } from "@/lib/curriculum";
 import dynamic from "next/dynamic";
 import Icon from "@/components/Icon";
 import SignIn from "@/components/SignIn";
@@ -321,128 +322,6 @@ function Loader({ subject }) {
   );
 }
 
-// The DEEP-LINKED concept guide (FIX 1): when a "Learn this" link from the
-// dashboard radar, a review row, or a weak-concept chip is tapped, openLearn fetches
-// the shared /api/learn guide into learnContent — this renders THAT guide (overview,
-// key ideas, why it works, pitfalls, Socratic questions, and the bundled "try this"
-// practice question) instead of the generic curriculum browser. "Browse the full
-// library" clears the concept to fall back to <LearnTab>. Reuses the .np-lesson card
-// system shared with LearnTab's ConceptGuide so the two surfaces read identically.
-function LearnConceptGuide({ concept, content, busy, error, onPractice, onBrowse, onRetry }) {
-  const subject = concept && concept.subject;
-  const color = SUBJECTS[subject] ? SUBJECTS[subject].color : "var(--text)";
-  const browseLink = (
-    <button type="button" className="np-ghost" onClick={onBrowse}>
-      <Icon name="back" size={15} /> Browse the full library
-    </button>
-  );
-
-  if (busy) {
-    return (
-      <div className="fade-up">
-        {browseLink}
-        <div className="np-card fade-up" role="status" aria-live="polite" style={{ textAlign: "center", padding: "48px 24px" }}>
-          <div className="np-pulse" style={{ fontFamily: "var(--mono)", fontSize: 13, letterSpacing: 1, color: "var(--muted)" }}>
-            {subject ? subject.toUpperCase() : "LEARN"}
-          </div>
-          <div style={{ fontFamily: "var(--display)", fontSize: 22, marginTop: 10 }}>Building your concept guide…</div>
-        </div>
-      </div>
-    );
-  }
-
-  if (error || !content) {
-    return (
-      <div className="fade-up">
-        {browseLink}
-        <div className="np-card np-lesson" role="alert">
-          <div className="np-cardicon" style={{ color: "var(--danger)" }}>Couldn’t load this concept</div>
-          <p className="np-lessontext">{error || "The concept guide is unavailable right now."}</p>
-          <button type="button" className="np-btn np-secondary" style={{ marginTop: 10 }} onClick={onRetry}>Try again</button>
-        </div>
-      </div>
-    );
-  }
-
-  const tryThis = content.tryThisQuestion || null;
-  return (
-    <div className="fade-up">
-      {browseLink}
-
-      <div className="np-qmeta" style={{ marginTop: 14, marginBottom: 12 }}>
-        <SubjectGlyph subject={subject} />
-        <span className="np-metaline">{SUBJECTS[subject] ? SUBJECTS[subject].label.toUpperCase() : ""}</span>
-      </div>
-      <h2 className="np-h1" style={{ color }}>{content.concept}</h2>
-
-      {content.overview && (
-        <div className="np-card np-lesson">
-          <div className="np-cardicon" style={{ color }}>Overview</div>
-          <p className="np-lessontext">{content.overview}</p>
-        </div>
-      )}
-
-      {Array.isArray(content.keyIdeas) && content.keyIdeas.length > 0 && (
-        <div className="np-card np-lesson">
-          <div className="np-cardicon" style={{ color }}>Key ideas</div>
-          <ul className="np-selfqs">
-            {content.keyIdeas.map((idea, i) => <li key={i}>{idea}</li>)}
-          </ul>
-        </div>
-      )}
-
-      {content.whyItWorks && (
-        <div className="np-card np-lesson">
-          <div className="np-cardicon" style={{ color }}>Why it works</div>
-          <p className="np-lessontext">{content.whyItWorks}</p>
-        </div>
-      )}
-
-      {Array.isArray(content.pitfalls) && content.pitfalls.length > 0 && (
-        <div className="np-card np-lesson">
-          <div className="np-cardicon" style={{ color }}>Common pitfalls</div>
-          <ul className="np-selfqs">
-            {content.pitfalls.map((p, i) => <li key={i}>{p}</li>)}
-          </ul>
-        </div>
-      )}
-
-      {Array.isArray(content.socraticQuestions) && content.socraticQuestions.length > 0 && (
-        <div className="np-card np-lesson">
-          <div className="np-cardicon" style={{ color }}>Ask yourself</div>
-          <p className="np-lessontext" style={{ color: "var(--muted)", marginBottom: 10 }}>
-            Think these through before practicing. Explaining your reasoning out loud counts.
-          </p>
-          <ul className="np-selfqs">
-            {content.socraticQuestions.map((q, i) => <li key={i}>{q}</li>)}
-          </ul>
-        </div>
-      )}
-
-      <div className="np-card np-lesson">
-        <div className="np-cardicon" style={{ color }}>Practice this concept</div>
-        {content.tryThis && (
-          <p className="np-lessontext" style={{ color: "var(--muted)", marginBottom: 12 }}>{content.tryThis}</p>
-        )}
-        {tryThis && onPractice ? (
-          <button
-            type="button"
-            className="np-btn np-primary np-btn--subject"
-            style={{ "--subject": color }}
-            onClick={() => onPractice(subject, tryThis)}
-          >
-            Practice this concept
-          </button>
-        ) : (
-          <p className="np-hint" style={{ margin: 0 }}>
-            A practice question for this concept is coming soon. Explore the full library below in the meantime.
-          </p>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // The app-shell view tabs that map 1:1 onto a URL hash (#practice / #learn /
 // #dashboard / #admin). Kept distinct from the marketing landing's section anchors
 // (#top / #how / #engine / #ranks / #pricing) so the two uses of the hash never
@@ -478,15 +357,10 @@ export default function Noobtopro() {
   const [feedback, setFeedback] = useState(null);
   const [scoreDelta, setScoreDelta] = useState(null);
 
-  // Learn tab: a selected weak concept + its Socratic guidance.
-  const [learnConcept, setLearnConcept] = useState(null); // { subject, concept }
-  const [learnContent, setLearnContent] = useState(null);
-  const [learnBusy, setLearnBusy] = useState(false);
-  const [learnError, setLearnError] = useState("");
-  // The active "try this" practice question for the open concept ({question,
-  // targetConcept, difficulty, token}) — the bundled guide question wired to the
-  // deep-link's "Practice this concept" button (FIX 1).
-  const [learnQuestion, setLearnQuestion] = useState(null);
+  // Learn tab: the curriculum concept to deep-link open on its PREPARED guide
+  // (a full concept object { subject, key, label, strand, rank } | null). Set by
+  // openLearn from a weak-concept chip; LearnTab opens that concept and clears it.
+  const [learnConcept, setLearnConcept] = useState(null);
   // The curriculum concept key currently generating an AI practice drill (increment 3) —
   // drives the concept-page button's spinner; null when idle.
   const [drillBusy, setDrillBusy] = useState(null);
@@ -502,10 +376,6 @@ export default function Noobtopro() {
   // Save-progress modal: focus the dialog on open, restore focus on close.
   const saveModalFocusRef = useRef(null);
   const saveModalPrevFocus = useRef(null);
-
-  // Monotonic token so a slow /api/learn response can't overwrite a newer
-  // concept the user has since clicked.
-  const learnRun = useRef(0);
 
   // Monotonic token so an in-flight diagnostic STEP grade or finalize can't land
   // a stale write after the user abandons the flow — sign-out (SIGNED_OUT),
@@ -531,15 +401,6 @@ export default function Noobtopro() {
   // score. Bumped by startPractice (per call) and by startPracticeWithQuestion.
   const practiceRun = useRef(0);
 
-  // Per-session memo of fetched concept guides, keyed "subject::concept". Concept
-  // guides are deterministic + standardized, so once fetched we render instantly
-  // on a revisit with NO server round-trip (and the server's shared cache means
-  // the LLM only ever generates each guide once across all users).
-  const learnCacheRef = useRef({});
-  // In-flight /api/learn promises by key, so concurrent opens of the SAME concept
-  // (double-click, or open-A → leave → reopen-A before it lands) share ONE billable
-  // request instead of firing a second Groq generation.
-  const learnInflightRef = useRef(new Map());
 
   // Session ring-buffer of recently-SHOWN practice/regenerate question texts, keyed
   // (e.g. "practice:math" or "learn:math::solving linear equations"). Sent to
@@ -693,9 +554,6 @@ export default function Noobtopro() {
         setHistory([]);
         setScoreDelta(null);
         setLearnConcept(null);
-        setLearnContent(null);
-        setLearnQuestion(null);
-        setLearnError("");
         setIsAdmin(false); // hide the Admin tab immediately on sign-out
         // Clear the local guest blob on sign-out so the prior user's scores/weak
         // concepts aren't exposed to the next person on a shared device.
@@ -722,9 +580,6 @@ export default function Noobtopro() {
     revokePreview(pImg);
     setShowSaveModal(false);
     setLearnConcept(null);
-    setLearnContent(null);
-    setLearnError("");
-    setLearnQuestion(null);
     setQuestions([]);
     setQi(0);
     setAnswers({});
@@ -766,9 +621,6 @@ export default function Noobtopro() {
     setScoreDelta(null);
     setFeedback(null);
     setLearnConcept(null);
-    setLearnContent(null);
-    setLearnQuestion(null);
-    setLearnError("");
     setView("practice");
     setStage("intro");
     signOutUser();
@@ -784,9 +636,6 @@ export default function Noobtopro() {
       setScores(null);
       setHistory([]);
       setLearnConcept(null);
-      setLearnContent(null);
-      setLearnError("");
-      setLearnQuestion(null);
       setView("practice");
       setStage("intro");
       setError("");
@@ -1001,51 +850,17 @@ export default function Noobtopro() {
   // Open the Learn tab on a concept and show a Socratic, answer-free guide. Served
   // from the per-session memo when already fetched (instant, no server call); the
   // server's shared cache means the LLM generates each guide at most once, ever.
-  async function openLearn(subject, concept) {
-    const myRun = ++learnRun.current;
+  // Open a weak concept in the Learn tab on its PREPARED guide (lib/guides), drawing
+  // from the existing curriculum library instead of generating one from scratch.
+  // `value` is a curriculum KEY (the grader now reports keys) or legacy free text —
+  // resolveConceptKey maps either onto a real concept; conceptByKey adds its rank so
+  // LearnTab can load the right guide. Unresolvable input just opens the curriculum
+  // browser (no concept selected), so a "Learn this" click is never a dead end.
+  function openLearn(subject, value) {
+    const key = resolveConceptKey(subject, value);
+    const concept = key ? conceptByKey(subject, key) : null;
     setView("learn");
-    setLearnConcept({ subject, concept });
-    setLearnError("");
-    setLearnQuestion(null);
-
-    const key = `${subject}::${concept}`;
-    const cached = learnCacheRef.current[key];
-    // Serve the memo UNLESS its "try this" token was consumed (tokens are one-shot —
-    // the jti dedupe would 409 a second graded attempt) or rejected (expired). A
-    // token-less entry refetches below: a SERVER cache hit, freshly signed, no Groq.
-    // Guests never need the token (they grade via /api/grade), so the memo always holds.
-    if (cached && (!user || !cached.tryThisQuestion || cached.tryThisQuestion.token)) {
-      setLearnContent(cached);
-      setLearnQuestion(cached.tryThisQuestion || null);
-      setLearnBusy(false);
-      return;
-    }
-
-    setLearnContent(null);
-    setLearnBusy(true);
-    try {
-      // Reuse an in-flight request for this concept if one exists, so a duplicate
-      // open can't trigger a second Groq generation (the costliest call shape).
-      let req = learnInflightRef.current.get(key);
-      if (!req) {
-        req = api("/api/learn", { subject, concept });
-        learnInflightRef.current.set(key, req);
-        req.finally(() => learnInflightRef.current.delete(key)).catch(() => {});
-      }
-      const data = await req;
-      // Warm the memo even if this open was superseded, so revisiting the concept
-      // is served from cache instead of re-generating. (A failed request rejects
-      // above and never reaches here, so the memo is never poisoned.)
-      learnCacheRef.current[key] = data;
-      if (myRun !== learnRun.current) return; // a newer concept is active — don't touch UI state
-      setLearnContent(data);
-      setLearnQuestion(data.tryThisQuestion || null);
-    } catch (e) {
-      if (myRun !== learnRun.current) return;
-      setLearnError(e.message || "Could not load the concept guide.");
-    } finally {
-      if (myRun === learnRun.current) setLearnBusy(false);
-    }
+    setLearnConcept(concept ? { subject, ...concept } : null);
   }
 
   // Regenerate the "try this" question for the open concept — a fresh, level-
@@ -1187,19 +1002,6 @@ export default function Noobtopro() {
     });
   }
 
-  // One-shot learn tokens: after ANY signed-in submit of a Learn-sourced question
-  // (success, duplicate 409, or an expired-token 400), drop the token from the session
-  // guide cache so the next open of that concept refetches a freshly-signed one.
-  // No-op for /api/generate questions (they aren't in the guide cache).
-  function consumeLearnToken(token) {
-    if (!token) return;
-    for (const k of Object.keys(learnCacheRef.current)) {
-      const g = learnCacheRef.current[k];
-      if (g && g.tryThisQuestion && g.tryThisQuestion.token === token) {
-        learnCacheRef.current[k] = { ...g, tryThisQuestion: { ...g.tryThisQuestion, token: null } };
-      }
-    }
-  }
 
   async function submitPractice(skip = false) {
     // Capture the practice run token: sign-out / Restart / "Reset my progress" /
@@ -1224,22 +1026,17 @@ export default function Noobtopro() {
         // Signed-in: SERVER-AUTHORITATIVE. The server grades, computes the new score
         // from the user's STORED level, and persists it for the verified uid; the
         // client renders the trusted result and cannot substitute a score.
-        let data;
-        try {
-          data = await authApi("/api/score", {
-            kind: "practice",
-            // The server-issued question token (audit P1-1): subject/question/band/
-            // topic/surface — AND the curriculum conceptKey for mastery coloring — all
-            // come from the VERIFIED token server-side, so the client no longer asserts
-            // any rating-relevant field. A missing/expired token gets a clear
-            // "generate a new question" error.
-            token: pQuestion.token,
-            reasoning,
-            image: imagePayload,
-          });
-        } finally {
-          consumeLearnToken(pQuestion.token); // one-shot: never resubmit a used/rejected token
-        }
+        // The server-issued question token (audit P1-1): subject/question/band/topic/
+        // surface — AND the curriculum conceptKey for mastery coloring — all come from
+        // the VERIFIED token server-side, so the client no longer asserts any
+        // rating-relevant field. A missing/expired token gets a clear
+        // "generate a new question" error.
+        const data = await authApi("/api/score", {
+          kind: "practice",
+          token: pQuestion.token,
+          reasoning,
+          image: imagePayload,
+        });
         if (myRun !== practiceRun.current) return; // abandoned mid-grade
         // Defensive: a malformed response must not put an undefined subjectScore into
         // state (which would crash the dashboard/livescore reads) — surface an error.
@@ -1526,21 +1323,16 @@ export default function Noobtopro() {
             onOverlayActiveChange={setOverlayActive}
           />
         ) : view === "learn" && scores ? (
-          // FIX 1: a deep-linked "Learn this" concept (learnConcept set) renders the
-          // fetched /api/learn guide; otherwise the generic curriculum browser.
-          learnConcept ? (
-            <LearnConceptGuide
-              concept={learnConcept}
-              content={learnContent}
-              busy={learnBusy}
-              error={learnError}
-              onPractice={startPracticeWithQuestion}
-              onBrowse={() => { setLearnConcept(null); setLearnError(""); }}
-              onRetry={() => openLearn(learnConcept.subject, learnConcept.concept)}
-            />
-          ) : (
-            <LearnTab onPractice={startConceptDrill} busyConcept={drillBusy} />
-          )
+          // The Learn tab IS the curriculum library. A deep-linked weak concept
+          // (learnConcept, set by openLearn) opens straight onto that concept's
+          // PREPARED guide; LearnTab clears the signal once consumed so re-tapping the
+          // same chip re-opens it. No concept set → the curriculum browser.
+          <LearnTab
+            onPractice={startConceptDrill}
+            busyConcept={drillBusy}
+            openConcept={learnConcept}
+            onConceptConsumed={() => setLearnConcept(null)}
+          />
         ) : (
           <>
             {/* INTRO (signed-in but not yet ranked — guests see the Landing instead) */}
@@ -1695,17 +1487,23 @@ export default function Noobtopro() {
                           <div className="np-weakwrap">
                             <div className="np-eyebrow np-eyebrow--sm">Work on</div>
                             <div className="np-weaktags">
-                              {s.weakConcepts.slice(0, 3).map((w, i) => (
+                              {s.weakConcepts.slice(0, 3).map((w, i) => {
+                                // `w` is a curriculum key (the grader now reports keys);
+                                // show its human label. Legacy free-text rows fall back
+                                // to a resolved label, then to the raw text.
+                                const label = conceptLabel(k, w) || conceptLabel(k, resolveConceptKey(k, w)) || w;
+                                return (
                                 <button
                                   key={i}
                                   type="button"
                                   className="np-weaktag np-weaktag-btn"
-                                  title={`Learn: ${w}`}
+                                  title={`Learn: ${label}`}
                                   onClick={() => openLearn(k, w)}
                                 >
-                                  {w}
+                                  {label}
                                 </button>
-                              ))}
+                                );
+                              })}
                             </div>
                           </div>
                         )}

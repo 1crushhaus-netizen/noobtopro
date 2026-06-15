@@ -20,7 +20,10 @@ import Icon from "@/components/Icon";
 // explanation + worked example + self-questions, loaded lazily from lib/guides.
 // onPractice(concept) — start an AI concept-practice drill for the given curriculum
 // concept (increment 3); busyConcept is the key currently generating (button spinner).
-export default function LearnTab({ onPractice, busyConcept = null } = {}) {
+// openConcept — a full curriculum concept object to DEEP-LINK open (a weak-concept
+// "Learn this" chip routes here instead of generating a guide); onConceptConsumed is
+// called once it's opened so the parent can clear the signal and re-tapping re-opens.
+export default function LearnTab({ onPractice, busyConcept = null, openConcept = null, onConceptConsumed } = {}) {
   // selected = the full concept object { subject, key, label, strand, rank } | null
   const [selected, setSelected] = useState(null);
   // mastery = { [subject]: { [conceptKey]: counters } } — guest localStorage or the
@@ -39,6 +42,17 @@ export default function LearnTab({ onPractice, busyConcept = null } = {}) {
       alive = false;
     };
   }, []);
+
+  // Deep-link: when the parent asks to open a concept (a weak-concept chip), jump
+  // straight onto its prepared guide, then signal consumption so re-tapping the same
+  // chip (which re-sets openConcept) opens it again rather than no-op'ing.
+  useEffect(() => {
+    if (openConcept && openConcept.subject && openConcept.key) {
+      setSelected(openConcept);
+      if (onConceptConsumed) onConceptConsumed();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openConcept]);
 
   const stateFor = (subject, key) => conceptState(mastery, subject, key);
 
