@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor, act } from "@testing-library/react";
 import Dashboard from "@/components/Dashboard";
 import { conceptsFor } from "@/lib/curriculum";
 
@@ -191,16 +191,23 @@ describe("Dashboard — leaderboard, reset, empty state", () => {
     expect(screen.queryByRole("button", { name: /sign out/i })).toBeNull();
   });
 
-  it("fires onReset only after confirmation", () => {
+  it("fires onReset only after confirming in the dialog (open + No never call it; Yes does)", async () => {
     const onReset = vi.fn();
     render(<Dashboard user={user} scores={scores} history={history} onReset={onReset} onPractice={() => {}} />);
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    // Opening the confirm dialog must NOT delete anything.
     fireEvent.click(screen.getByRole("button", { name: /reset my progress/i }));
+    expect(screen.getByRole("dialog", { name: /are you sure/i })).toBeTruthy();
     expect(onReset).not.toHaveBeenCalled();
-    confirmSpy.mockReturnValue(true);
+    // "No" cancels.
+    fireEvent.click(screen.getByRole("button", { name: /^no$/i }));
+    expect(screen.queryByRole("dialog", { name: /are you sure/i })).toBeNull();
+    expect(onReset).not.toHaveBeenCalled();
+    // Reopen + "Yes" confirms.
     fireEvent.click(screen.getByRole("button", { name: /reset my progress/i }));
-    expect(onReset).toHaveBeenCalled();
-    confirmSpy.mockRestore();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^yes$/i }));
+    });
+    expect(onReset).toHaveBeenCalledTimes(1);
   });
 
   it("shows the 'Not ranked yet' empty state + 'Prove it' CTA when there are no scores", () => {

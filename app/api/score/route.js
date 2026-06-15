@@ -55,7 +55,8 @@ import { isCrossSiteRequest, isWrongContentType, readJsonLimited, MAX_BODY_BYTES
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireUser } from "@/lib/adminAuth";
 import { reportInjection, reportRateLimit, shouldDockForInjection } from "@/lib/abuseDetection";
-import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, normalizeFeedbackList, capSolution, normalizeErrors, normalizeSolve, normalizeReasoningSurface, reasoningSurfaceContext } from "@/lib/gradeInput";
+import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, resolveWeakConcepts, normalizeFeedbackList, capSolution, normalizeErrors, normalizeSolve, normalizeReasoningSurface, reasoningSurfaceContext } from "@/lib/gradeInput";
+import { weakConceptPromptBlock } from "@/lib/curriculum";
 import { withNumericVerification, makeRegrade } from "@/lib/numericVerify";
 
 export const dynamic = "force-dynamic";
@@ -200,7 +201,7 @@ async function handlePractice(req, body) {
 
   const { token, reasoning, image } = body || {};
   // SERVER-ISSUED QUESTION BINDING (audit P1-1). The token is signed by
-  // /api/generate (or /api/learn's "try this") at serve time; EVERY rating-relevant
+  // /api/generate at serve time; EVERY rating-relevant
   // field — subject, question text, difficulty band, topic bucket, reasoning
   // surface/trap — comes from the VERIFIED payload, never the request body. Before
   // this, a signed-in user could self-author an easy question labeled `phd` and
@@ -386,6 +387,7 @@ async function handlePractice(req, body) {
         `Question difficulty band: ${safeDifficulty}\n` +
         (surfaceCtx ? surfaceCtx + "\n" : "") +
         `Learner's current level: ${promptPrevScore}/350\n\n` +
+        weakConceptPromptBlock(subject) +
         // fenceGuard (audit P2-12): learner text can't fake closing the untrusted block.
         `Learner's reasoning:\n"""${fenceGuard(work)}"""`,
       image: img.image,
@@ -429,7 +431,7 @@ async function handlePractice(req, body) {
     //    path-independent — final-answer correctness never enters here). A dock carries its
     //    own forced low score (DOCK_SCORE), so use it directly rather than the all-zero mean.
     const reasoningScore = dock ? graded.reasoningScore : scoreFromRubric(attemptRubric);
-    const weakConcepts = normalizeWeakConcepts(graded?.weakConcepts);
+    const weakConcepts = resolveWeakConcepts(subject, graded?.weakConcepts);
     // Post-grade feedback: what was good, how to reach 100, the grader's own worked
     // solution (compute-first) used to type the learner's errors, the typed error list,
     // and — only on a SUBSTANTIVE (non-docked) attempt — the full worked solution. A dock
@@ -710,6 +712,7 @@ async function handleDiagnosticStep(req, body) {
         `Subject: ${item.subject}\n` +
         `Question difficulty band: ${item.band}\n` +
         (surfaceCtx ? surfaceCtx + "\n" : "") +
+        weakConceptPromptBlock(item.subject) +
         `Question:\n"""${capText(item.question)}"""\n\n` +
         // fenceGuard (audit P2-12): learner text can't fake closing the block.
         `Learner's reasoning:\n"""${fenceGuard(reasoning)}"""`,
@@ -751,7 +754,7 @@ async function handleDiagnosticStep(req, body) {
       d: item.band,
       s: reasoningScore,
       r: rubric,
-      w: normalizeWeakConcepts(checked?.weakConcepts).slice(0, 8).map((c) => c.slice(0, 60)),
+      w: resolveWeakConcepts(item.subject, checked?.weakConcepts),
       c: typeof checked?.comment === "string" ? checked.comment.slice(0, 280) : "",
     };
     const transcript = [...st.transcript, entry];
