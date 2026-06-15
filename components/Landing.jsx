@@ -399,7 +399,7 @@ export default function Landing({
             <div className="np-card np-lp-plan np-lp-plan--pro" data-reveal style={{ "--ri": 1 }}>
               <span className="np-lp-badge">Most popular</span>
               <div className="np-lp-plan-name">Pro</div>
-              <div className="np-lp-plan-price">$9.99<small> / month</small></div>
+              <div className="np-lp-plan-price">€9.99<small> / month</small></div>
               <div className="np-lp-plan-tag">Unlimited practice and the full toolkit.</div>
               <ul className="np-lp-feats">
                 {PRO_FEATURES.map((f) => (

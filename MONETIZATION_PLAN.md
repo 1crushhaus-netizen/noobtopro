@@ -6,18 +6,19 @@ built: the entitlement foundation (the `subscriptions` table + `upsert_subscript
 (`app/api/checkout`), the signature-verified Polar webhook (`app/api/webhooks/polar` →
 `lib/polarWebhook.js`), the customer portal (`app/api/portal`), the server-enforced gates
 (free daily practice cap + Pro-only photo grading in `app/api/score` & `app/api/grade`), and
-the UI (Landing `$9.99/mo` card, Dashboard Pro badge + Manage/Upgrade + the trends/history
+the UI (Landing `€9.99/mo` card, Dashboard Pro badge + Manage/Upgrade + the trends/history
 gate, the 402 upgrade nudge). The `@polar-sh/sdk` is wired through `lib/polar.js`.
 
 **It is INERT until configured.** Deny-by-default: the gates only bite when Pro is actually
 sellable (`POLAR_ACCESS_TOKEN` + `POLAR_PRODUCT_ID_PRO` set), and the client only shows Pro UI
 when `NEXT_PUBLIC_PRO_ENABLED=true`. So nothing a user sees changes until the owner flips those
-on. **Decided pricing: $9.99/month, monthly-only, built against Polar SANDBOX first.**
+on. **Decided pricing: €9.99/month, monthly-only, built against Polar SANDBOX first.**
+(The org's default presentment currency is EUR, so the headline price is € rather than $.)
 
 ### What's left to go live (owner / config — no more app code)
-1. **Create the Pro product in Polar (sandbox)** → copy its id to `POLAR_PRODUCT_ID_PRO`.
-   (A monthly `$9.99` recurring product. This is the one step that needs the Polar dashboard
-   or the Polar MCP `polar_products_create`.)
+1. ✅ **Pro product created in Polar (sandbox)** — `€9.99`/month recurring.
+   **`POLAR_PRODUCT_ID_PRO=213d56a6-fde8-4ad0-9167-91a5d2c8fb9b`** (price id
+   `12187dbc-b1cd-4393-9c43-a8ecc7d5d250`). For production, recreate it in the prod org.
 2. **Set the env** in Vercel (Sensitive): `POLAR_ACCESS_TOKEN`, `POLAR_SERVER=sandbox`,
    `POLAR_PRODUCT_ID_PRO`, `POLAR_SUCCESS_URL=https://<domain>/?checkout=success`,
    `NEXT_PUBLIC_PRO_ENABLED=true`. (`SUPABASE_SERVICE_ROLE_KEY` is already required.)

@@ -1570,7 +1570,7 @@ export default function Noobtopro() {
               onClick={startCheckout}
               disabled={upgradeBusy}
             >
-              <Icon name="spark" size={16} /> {upgradeBusy ? "Starting checkout…" : "Upgrade to Pro — $9.99/mo"}
+              <Icon name="spark" size={16} /> {upgradeBusy ? "Starting checkout…" : "Upgrade to Pro — €9.99/mo"}
             </button>
             <button className="np-ghost np-modal-later" onClick={() => setUpgradeNudge(null)}>Not now</button>
           </div>
