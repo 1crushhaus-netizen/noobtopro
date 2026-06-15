@@ -339,6 +339,7 @@ export default function Noobtopro() {
   const [busy, setBusy] = useState(false);
   const [showAuthNote, setShowAuthNote] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
+  const [resetNotice, setResetNotice] = useState(false); // transient "progress was reset" toast
   const [user, setUser] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false); // server-verified via /api/admin/me; gates the Admin tab
   const navScrolled = useScrolled(); // drives the shared TopNav condense-on-scroll
@@ -639,8 +640,11 @@ export default function Noobtopro() {
       setView("practice");
       setStage("intro");
       setError("");
+      setResetNotice(true); // success toast (auto-dismisses); the dashboard's modal closes by unmounting
+      return true;
     } catch (e) {
       setError(e.message || "Could not reset your progress.");
+      return false;
     }
   }
 
@@ -1175,7 +1179,21 @@ export default function Noobtopro() {
   // While the save modal or a dashboard drawer is open, make the rest of the page
   // inert so keyboard/screen-reader users can't reach background controls (proper
   // modal focus containment).
+  // The "progress was reset" toast auto-dismisses; role=status announces it once.
+  useEffect(() => {
+    if (!resetNotice) return;
+    const t = setTimeout(() => setResetNotice(false), 4000);
+    return () => clearTimeout(t);
+  }, [resetNotice]);
+
   const bgInert = (showSaveModal && !user) || overlayActive ? true : undefined;
+
+  // Transient "progress was reset" toast. Rendered in EVERY return branch — a reset
+  // lands the learner on the intro/Landing branch (below), not the app shell — so it
+  // always appears. Fixed-position, so where it sits in the tree doesn't matter.
+  const resetToast = resetNotice ? (
+    <div className="np-toast" role="status" aria-live="polite">Your progress was reset.</div>
+  ) : null;
 
   /* ----------------------------- render ----------------------------- */
   // App chrome: the sidebar (nav + account + theme) renders whenever the tabs
@@ -1192,16 +1210,19 @@ export default function Noobtopro() {
   // to "dashboard" by hydrate(), so they never land here.
   if (stage === "intro" && view !== "dashboard" && view !== "learn" && view !== "admin") {
     return (
-      <Landing
-        user={user}
-        busy={busy}
-        onProveIt={beginDiagnostic}
-        onSignIn={() => (isSupabaseConfigured ? openSignIn() : setShowAuthNote(true))}
-        error={error}
-        onDismissError={() => setError("")}
-        showAuthNote={showAuthNote}
-        onDismissAuthNote={() => setShowAuthNote(false)}
-      />
+      <>
+        <Landing
+          user={user}
+          busy={busy}
+          onProveIt={beginDiagnostic}
+          onSignIn={() => (isSupabaseConfigured ? openSignIn() : setShowAuthNote(true))}
+          error={error}
+          onDismissError={() => setError("")}
+          showAuthNote={showAuthNote}
+          onDismissAuthNote={() => setShowAuthNote(false)}
+        />
+        {resetToast}
+      </>
     );
   }
 
@@ -1243,6 +1264,8 @@ export default function Noobtopro() {
           </div>
         </div>
       )}
+
+      {resetToast}
 
       <div className="np-app" inert={bgInert}>
         {/* ONE shared sticky TopNav. With app chrome it carries the view tabs +

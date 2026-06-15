@@ -145,3 +145,36 @@ describe("Sign-out (shared-device safety)", () => {
     expect(screen.queryByText("Where you stand")).toBe(null);
   });
 });
+
+describe("Reset my progress — confirmation modal", () => {
+  it("confirms via a dimmed dialog (No cancels; Yes deletes + toasts) instead of window.confirm", async () => {
+    supa.user = USER;
+    render(<Noobtopro />);
+    await screen.findByText("Where you stand");
+    fireEvent.click(screen.getByRole("button", { name: /^dashboard$/i }));
+
+    // Opening the dialog does NOT delete anything yet.
+    fireEvent.click(await screen.findByRole("button", { name: /reset my progress/i }));
+    expect(await screen.findByRole("dialog", { name: /are you sure/i })).toBeTruthy();
+    expect(screen.getByText(/permanently deletes all your scores/i)).toBeTruthy();
+    expect(store.deleteAllUserData).not.toHaveBeenCalled();
+
+    // "No" cancels — dialog closes, nothing deleted.
+    fireEvent.click(screen.getByRole("button", { name: /^no$/i }));
+    await flush();
+    expect(screen.queryByRole("dialog", { name: /are you sure/i })).toBeNull();
+    expect(store.deleteAllUserData).not.toHaveBeenCalled();
+
+    // Reopen and confirm with "Yes" → the delete runs and a success toast appears.
+    fireEvent.click(screen.getByRole("button", { name: /reset my progress/i }));
+    await screen.findByRole("dialog", { name: /are you sure/i });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^yes$/i }));
+    });
+    await flush();
+    expect(store.deleteAllUserData).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText(/your progress was reset/i)).toBeTruthy();
+    // The destructive action returned the learner to the intro (dashboard stats gone).
+    expect(screen.queryByText("Where you stand")).toBe(null);
+  });
+});

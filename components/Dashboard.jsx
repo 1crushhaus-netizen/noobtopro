@@ -318,6 +318,15 @@ export default function Dashboard({
   const [imgFailed, setImgFailed] = useState(false);
   // Which slide-over drawer is open: null | "charts" | "reviews".
   const [drawer, setDrawer] = useState(null);
+  // "Reset my progress" confirmation modal (replaces window.confirm): a dimmed
+  // dialog with No (safe default) / Yes (destructive). `resetting` drives the
+  // in-flight spinner so a slow signed-in delete can't be double-fired.
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const resetNoRef = useRef(null); // default focus = the safe "No" button
+  const resetPrevFocus = useRef(null); // focus to restore when the dialog closes
+  const resettingRef = useRef(false);
+  useEffect(() => { resettingRef.current = resetting; }, [resetting]);
   // Tasteful staggered scroll-reveal for the bento's main panels (shared hook).
   const { ref: revealRef, armed } = useScrollReveal();
   // Per-concept mastery map for the §7 breadth gate (same injected-loader pattern
@@ -341,9 +350,23 @@ export default function Dashboard({
   // containment). The guest gate does NOT inert the page — it's scoped to the
   // dashboard body so the nav stays usable for a guest who'd rather keep exploring.
   useEffect(() => {
-    onOverlayActiveChange?.(drawer !== null);
-  }, [drawer, onOverlayActiveChange]);
+    onOverlayActiveChange?.(drawer !== null || confirmReset);
+  }, [drawer, confirmReset, onOverlayActiveChange]);
   useEffect(() => () => onOverlayActiveChange?.(false), [onOverlayActiveChange]);
+
+  // Reset dialog: focus the safe "No" button on open; restore focus on close; let
+  // Escape cancel (unless a reset is already in flight). The dimmed backdrop +
+  // inert background (via onOverlayActiveChange) contain focus like the other modals.
+  useEffect(() => {
+    if (!confirmReset) return;
+    resetNoRef.current?.focus();
+    const onKey = (e) => { if (e.key === "Escape" && !resettingRef.current) setConfirmReset(false); };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      resetPrevFocus.current?.focus?.();
+    };
+  }, [confirmReset]);
 
   const meta = (user && user.user_metadata) || {};
   const name = meta.full_name || meta.name || (user && user.email) || "You";
@@ -459,9 +482,7 @@ export default function Dashboard({
           <button
             className="np-btn np-danger np-dash-actbtn"
             style={{ marginLeft: "auto" }}
-            onClick={() => {
-              if (window.confirm("This permanently deletes all your scores and history. Continue?")) onReset && onReset();
-            }}
+            onClick={() => { resetPrevFocus.current = document.activeElement; setConfirmReset(true); }}
           >
             Reset my progress
           </button>
@@ -492,6 +513,56 @@ export default function Dashboard({
       <Drawer open={drawer === "reviews"} title="Review your answers" titleId="np-drawer-reviews" onClose={() => setDrawer(null)}>
         <ReviewList loadReviews={loadReviews} onPractice={onPractice} onLearn={onLearn} />
       </Drawer>
+
+      {confirmReset &&
+        createPortal(
+          <div
+            className="np-modal-backdrop"
+            onClick={() => { if (!resetting) setConfirmReset(false); }}
+          >
+            <div
+              className="np-surface-elevated np-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="np-resetconfirm-title"
+              aria-describedby="np-resetconfirm-desc"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="np-modal-spark" aria-hidden="true"><Icon name="refresh" size={22} /></div>
+              <h2 id="np-resetconfirm-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+                Are you sure?
+              </h2>
+              <p id="np-resetconfirm-desc" className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
+                This permanently deletes all your scores and history.
+              </p>
+              <div className="np-modal-actions">
+                <button
+                  ref={resetNoRef}
+                  className="np-btn np-secondary"
+                  onClick={() => setConfirmReset(false)}
+                  disabled={resetting}
+                >
+                  No
+                </button>
+                <button
+                  className="np-btn np-danger"
+                  onClick={async () => {
+                    setResetting(true);
+                    const ok = await onReset?.();
+                    // Success → the app switches to the intro view and unmounts this
+                    // dashboard (nothing to set). Failure → resetProgress surfaces the
+                    // error banner; close the dialog and clear the spinner.
+                    if (ok === false) { setResetting(false); setConfirmReset(false); }
+                  }}
+                  disabled={resetting}
+                >
+                  {resetting ? "Resetting…" : "Yes"}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
