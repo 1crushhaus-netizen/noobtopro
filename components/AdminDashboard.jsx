@@ -73,10 +73,13 @@ export default function AdminDashboard({ adminApi }) {
 
   return (
     <div className="fade-up">
-      <h2 className="np-h2">Admin</h2>
-      <p className="np-lede" style={{ marginBottom: 18 }}>
-        Approve concept guides into the public hub, and triage suspicious activity. Actions take effect immediately.
-      </p>
+      <div className="np-pagehead">
+        <span className="np-eyebrow--mono">Admin</span>
+        <h2 className="np-h2">Curation and security</h2>
+        <p className="np-lede">
+          Approve concept guides into the public hub, and triage suspicious activity. Actions take effect immediately.
+        </p>
+      </div>
 
       {error && (
         <div className="np-error" role="alert" style={{ marginBottom: 16 }}>
@@ -112,7 +115,7 @@ export default function AdminDashboard({ adminApi }) {
                 {g.level_band && <Badge tone="neutral">{g.level_band}</Badge>}
               </div>
               {g.overview && <div className="np-admin-preview">{g.overview}</div>}
-              {!ready && <div className="np-admin-hint">Empty stub — open it in Learn to generate a guide, or delete it.</div>}
+              {!ready && <div className="np-admin-hint">Empty stub. Open it in Learn to generate a guide, or delete it.</div>}
               <div className="np-admin-actions">
                 <button className="np-btn np-primary" disabled={!ready || busyKey === key} onClick={() => act(key, { target: "guide", action: "approve", subject: g.subject, concept_key: g.concept_key })}>Approve → public</button>
                 <button className="np-ghost" disabled={busyKey === key} onClick={() => act(key, { target: "guide", action: "hide", subject: g.subject, concept_key: g.concept_key })}>Hide</button>

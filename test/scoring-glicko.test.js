@@ -17,6 +17,7 @@ import {
   diagnosticSeedGlicko,
   diagnosticSeedFromReasoning,
   diagnosticSubjectScore,
+  DIAG_PLACEMENT_CEILING,
   repeatFactorForCount,
   repeatFactorFromHistory,
   repeatFactorFromRecent,
@@ -204,20 +205,24 @@ describe("diagnosticSeedFromReasoning (reasoning-anchored placement)", () => {
   const tiers = (rubVal, rs) =>
     ["beginner", "intermediate", "advanced"].map((difficulty) => ({ difficulty, reasoningScore: rs, rubric: fullRubric(rubVal) }));
 
-  it("places a blank/idk (docked) diagnostic at the dock floor, NOT the old ~18", () => {
+  it("places a blank/idk (docked) diagnostic at the dock floor", () => {
     // a docked answer carries reasoningScore = DOCK_SCORE (3) + an all-zero rubric
     const seed = diagnosticSeedFromReasoning(tiers(0, 3));
-    expect(seed.score).toBeLessThanOrEqual(Math.round((5 * 350) / 100)); // dock floor ×3.5; was ~18 (×3.5) under the Glicko-games seed
+    // FIX 7: placement maps quality through the conservative DIAG_PLACEMENT_CEILING.
+    expect(seed.score).toBeLessThanOrEqual(Math.round((5 * DIAG_PLACEMENT_CEILING) / 100));
   });
 
-  it("places a flawless diagnostic near 350 (full range restored; was capped ~270)", () => {
-    expect(diagnosticSeedFromReasoning(tiers(4, 100)).score).toBeGreaterThanOrEqual(Math.round((95 * 350) / 100));
+  it("FIX 7: a flawless diagnostic lands at the conservative ceiling (low Doctorate), BELOW the 350 max", () => {
+    const seed = diagnosticSeedFromReasoning(tiers(4, 100));
+    expect(seed.score).toBeGreaterThanOrEqual(Math.round((95 * DIAG_PLACEMENT_CEILING) / 100)); // near the ceiling
+    expect(seed.score).toBeLessThanOrEqual(DIAG_PLACEMENT_CEILING); // never the 350 max from one cold sitting
+    expect(seed.score).toBeLessThan(350);
   });
 
-  it("the subject score equals the difficulty-weighted QUALITY aggregate mapped onto the 0–350 scale", () => {
+  it("the subject score equals the difficulty-weighted QUALITY aggregate mapped onto the conservative scale", () => {
     for (const [rub, rs] of [[0, 3], [1, 30], [2, 50], [4, 100]]) {
       const qs = tiers(rub, rs);
-      expect(diagnosticSeedFromReasoning(qs).score).toBe(Math.round((diagnosticSubjectScore(qs) * 350) / 100));
+      expect(diagnosticSeedFromReasoning(qs).score).toBe(Math.round((diagnosticSubjectScore(qs) * DIAG_PLACEMENT_CEILING) / 100));
     }
   });
 
@@ -233,6 +238,28 @@ describe("diagnosticSeedFromReasoning (reasoning-anchored placement)", () => {
     expect(Object.keys(seed.rubric)).toHaveLength(9);
     for (const k of RUBRIC_KEYS) expect(Number.isFinite(seed.glicko[k].rating)).toBe(true);
     expect(diagnosticSeedFromReasoning([]).score).toBe(0);
+  });
+
+  it("FIX 7: the ADAPTIVE (path-weighted) walk places conservatively — perfect < max, ~60% at High", () => {
+    // The §8 walk: a perfect run climbs intermediate → advanced → phd; a uniform ~60%
+    // run walks up the same bands at quality 60. The path-weighted aggregate maps
+    // through the conservative ceiling.
+    const walk = (bands, rs, rub) =>
+      bands.map((difficulty) => ({ difficulty, reasoningScore: rs, rubric: fullRubric(rub) }));
+
+    // (a) A perfect cold 3-step run lands BELOW the 350 max (top University / low Doctorate).
+    const perfect = diagnosticSeedFromReasoning(walk(["intermediate", "advanced", "phd"], 100, 4), { pathWeighted: true });
+    expect(perfect.score).toBeLessThan(350);
+    expect(perfect.score).toBeGreaterThanOrEqual(270); // still a strong, top-of-range placement
+    expect(perfect.score).toBeLessThanOrEqual(DIAG_PLACEMENT_CEILING);
+
+    // (b) A ~60% run places mid-range (HIGH band 140–209), NOT University (210+).
+    const sixty = diagnosticSeedFromReasoning(walk(["intermediate", "advanced", "phd"], 60, 2), { pathWeighted: true });
+    expect(sixty.score).toBeGreaterThanOrEqual(140); // High floor
+    expect(sixty.score).toBeLessThan(210); // below University
+
+    // Monotonic: better reasoning still places higher.
+    expect(sixty.score).toBeLessThan(perfect.score);
   });
 });
 

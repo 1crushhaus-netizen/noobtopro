@@ -32,11 +32,14 @@ export default function SignIn({ providers, onProvider, onBack }) {
   return (
     <div className="fade-up np-signinscreen">
       <button className="np-ghost" style={{ marginBottom: 14 }} onClick={onBack}><Icon name="back" size={14} /> Back</button>
-      <h2 className="np-h2">Save your progress</h2>
-      <p className="np-lede" style={{ marginBottom: 22 }}>
-        Sign in to keep your scores across devices. Identity is handled by your provider — noobtopro never
-        sees or stores a password.
-      </p>
+      <div className="np-pagehead">
+        <span className="np-eyebrow--mono">Sign in</span>
+        <h2 className="np-h2">Save your progress</h2>
+        <p className="np-lede">
+          Sign in to keep your scores across devices. Identity is handled by your provider; noobtopro never
+          sees or stores a password.
+        </p>
+      </div>
 
       <div className="np-providerlist">
         {providers.map((p) => (
@@ -56,7 +59,7 @@ export default function SignIn({ providers, onProvider, onBack }) {
       </div>
 
       <p className="np-hint" style={{ marginTop: 18 }}>
-        No passwords, no email sign-up — just your chosen account.
+        No passwords, no email sign-up, just your chosen account.
       </p>
     </div>
   );

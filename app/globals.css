@@ -88,13 +88,14 @@
   /* Misc shared values */
   --disabled-opacity: .45;
   --eyebrow-ls: .08em;
-  --w-content: 900px;            /* standard centered column */
-  --w-wide: 1560px;              /* Dashboard bento column */
+  --w-content: 1080px;           /* the unified centered column (landing + app share it) */
   --w-narrow: 460px;             /* dialogs / sign-in / gate cards */
-  --w-side: 248px;               /* app sidebar */
   --scrim: rgba(0, 0, 0, .7);
   --shadow-lg: 0 24px 64px rgba(0, 0, 0, .55);
   --scroll-shadow: rgba(255, 255, 255, .07);  /* light haze — black shadows vanish on a black panel */
+
+  /* Shared motion easing (the landing's "Dynamic" curve, now app-wide). */
+  --ease: cubic-bezier(.2, .7, .2, 1);
 }
 
 [data-theme="light"] {
@@ -171,58 +172,11 @@ body {
 ::selection { background: var(--line-strong); }
 
 /* =============================================================================
-   App shell — left sidebar (≥1024px) that collapses into a top band on
-   smaller screens. One DOM tree, two layouts, so nav buttons are never
-   duplicated (test queries rely on unique accessible names).
+   App shell — ONE shared sticky top nav (components/TopNav.jsx) drives BOTH the
+   landing and the signed-in app; content flows below it in a 1080px centered
+   column. The left sidebar is gone, so there is no fixed offset to budget.
    ========================================================================== */
 .np-root { min-height: 100vh; }
-
-.np-side {
-  display: flex; flex-direction: row; flex-wrap: wrap; align-items: center;
-  gap: 10px 16px;
-  padding: 12px clamp(16px, 4vw, 24px) 0;
-  padding-left: max(clamp(16px, 4vw, 24px), env(safe-area-inset-left));
-  padding-right: max(clamp(16px, 4vw, 24px), env(safe-area-inset-right));
-  border-bottom: 1px solid var(--line);
-  background: var(--bg);
-}
-.np-side .np-nav { order: 3; width: 100%; }
-.np-side-foot { order: 2; margin-left: auto; display: flex; align-items: center; gap: 10px; }
-.np-side-user { display: none; }
-.np-side-id { display: none; }
-
-@media (min-width: 1024px) {
-  .np-side {
-    position: fixed; top: 0; left: 0; bottom: 0; z-index: 50;
-    width: var(--w-side);
-    flex-direction: column; flex-wrap: nowrap; align-items: stretch;
-    gap: 0;
-    padding: 22px 14px 18px;
-    padding-bottom: max(18px, env(safe-area-inset-bottom));
-    border-bottom: none;
-    border-right: 1px solid var(--line);
-  }
-  .np-side .np-brand { padding: 0 10px; margin-bottom: 22px; }
-  .np-side .np-nav { order: 0; width: auto; }
-  .np-side-foot {
-    order: 0; margin-left: 0; margin-top: auto;
-    flex-direction: column; align-items: stretch; gap: 10px;
-    padding-top: 14px; border-top: 1px solid var(--line);
-  }
-  .np-side-user {
-    display: block; font-size: 12px; color: var(--faint);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    padding: 0;
-  }
-  /* Signed-in identity block (avatar + name + email + rank chip) — identity's
-     single home; the Dashboard bento carries no identity bar. */
-  .np-side-id { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 0 2px 2px; }
-  .np-side-avatar { width: 30px; height: 30px; font-size: 13px; }
-  .np-side-idtext { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-  .np-side-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .np-side-rank { font-size: 10px; padding: 2px 8px; flex: none; }
-  .np-frame--side { margin-left: var(--w-side); }
-}
 
 /* Brand wordmark — tight, monochrome; the arrow is the only flourish. */
 .np-brand {
@@ -230,42 +184,87 @@ body {
   letter-spacing: -.02em; cursor: pointer; color: var(--text);
   background: none; border: none; padding: 0; text-align: left;
   display: inline-flex; align-items: center; min-height: 32px;
+  text-decoration: none;
 }
 .np-arrow { color: var(--faint); padding: 0 1px; font-family: var(--mono); font-weight: 500; }
-.np-tag { font-size: 12px; color: var(--faint); font-family: var(--mono); letter-spacing: .02em; }
-.np-signin { margin-left: auto; display: flex; align-items: center; gap: 10px; }
-
-/* Chrome-less header (intro / sign-in screens — no sidebar). */
-.np-top { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 0 auto 28px; max-width: var(--w-content); }
 
 .np-main { max-width: var(--w-content); margin: 0 auto; }
 
-/* Nav — vertical rail items in the sidebar, underline tabs in the top band. */
-.np-nav { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
-.np-nav::-webkit-scrollbar { display: none; }
+/* ---- the shared top nav (.np-topnav*) — the landing aliases onto these ----
+   Sticky, backdrop-blurred, hairline bottom border, 1080px inner row that
+   condenses once you scroll past the top. */
+.np-topnav {
+  position: sticky; top: 0; z-index: 30;
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--line);
+  transition: background .25s ease, box-shadow .25s ease;
+}
+.np-topnav-inner {
+  max-width: var(--w-content); margin: 0 auto;
+  padding: 12px clamp(20px, 5vw, 40px);
+  padding-left: max(clamp(20px, 5vw, 40px), env(safe-area-inset-left));
+  padding-right: max(clamp(20px, 5vw, 40px), env(safe-area-inset-right));
+  display: flex; align-items: center; gap: 18px;
+  transition: padding .25s var(--ease);
+}
+.np-topnav.is-scrolled { background: color-mix(in srgb, var(--bg) 92%, transparent); box-shadow: 0 1px 0 var(--line); }
+.np-topnav.is-scrolled .np-topnav-inner { padding-top: 8px; padding-bottom: 8px; }
+.np-topnav-brand { font-family: var(--display); font-weight: 600; font-size: 17px; letter-spacing: -.01em; }
+
+/* Landing section anchors */
+.np-topnav-links { display: flex; gap: 22px; margin-left: 8px; }
+.np-topnav-links a { color: var(--muted); font-size: 13.5px; text-decoration: none; transition: color .15s ease; }
+.np-topnav-links a:hover { color: var(--text); }
+
+/* Signed-in view tabs */
+.np-topnav-tabs { display: flex; gap: 2px; margin-left: 6px; overflow-x: auto; scrollbar-width: none; }
+.np-topnav-tabs::-webkit-scrollbar { display: none; }
+
+.np-topnav-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.np-topnav-cta { min-height: 38px; padding: 8px 18px; font-size: 13.5px; }
+
+/* Compact signed-in identity (avatar + name + overall-rank chip). */
+.np-topnav-id { display: flex; align-items: center; gap: 9px; min-width: 0; max-width: 220px; }
+.np-topnav-avatar { width: 30px; height: 30px; font-size: 13px; flex: none; }
+.np-topnav-idtext { display: flex; flex-direction: column; min-width: 0; }
+.np-topnav-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.np-topnav-email { font-size: 11px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.np-topnav-rank { font-size: 11px; padding: 3px 9px; flex: none; }
+
+@media (max-width: 900px) { .np-topnav-idtext { display: none; } }
+@media (max-width: 820px) { .np-topnav-links { display: none; } }
+@media (max-width: 640px) { .np-topnav-id { display: none; } }
+@media (max-width: 540px) { .np-topnav-signin { display: none; } }
+
+/* Nav tabs — underline-pill segmented control (shared with the Learn segments). */
 .np-tab {
   background: none; border: none; border-radius: var(--radius-btn);
   color: var(--muted); font-family: var(--ui); font-size: 14px; font-weight: 500;
   padding: 9px 12px; cursor: pointer;
-  display: inline-flex; align-items: center; gap: 10px; min-height: 44px;
+  display: inline-flex; align-items: center; gap: 8px; min-height: 44px;
   white-space: nowrap;
   transition: color .15s ease, background .15s ease;
 }
 .np-tab svg { flex: none; opacity: .85; }
 .np-tab:hover { color: var(--text); background: var(--tint-1); }
 .np-tab.active { color: var(--text); background: var(--tint-2); }
-@media (min-width: 1024px) {
-  .np-side .np-nav { flex-direction: column; overflow: visible; }
-  .np-side .np-tab { min-height: 38px; padding: 8px 10px; }
-}
+@media (max-width: 560px) { .np-tab { padding: 9px 10px; gap: 6px; } }
 
 /* =============================================================================
    Typography primitives
    ========================================================================== */
-.np-h1 { font-family: var(--display); font-weight: 600; font-size: clamp(30px, 4.5vw, 44px); line-height: 1.08; letter-spacing: -.03em; margin: 0 0 16px; }
-.np-h2 { font-family: var(--display); font-weight: 600; font-size: clamp(22px, 3vw, 28px); letter-spacing: -.02em; margin: 0 0 6px; }
-.np-lede { font-size: 15px; color: var(--muted); max-width: 64ch; margin: 0 0 26px; }
+/* In-app page/section titles share the landing's SECTION-title scale (.np-lp-h2):
+   the app NEVER uses the 60px hero. .np-h1 and .np-h2 resolve to the same recipe
+   so an in-app page head reads identically to a landing section head. */
+.np-h1, .np-h2 { font-family: var(--display); font-weight: 600; font-size: clamp(24px, 3.4vw, 34px); line-height: 1.12; letter-spacing: -.025em; margin: 0 0 6px; }
+.np-lede { font-size: 15px; color: var(--muted); line-height: 1.6; max-width: 64ch; margin: 14px 0 26px; }
 .np-lede em, .np-h1 em { color: var(--text); font-style: normal; font-weight: 600; }
+
+/* Page-head pattern (shared with the landing): a mono eyebrow above the title. */
+.np-pagehead { margin-bottom: 26px; }
+.np-pagehead .np-lede { margin-bottom: 0; }
+.np-eyebrow--mono { display: inline-block; font-family: var(--mono); font-size: 12px; font-weight: 400; letter-spacing: var(--eyebrow-ls); text-transform: uppercase; color: var(--faint); }
 
 .np-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px; }
 .np-step { display: flex; flex-direction: column; gap: 8px; }
@@ -280,6 +279,10 @@ body {
 
 /* =============================================================================
    Buttons — ONE base + role modifiers (primary · secondary · danger · ghost)
+   ONE size ladder, applied to the SAME role across landing and app:
+     · sm  38px  — nav CTA (.np-topnav-cta)
+     · md  44px  — default (.np-btn)
+     · lg  52px  — primary page CTAs (.np-big)
    ========================================================================== */
 .np-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid transparent; border-radius: var(--radius-btn); padding: 10px 16px; min-height: 44px; font-family: var(--ui); font-size: 14px; font-weight: 500; cursor: pointer; transition: opacity .15s ease, background .15s ease, border-color .15s ease, color .15s ease, transform .12s ease; }
 .np-btn:active { transform: translateY(1px); }
@@ -298,7 +301,7 @@ body {
 .np-danger:hover:not(:disabled) { background: var(--danger-soft); border-color: var(--danger-border-strong); }
 .np-danger svg { color: var(--danger); }
 .np-btn--block { width: 100%; justify-content: center; }
-.np-big { font-size: 15px; padding: 13px 22px; margin-top: 6px; }
+.np-big { font-size: 15px; padding: 14px 24px; min-height: 52px; margin-top: 6px; }
 /* Intro primary-action row */
 .np-introcta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
 .np-introcta .np-big { margin-top: 0; }
@@ -318,10 +321,6 @@ body {
 .np-theme-btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border: none; border-radius: var(--radius-pill); background: none; color: var(--faint); cursor: pointer; transition: color .15s ease, background .15s ease; }
 .np-theme-btn:hover { color: var(--text); }
 .np-theme-btn.active { background: var(--tint-2); color: var(--text); }
-@media (min-width: 1024px) {
-  .np-side-foot .np-theme { justify-content: center; display: flex; }
-  .np-side-foot .np-theme-btn { flex: 1; }
-}
 
 /* =============================================================================
    Question flow
@@ -667,12 +666,12 @@ body {
 .np-profileemail { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* =============================================================================
-   Merged Dashboard (bento grid)
+   Merged Dashboard — a NORMAL scrolling 1080px page (the viewport-tall no-scroll
+   height-lock is gone). The bento is a standard responsive grid in normal flow:
+   KPIs, radar, by-subject + rank-moves, leaderboard, actions. Same panels and
+   content; the page just scrolls like every other in-app view.
    ========================================================================== */
-.np-top--wide, .np-main--wide, .np-nav--wide, .np-foot--wide { max-width: var(--w-wide); }
-
-.np-dash-pagehead { margin-bottom: 16px; }
-.np-dash-pagehead .np-h2 { margin-bottom: 2px; }
+.np-dash-pagehead { margin-bottom: 22px; }
 .np-dash-pagehead .np-lede { margin-bottom: 0; max-width: 70ch; }
 
 .np-dash { display: grid; gap: 14px; grid-template-columns: repeat(12, 1fr); align-items: start; }
@@ -681,18 +680,16 @@ body {
 .np-dash-identity .np-profilename { font-size: 14px; line-height: 1.25; }
 .np-dash-identity .np-profileemail { font-size: 12px; line-height: 1.25; }
 .np-dash-rankchip { font-family: var(--mono); font-size: 12px; letter-spacing: .02em; color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-pill); padding: 4px 12px; white-space: nowrap; background: var(--tint-1); }
-/* Row 1 is purely the KPI cluster (identity lives in the sidebar). */
+/* Row 1 is purely the KPI cluster (identity lives in the top nav). */
 .np-dash-kpis { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-.np-dash-kpis .np-statcard { padding: 12px 16px; gap: 2px; justify-content: center; }
-.np-dash-kpis .np-statnum { font-size: 24px; }
-/* Row 2 splits into equal thirds: the sidebar narrowed the grid vs the old
-   tab layout, and at span-3 the text-dense "By subject" gate lines wrapped to
-   three lines each — overflowing the height-locked track. */
+.np-dash-kpis .np-statcard { padding: 14px 18px; gap: 2px; justify-content: center; }
+.np-dash-kpis .np-statnum { font-size: 26px; }
+/* Row 2 splits into equal thirds in normal flow (no height-lock). */
 .np-dash-radar { grid-column: span 4; }
 .np-dash-mid { grid-column: span 4; display: flex; flex-direction: column; gap: 14px; }
 .np-dash-lead { grid-column: span 4; }
-.np-dash-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 2px; }
-.np-dash-actbtn { min-height: 42px; }
+.np-dash-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 6px; margin-top: 4px; border-top: 1px solid var(--line); }
+.np-dash-actbtn { min-height: 44px; }
 .np-dash-panel { padding: var(--pad-card-compact); }
 .np-dash-subrow { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .np-dash-subrow:last-child { margin-bottom: 0; }
@@ -735,91 +732,11 @@ body {
   width: 100%; max-width: var(--w-narrow); height: max-content;
 }
 
-/* ≥1024px: the Dashboard becomes a VIEWPORT-TALL app frame (no page scroll);
-   panels scroll INSIDE their cards. The sidebar carries the chrome, so the
-   frame only has to budget the page header + grid. */
-@media (min-width: 1024px) {
-  .np-shell--dash {
-    height: 100vh;            /* legacy fallback */
-    height: 100svh;           /* fits on first paint, immune to mobile toolbar reflow */
-    display: flex; flex-direction: column; overflow: hidden;
-    padding-bottom: 24px;     /* reclaim the bottom pad for the no-scroll budget */
-  }
-  .np-shell--dash > .np-foot { display: none; }
-  .np-shell--dash > .np-main { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-  .np-shell--dash > .np-main > .np-dash-frame { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-  .np-dash-frame > .np-dash-pagehead { flex: 0 0 auto; margin-bottom: 10px; }
-  .np-dash-pagehead .np-h2 { font-size: 22px; }
-  .np-dash-pagehead .np-lede { font-size: 14px; }
-
-  .np-dash-frame > .np-dash {
-    flex: 1 1 auto; min-height: 0; gap: 12px;
-    grid-template-rows: auto 1fr auto;
-    align-items: stretch;
-    overflow: hidden;
-  }
-  .np-dash-frame .np-dash-kpis     { grid-row: 1; }
-  .np-dash-frame .np-dash-radar    { grid-row: 2; min-height: 0; }
-  .np-dash-frame .np-dash-mid      { grid-row: 2; min-height: 0; }
-  .np-dash-frame .np-dash-lead     { grid-row: 2; min-height: 0; }
-  .np-dash-frame .np-dash-actions  { grid-row: 3; }
-
-  .np-dash-frame .np-dash-radar,
-  .np-dash-frame .np-dash-mid > .np-card,
-  .np-dash-frame .np-dash-lead > .np-card {
-    display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 16px;
-  }
-  .np-dash-frame .np-dash-lead { display: flex; flex-direction: column; }
-  .np-dash-frame .np-dash-mid { overflow: hidden; }
-  /* "By subject" keeps its natural height while it fits, but may SHRINK and
-     scroll internally when the gate lines wrap taller than the track — it must
-     never overlap the action bar or push "Why your rank moved" out of view.
-     Both cards carry a floor so neither can be crushed to nothing. */
-  .np-dash-frame .np-dash-mid > .np-card:first-child {
-    flex: 0 1 auto; min-height: 150px; display: block;
-    overflow-y: auto; overscroll-behavior: contain;
-    scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent;
-  }
-  .np-dash-frame .np-dash-mid > .np-card:last-child { flex: 1 1 0; min-height: 140px; }
-
-  .np-dash-frame .np-dash-cardhead { flex: 0 0 auto; }
-  .np-dash-frame .np-dash-cardbody {
-    flex: 1 1 auto; min-height: 0;
-    overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable;
-    scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent;
-  }
-  /* Scroll affordance ("more above/below"): edge shadows pinned to the
-     container (attachment: scroll) + panel-colored covers that travel with the
-     content (attachment: local) and hide each shadow when that edge is fully
-     scrolled. Theme-proof: covers fade to var(--panel); the shadow hue is the
-     per-theme --scroll-shadow (a light haze on the black panel, a grey shadow
-     on the white one). Longhand on purpose — the background shorthand would
-     clobber .np-card's background-color. */
-  .np-dash-frame .np-dash-cardbody,
-  .np-dash-frame .np-dash-mid > .np-card:first-child {
-    background-image:
-      linear-gradient(var(--panel) 30%, transparent),
-      linear-gradient(transparent, var(--panel) 70%),
-      radial-gradient(farthest-side at 50% 0, var(--scroll-shadow), transparent),
-      radial-gradient(farthest-side at 50% 100%, var(--scroll-shadow), transparent);
-    background-position: center top, center bottom, center top, center bottom;
-    background-size: 100% 28px, 100% 28px, 100% 12px, 100% 12px;
-    background-repeat: no-repeat;
-    background-attachment: local, local, scroll, scroll;
-  }
-  .np-dash-frame .np-dash-cardbody:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 8px; }
-  .np-dash-frame .np-dash-cardbody::-webkit-scrollbar { width: 8px; }
-  .np-dash-frame .np-dash-cardbody::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 4px; }
-
-  /* Radar: the chart SHRINKS into whatever height is left so the focus rows
-     ("Weakest: …") stay pinned and always visible — no internal scroll here. */
-  .np-dash-frame .np-dash-radarchart { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; }
-  .np-dash-frame .np-dash-radarchart .np-chart { width: 100%; height: 100%; max-height: 300px; }
-  .np-dash-frame .np-dash-radar .np-dash-focus { flex: 0 0 auto; }
-
-  .np-dash-frame .np-dash-actions { padding-top: 12px; border-top: 1px solid var(--line); }
-  .np-dash-frame .np-dash-actbtn { min-height: 44px; }
-}
+/* Normal flow: the radar chart sizes to a sensible cap and the focus rows sit
+   below it; panels grow with their content (no internal scroll, no height-lock). */
+.np-dash-radarchart { display: flex; align-items: center; justify-content: center; }
+.np-dash-radarchart .np-chart { width: 100%; max-height: 300px; }
+.np-dash-cardbody:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 8px; }
 
 @media (max-width: 1023.98px) {
   .np-dash { grid-template-columns: 1fr; }
@@ -888,18 +805,8 @@ summary.np-cardicon { min-height: 44px; }
 .np-lp-container { width: 100%; max-width: 1080px; margin: 0 auto; padding-left: clamp(20px, 5vw, 40px); padding-right: clamp(20px, 5vw, 40px); }
 .np-lp a:focus-visible, .np-lp button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--radius-inset); }
 
-/* nav */
-.np-lp-nav { position: sticky; top: 0; z-index: 30; background: color-mix(in srgb, var(--bg) 80%, transparent); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-bottom: 1px solid var(--line); }
-.np-lp-navinner { max-width: 1080px; margin: 0 auto; padding: 12px clamp(20px, 5vw, 40px); display: flex; align-items: center; gap: 18px; }
-.np-lp-brand { font-family: var(--display); font-weight: 600; font-size: 17px; color: var(--text); text-decoration: none; letter-spacing: -.01em; }
-.np-lp-navlinks { display: flex; gap: 22px; margin-left: 8px; }
-.np-lp-navlinks a { color: var(--muted); font-size: 13.5px; text-decoration: none; transition: color .15s ease; }
-.np-lp-navlinks a:hover { color: var(--text); }
-.np-lp-navactions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
-.np-lp-navcta { min-height: 38px; padding: 8px 18px; font-size: 13.5px; }
-@media (max-width: 820px) { .np-lp-navlinks { display: none; } }
-@media (max-width: 540px) { .np-lp-navsignin { display: none; } }
-
+/* nav — the landing now renders the SHARED <TopNav> (.np-topnav*); its nav CSS
+   lives in the app-shell section above, so the two surfaces stay identical. */
 .np-lp-banners { padding-top: 14px; display: flex; flex-direction: column; gap: 10px; }
 
 /* hero */
@@ -1046,11 +953,7 @@ summary.np-cardicon { min-height: 44px; }
 }
 .np-lp-glow { animation: npGlowBreathe 9s ease-in-out infinite; }
 
-/* Nav condenses + firms up once you scroll past the hero. */
-.np-lp-nav { transition: background .25s ease, box-shadow .25s ease; }
-.np-lp-navinner { transition: padding .25s var(--ease); }
-.np-lp-nav.is-scrolled { background: color-mix(in srgb, var(--bg) 92%, transparent); box-shadow: 0 1px 0 var(--line); }
-.np-lp-nav.is-scrolled .np-lp-navinner { padding-top: 8px; padding-bottom: 8px; }
+/* (Nav condense lives on the shared .np-topnav in the app-shell section.) */
 
 /* Card hover lift (uses `translate`, independent of the reveal `transform`). */
 .np-lp-feat, .np-lp-subj, .np-lp-plan { transition: translate .2s var(--ease), border-color .2s ease, background .2s ease; }
@@ -1062,6 +965,17 @@ summary.np-cardicon { min-height: 44px; }
 /* Primary-button arrow nudges on hover. */
 .np-lp .np-primary svg { transition: transform .18s var(--ease); }
 .np-lp .np-primary:hover svg { transform: translateX(3px); }
+
+/* ---- in-app motion (the same primitives, now inside the .np-* layer) ----
+   The reveal selectors above are unscoped, so adding `is-armed` to the app root
+   lights them up for [data-reveal] page sections. Hover-lift is OPT-IN via
+   `.np-lift` so the dashboard's dense cells aren't all animated — only feature/
+   step/score cards and the like get the lift. */
+.np-card.np-lift { transition: translate .2s var(--ease), border-color .2s ease, background .2s ease; }
+.np-card.np-lift:hover { translate: 0 -3px; border-color: var(--line-strong); }
+/* In-app primary buttons get the same arrow-nudge the landing's do. */
+.np-app .np-primary svg { transition: transform .18s var(--ease); }
+.np-app .np-primary:hover svg { transform: translateX(3px); }
 
 /* The 0–350 ladder fills left→right when the bar scrolls into view. */
 .is-armed .np-lp-scale .np-lp-seg {

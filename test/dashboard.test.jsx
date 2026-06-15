@@ -95,7 +95,7 @@ describe("Dashboard — §7 curriculum breadth gate (by-subject, display-layer)"
     render(<Dashboard user={user} scores={scores} history={history} onPractice={() => {}} />);
     // math score 210 → depth says University, but nothing is mastered → chip gated down.
     expect(screen.getAllByText("Elementary").length).toBeGreaterThan(0);
-    expect(screen.getByText(/Score at University — master the 21 remaining Elementary concepts in Learn to advance/)).toBeTruthy();
+    expect(screen.getByText(/Score at University: master the 21 remaining Elementary concepts in Learn to advance/)).toBeTruthy();
     // The score itself is NOT capped (§11.3 Option B — label gating only).
     expect(screen.getAllByText("210").length).toBeGreaterThan(0);
   });
@@ -166,6 +166,22 @@ describe("Dashboard — leaderboard, reset, empty state", () => {
     await waitFor(() => expect(screen.getAllByText(/You're/i).length).toBeGreaterThan(0));
     expect(loadLeaderboard).toHaveBeenCalled();
     expect(screen.getAllByText(/ranked/i).length).toBeGreaterThan(0);
+  });
+
+  it("FIX 8: an UNVERIFIED caller sees a PROVISIONAL placement (no rank) with attempts remaining", async () => {
+    // The server marks the caller's own row provisional (a freshly-migrated guest score):
+    // it carries band/score for visibility but NO `above`, plus `needed` graded attempts.
+    const tiers = {
+      overall: { counts: [2, 1, 0, 0, 0], total: 3, you: { band: 3, score: 250, provisional: true, needed: 5 } },
+      math: { counts: [1, 1, 1, 0, 0], total: 3, you: { band: 3, score: 250, provisional: true, needed: 5 } },
+    };
+    const loadLeaderboard = vi.fn(async () => ({ tiers }));
+    render(<Dashboard user={user} scores={scores} history={history} loadLeaderboard={loadLeaderboard} onPractice={() => {}} />);
+    await waitFor(() => expect(screen.getByText(/provisional/i)).toBeTruthy());
+    expect(screen.getByText(/5 more graded attempts/i)).toBeTruthy();
+    // No real rank caption for a provisional user.
+    expect(screen.queryByText(/You're/i)).toBeNull();
+    expect(screen.queryByText(/top \d+%/i)).toBeNull();
   });
 
   it("does NOT render a duplicate Sign out (it lives once in the global header)", () => {

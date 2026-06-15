@@ -16,6 +16,7 @@ import Icon from "@/components/Icon";
 import { LineChart, BarChart, RadarChart, MiniBar } from "@/components/charts";
 import Leaderboard from "@/components/Leaderboard";
 import ReviewList from "@/components/ReviewList";
+import { useScrollReveal } from "@/components/useReveal";
 import { SubjectGlyph, deltaColor } from "@/components/ui";
 
 /* ---------------------------------------------------------------------------
@@ -27,23 +28,6 @@ import { SubjectGlyph, deltaColor } from "@/components/ui";
    in a slide-over Drawer. Guests (no signed-in `user`) get a gated, blurred preview
    prompting sign-in (no real data, no auth fetches).
 --------------------------------------------------------------------------- */
-
-// True at the desktop breakpoint where the dashboard becomes a viewport-tall frame
-// and its panels actually scroll internally. The scrollable-region tabIndex is gated
-// on this so the panels aren't empty keyboard tab-stops below 1024px (where they're
-// plain blocks on a normally-scrolling page).
-function useIsWide() {
-  const [wide, setWide] = useState(false);
-  useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
-    const mq = window.matchMedia("(min-width: 1024px)");
-    const sync = () => setWide(mq.matches);
-    sync();
-    mq.addEventListener("change", sync);
-    return () => mq.removeEventListener("change", sync);
-  }, []);
-  return wide;
-}
 
 // Reusable right-side slide-over drawer. Portaled to <body> so it mounts OUTSIDE
 // the inert background subtree (the page is made inert via onOverlayActiveChange,
@@ -147,7 +131,7 @@ function Drawer({ open, title, titleId, onClose, children }) {
 function KpiStats({ scores, attempts }) {
   return (
     <div className="np-dash-kpis">
-      <div className="np-card np-statcard">
+      <div className="np-card np-lift np-statcard">
         <span className="np-eyebrow np-eyebrow--xs">Doctorate index</span>
         {/* Neutral ink like its siblings — the KPI is not a subject or a valence,
             so it gets no chromatic accent under the greyscale system. */}
@@ -155,13 +139,13 @@ function KpiStats({ scores, attempts }) {
           {phdIndex(scores)}<span style={{ color: "var(--muted)", fontSize: 15 }}> / 350</span>
         </span>
       </div>
-      <div className="np-card np-statcard">
+      <div className="np-card np-lift np-statcard">
         <span className="np-eyebrow np-eyebrow--xs">Total points</span>
         <span className="np-statnum">
           {totalPoints(scores)}<span style={{ color: "var(--muted)", fontSize: 15 }}> / 1050</span>
         </span>
       </div>
-      <div className="np-card np-statcard">
+      <div className="np-card np-lift np-statcard">
         <span className="np-eyebrow np-eyebrow--xs">Problems graded</span>
         <span className="np-statnum">{attempts}</span>
       </div>
@@ -198,14 +182,14 @@ function BySubject({ scores, mastery, onPractice }) {
                 // The score qualifies for a higher band, but §7 holds the rank until
                 // the blocking curriculum is mastered (state in text, not color alone).
                 <span className="np-dash-subgatetext">
-                  <Icon name="lock" size={11} /> Score at {g.ungated.name} — master the{" "}
+                  <Icon name="lock" size={11} /> Score at {g.ungated.name}: master the{" "}
                   {g.next.total - g.next.mastered} remaining {g.next.rankLabel} concept
                   {g.next.total - g.next.mastered === 1 ? "" : "s"} in Learn to advance
                 </span>
               ) : g.next ? (
                 <span className="np-dash-subgatetext">
                   {g.next.complete
-                    ? `${g.next.rankLabel} curriculum complete — keep climbing`
+                    ? `${g.next.rankLabel} curriculum complete, keep climbing`
                     : `${g.next.rankLabel} curriculum: ${g.next.mastered}/${g.next.total} mastered`}
                 </span>
               ) : null}
@@ -227,11 +211,11 @@ function RadarPanel({ scores, onPractice, onLearn }) {
     .map((k) => ({ key: k, label: SUBJECTS[k].label, color: SUBJECTS[k].color, rubric: scores[k].rubric }));
 
   return (
-    <div className="np-card np-dash-radar">
+    <div className="np-card np-dash-radar" data-reveal style={{ "--ri": 0 }}>
       <div className="np-dash-cardhead">
         <div className="np-charttitle">Reasoning profile</div>
         <div className="np-chartsub" style={{ marginBottom: 0 }}>
-          Where you reason well across the dimensions we grade — and where to focus next.
+          Where you reason well across the dimensions we grade, and where to focus next.
         </div>
       </div>
       {rubricSubjects.length >= 1 ? (
@@ -249,7 +233,7 @@ function RadarPanel({ scores, onPractice, onLearn }) {
                   <SubjectGlyph subject={s.key} width={16} />
                   <span className="np-statsub" style={{ flex: 1, minWidth: 0 }}>
                     {lowLabel ? (
-                      <>Weakest: <strong style={{ color: "var(--text)" }}>{lowLabel}</strong>{concept ? <> — <em>{concept}</em></> : null}</>
+                      <>Weakest: <strong style={{ color: "var(--text)" }}>{lowLabel}</strong>{concept ? <>: <em>{concept}</em></> : null}</>
                     ) : (
                       "Keep practicing to refine your profile."
                     )}
@@ -273,9 +257,9 @@ function RadarPanel({ scores, onPractice, onLearn }) {
 
 // "Why your rank moved" — the most recent graded attempts with their persisted
 // one-line rationale (trimmed for the always-visible grid).
-function RecentMoves({ history, scrollRegion }) {
-  // Newest first. The panel scrolls internally, so we keep a generous slice rather
-  // than the old hard cap of 4 — the learner can scroll back through their history.
+function RecentMoves({ history }) {
+  // Newest first. In normal page flow we keep a generous slice (the page scrolls);
+  // the learner can scroll back through their recent history.
   const moves = history
     .filter((a) => a.type === "attempt" && typeof a.rationale === "string" && a.rationale.trim())
     .slice(-25)
@@ -288,7 +272,7 @@ function RecentMoves({ history, scrollRegion }) {
         <div className="np-charttitle" style={{ marginBottom: 4 }}>Why your rank moved</div>
         <div className="np-chartsub" style={{ marginBottom: 0 }}>Your latest graded attempts, and why each gained or cost points.</div>
       </div>
-      <div className="np-dash-cardbody" tabIndex={scrollRegion ? 0 : undefined} role="region" aria-label="Recent rank changes">
+      <div className="np-dash-cardbody" role="region" aria-label="Recent rank changes">
         {moves.length >= 1 ? (
           moves.map((m, i) => (
             <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 8 }}>
@@ -328,8 +312,8 @@ export default function Dashboard({
   const [imgFailed, setImgFailed] = useState(false);
   // Which slide-over drawer is open: null | "charts" | "reviews".
   const [drawer, setDrawer] = useState(null);
-  // ≥1024px (the panels scroll internally there) → mark the scroll regions focusable.
-  const isWide = useIsWide();
+  // Tasteful staggered scroll-reveal for the bento's main panels (shared hook).
+  const { ref: revealRef, armed } = useScrollReveal();
   // Per-concept mastery map for the §7 breadth gate (same injected-loader pattern
   // as loadLeaderboard/loadReviews). Signed-in only (the guest gate fetches
   // nothing); a load failure just renders ungated bands — nothing is lost.
@@ -378,7 +362,7 @@ export default function Dashboard({
           <h2 id="np-gate-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>Sign in to see your Dashboard</h2>
           <p className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
             Your scores, reasoning profile, leaderboard rank, and answer history live here. Sign in to unlock your dashboard
-            {scores ? " — your guest results carry over automatically." : "."}
+            {scores ? "; your guest results carry over automatically." : "."}
           </p>
           <button className="np-btn np-primary np-big np-btn--block" onClick={onSignIn}>
             <Icon name="login" size={16} /> Sign in
@@ -434,22 +418,23 @@ export default function Dashboard({
     .map((a) => ({ value: Math.round(a.delta || 0), glyph: SUBJECTS[a.subject]?.glyph || "·" }));
 
   return (
-    <div className="fade-up np-dash-frame">
-      <div className="np-dash-pagehead">
+    <div className={"fade-up np-dash-frame" + (armed ? " is-armed" : "")} ref={revealRef}>
+      <div className="np-pagehead np-dash-pagehead">
+        <span className="np-eyebrow--mono">Where you stand</span>
         <h2 className="np-h2">Your dashboard</h2>
-        <p className="np-lede">Your scores, reasoning profile, rank, and recent progress — all in one place.</p>
+        <p className="np-lede">Your scores, reasoning profile, rank, and recent progress, all in one place.</p>
       </div>
       <div className="np-dash">
-        {/* Identity (avatar + name + rank) lives in the app sidebar — the bento's
+        {/* Identity (avatar + name + rank) lives in the app top nav — the bento's
             top row is purely the KPI cluster. */}
         <KpiStats scores={scores} attempts={attempts} />
         <RadarPanel scores={scores} onPractice={onPractice} onLearn={onLearn} />
-        <div className="np-dash-mid">
+        <div className="np-dash-mid" data-reveal style={{ "--ri": 1 }}>
           <BySubject scores={scores} mastery={mastery} onPractice={onPractice} />
-          <RecentMoves history={history} scrollRegion={isWide} />
+          <RecentMoves history={history} />
         </div>
-        <div className="np-dash-lead">
-          <Leaderboard loadLeaderboard={loadLeaderboard} scrollRegion={isWide} />
+        <div className="np-dash-lead" data-reveal style={{ "--ri": 2 }}>
+          <Leaderboard loadLeaderboard={loadLeaderboard} />
         </div>
         <div className="np-dash-actions">
           <button className="np-btn np-secondary np-dash-actbtn" onClick={() => setDrawer("charts")}>
@@ -458,6 +443,13 @@ export default function Dashboard({
           <button className="np-btn np-secondary np-dash-actbtn" onClick={() => setDrawer("reviews")}>
             Review your answers <Icon name="arrow" size={16} />
           </button>
+          {/* Re-take the diagnostic to re-baseline. The replace-your-scores confirmation
+              lives in beginDiagnostic (FIX 6) so it fires from every entry point. */}
+          {onStartDiagnostic && (
+            <button className="np-btn np-secondary np-dash-actbtn" onClick={onStartDiagnostic}>
+              Re-take diagnostic <Icon name="arrow" size={16} />
+            </button>
+          )}
           <button
             className="np-btn np-danger np-dash-actbtn"
             style={{ marginLeft: "auto" }}
@@ -482,7 +474,7 @@ export default function Dashboard({
         </div>
         <div className="np-card np-chartcard">
           <div className="np-charttitle">Points gained and lost</div>
-          <div className="np-chartsub">Each bar is one graded attempt — above the line when your reasoning earned points, below it when it cost them.</div>
+          <div className="np-chartsub">Each bar is one graded attempt: above the line when your reasoning earned points, below it when it cost them.</div>
           {barItems.length >= 1 ? (
             <BarChart items={barItems} />
           ) : (

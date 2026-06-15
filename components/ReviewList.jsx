@@ -51,7 +51,7 @@ export default function ReviewList({ loadReviews, onPractice, onLearn }) {
       ) : error ? (
         <p className="np-statsub">{error}</p>
       ) : !reviews || reviews.length === 0 ? (
-        <p className="np-statsub">No graded answers to review yet — solve a practice problem and it'll show up here.</p>
+        <p className="np-statsub">No graded answers to review yet. Solve a practice problem and it'll show up here.</p>
       ) : (
         reviews.map((rv, i) => {
           const color = SUBJECTS[rv.subject]?.color || "var(--muted)";

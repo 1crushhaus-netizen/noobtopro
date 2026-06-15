@@ -19,7 +19,7 @@ const TRACK_DEFS = [
   ...ORDER.map((k) => ({ key: k, label: SUBJECTS[k].label, color: SUBJECTS[k].color, glyph: SUBJECTS[k].glyph })),
 ];
 
-export default function Leaderboard({ loadLeaderboard, scrollRegion }) {
+export default function Leaderboard({ loadLeaderboard }) {
   const [tiers, setTiers] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -63,17 +63,24 @@ export default function Leaderboard({ loadLeaderboard, scrollRegion }) {
   const you = overall && overall.you;
   const total = overall ? Number(overall.total) || 0 : 0;
   const youBand = you && Number.isInteger(you.band) ? you.band : null;
-  const topPct = you && total >= 2 ? Math.max(1, Math.round(((you.above + 1) / total) * 100)) : null;
+  // FIX 8: an UNVERIFIED caller (a freshly-migrated guest score) gets a PROVISIONAL
+  // placement — no real rank/percentile until N=5 server-graded attempts are earned.
+  const provisional = !!(you && you.provisional);
+  const gradedNeeded = provisional ? Math.max(0, Number(you.needed) || 0) : 0;
+  // A real percentile only exists for a VERIFIED caller (the server omits `above` when provisional).
+  const topPct = you && !provisional && total >= 2 && Number.isFinite(Number(you.above))
+    ? Math.max(1, Math.round(((you.above + 1) / total) * 100))
+    : null;
 
   return (
     <div className="np-card">
       <div className="np-dash-cardhead">
         <div className="np-charttitle" style={{ marginBottom: 6 }}>Leaderboard</div>
         <div className="np-chartsub" style={{ marginBottom: 0 }}>
-          How everyone ranked is distributed across the five ranks — anonymous by design. The dot on each curve is you.
+          How everyone ranked is distributed across the five ranks, anonymous by design. The dot on each curve is you.
         </div>
       </div>
-      <div className="np-dash-cardbody" tabIndex={scrollRegion ? 0 : undefined} role="region" aria-label="Leaderboard rankings">
+      <div className="np-dash-cardbody" role="region" aria-label="Leaderboard rankings">
         {loading ? (
           <p className="np-statsub" role="status" aria-live="polite">Loading the leaderboard…</p>
         ) : error ? (
@@ -91,10 +98,17 @@ export default function Leaderboard({ loadLeaderboard, scrollRegion }) {
             </div>
             <RankDistribution tracks={tracks} rankLabels={RANKS} />
             <div className="np-statsub" style={{ marginTop: 8 }}>
-              {youBand != null ? (
+              {provisional ? (
+                // FIX 8: a migrated guest score is shown but UNRANKED until verified.
+                <>
+                  Your placement is <strong style={{ color: "var(--text)" }}>provisional</strong>. Complete{" "}
+                  {gradedNeeded > 0 ? <>{gradedNeeded} more graded {gradedNeeded === 1 ? "attempt" : "attempts"}</> : "a few graded attempts"}{" "}
+                  to join the leaderboard.
+                </>
+              ) : youBand != null ? (
                 <>
                   You're <strong style={{ color: "var(--text)" }}>{RANKS[youBand]}</strong> overall
-                  {topPct != null ? <> — top {topPct}%</> : null} of {total} ranked
+                  {topPct != null ? <>, top {topPct}%</> : null} of {total} ranked
                 </>
               ) : (
                 "Complete the diagnostic to take your place."
@@ -102,7 +116,7 @@ export default function Leaderboard({ loadLeaderboard, scrollRegion }) {
             </div>
           </>
         ) : (
-          <p className="np-statsub">No ranked learners yet — be the first.</p>
+          <p className="np-statsub">No ranked learners yet. Be the first.</p>
         )}
       </div>
     </div>

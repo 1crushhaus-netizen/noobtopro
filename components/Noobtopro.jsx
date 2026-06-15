@@ -23,8 +23,9 @@ import SignIn from "@/components/SignIn";
 import LearnTab from "@/components/LearnTab";
 import AdminDashboard from "@/components/AdminDashboard";
 import ScoreBreakdown, { ErrorList, hasReasoningError } from "@/components/ScoreBreakdown";
-import ThemeToggle from "@/components/ThemeToggle";
 import Landing from "@/components/Landing";
+import TopNav from "@/components/TopNav";
+import { useScrolled } from "@/components/useReveal";
 import { SubjectGlyph, deltaColor } from "@/components/ui";
 
 /* ----------------------------- helpers ----------------------------- */
@@ -46,7 +47,7 @@ async function api(path, body) {
       // Surface the server's Retry-After so the user knows how long to wait.
       const retry = Number(res.headers.get("Retry-After"));
       if (Number.isFinite(retry) && retry > 0) {
-        msg = `Too many requests — please wait ${retry}s and try again.`;
+        msg = `Too many requests. Please wait ${retry}s and try again.`;
       }
     }
     throw new Error(msg);
@@ -103,7 +104,7 @@ const MAX_RAW_IMAGE_BYTES = 2_500_000;
 const MAX_IMAGE_DIM = 1280;
 async function prepareImage(file) {
   if (file.type && !IMAGE_MIME_ALLOWED.has(file.type)) {
-    throw new Error("That file type isn't supported — attach a JPEG, PNG, WebP, or GIF photo.");
+    throw new Error("That file type isn't supported. Attach a JPEG, PNG, WebP, or GIF photo.");
   }
   // Probe 2D-canvas availability BEFORE wiring an <img> load: environments without
   // canvas (jsdom, some webviews) would otherwise leave the load promise pending
@@ -146,7 +147,7 @@ async function prepareImage(file) {
     }
   }
   if (file.size > MAX_RAW_IMAGE_BYTES) {
-    throw new Error("That photo is too large to grade — please retake it smaller, or crop to just your work.");
+    throw new Error("That photo is too large to grade. Please retake it smaller, or crop to just your work.");
   }
   return { data: await fileToBase64(file), mime: file.type || "image/jpeg" };
 }
@@ -164,10 +165,6 @@ const loadLeaderboard = () => authApi("/api/leaderboard", {});
 // Key for one adaptive-diagnostic step entry (subject + step number — the band can
 // repeat across a ±1 walk, so it can't key anything).
 const qid = (q) => (q ? `${q.subject}:${q.stepNo}` : "");
-
-// NEXT_PUBLIC_* is inlined at build time. When "true", the Learn tab becomes the
-// browsable Concept Hub (full catalog); otherwise it stays the weak-concept picker.
-const HUB_ENABLED = process.env.NEXT_PUBLIC_ENABLE_CONCEPT_HUB === "true";
 
 // Object URLs created for image previews must be revoked or they leak memory
 // for the life of the page. Safe to call with a missing/blob-less image.
@@ -249,7 +246,7 @@ function AnswerComposer({ value, onText, img, onAttach, onRemoveImg, onSubmit, o
         aria-label="Your reasoning"
         value={value}
         onChange={(e) => onText(e.target.value)}
-        placeholder={placeholder || "Show your full reasoning — every step, not just the answer."}
+        placeholder={placeholder || "Show your full reasoning: every step, not just the answer."}
         rows={6}
       />
       {img && (
@@ -279,8 +276,8 @@ function AnswerComposer({ value, onText, img, onAttach, onRemoveImg, onSubmit, o
               className="np-ghost np-skip"
               disabled={skipLocked || loading}
               onClick={onSkip}
-              aria-label={skipLocked ? `I don't know — available in ${skipIn} seconds` : "I don't know — skip this question"}
-              title={skipLocked ? "Take a moment to think it through first" : "Skip — I don't know this one"}
+              aria-label={skipLocked ? `I don't know, available in ${skipIn} seconds` : "I don't know, skip this question"}
+              title={skipLocked ? "Take a moment to think it through first" : "Skip, I don't know this one"}
             >
               {skipLocked ? `I don't know (${skipIn}s)` : "I don't know"}
             </button>
@@ -294,35 +291,9 @@ function AnswerComposer({ value, onText, img, onAttach, onRemoveImg, onSubmit, o
   );
 }
 
-// Signed-in identity in the sidebar footer (avatar + name + email + overall rank).
-// This is identity's ONLY home — the Dashboard bento dropped its identity bar so
-// the top row is purely KPIs.
-function SidebarIdentity({ user, scores }) {
-  const [imgFailed, setImgFailed] = useState(false);
-  if (!user) return null;
-  const meta = user.user_metadata || {};
-  const name = meta.full_name || meta.name || user.email || "You";
-  const avatar = meta.avatar_url || meta.picture || null;
-  const showAvatar = avatar && !imgFailed;
-  return (
-    <div className="np-side-id">
-      {showAvatar ? (
-        <img className="np-avatar np-side-avatar" src={avatar} alt="" referrerPolicy="no-referrer" onError={() => setImgFailed(true)} />
-      ) : (
-        <div className="np-avatar np-avatarfallback np-side-avatar">{String(name).charAt(0).toUpperCase()}</div>
-      )}
-      <div className="np-side-idtext">
-        <span className="np-side-name">{name}</span>
-        {user.email && <span className="np-side-user">{user.email}</span>}
-      </div>
-      {scores && (
-        <span className="np-dash-rankchip np-side-rank" title="Your overall rank">
-          {rankFor(phdIndex(scores)).name}
-        </span>
-      )}
-    </div>
-  );
-}
+// Signed-in identity (avatar + name + email + overall rank) now lives in the
+// shared TopNav (components/TopNav.jsx) — its only home, the Dashboard bento has
+// no identity bar.
 
 function Loader({ subject }) {
   const lines = ["Reading your reasoning line by line", "Weighing the thinking, not just the answer", "Scoring against the rubric"];
@@ -341,6 +312,128 @@ function Loader({ subject }) {
   );
 }
 
+// The DEEP-LINKED concept guide (FIX 1): when a "Learn this" link from the
+// dashboard radar, a review row, or a weak-concept chip is tapped, openLearn fetches
+// the shared /api/learn guide into learnContent — this renders THAT guide (overview,
+// key ideas, why it works, pitfalls, Socratic questions, and the bundled "try this"
+// practice question) instead of the generic curriculum browser. "Browse the full
+// library" clears the concept to fall back to <LearnTab>. Reuses the .np-lesson card
+// system shared with LearnTab's ConceptGuide so the two surfaces read identically.
+function LearnConceptGuide({ concept, content, busy, error, onPractice, onBrowse, onRetry }) {
+  const subject = concept && concept.subject;
+  const color = SUBJECTS[subject] ? SUBJECTS[subject].color : "var(--text)";
+  const browseLink = (
+    <button type="button" className="np-ghost" onClick={onBrowse}>
+      <Icon name="back" size={15} /> Browse the full library
+    </button>
+  );
+
+  if (busy) {
+    return (
+      <div className="fade-up">
+        {browseLink}
+        <div className="np-card fade-up" role="status" aria-live="polite" style={{ textAlign: "center", padding: "48px 24px" }}>
+          <div className="np-pulse" style={{ fontFamily: "var(--mono)", fontSize: 13, letterSpacing: 1, color: "var(--muted)" }}>
+            {subject ? subject.toUpperCase() : "LEARN"}
+          </div>
+          <div style={{ fontFamily: "var(--display)", fontSize: 22, marginTop: 10 }}>Building your concept guide…</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !content) {
+    return (
+      <div className="fade-up">
+        {browseLink}
+        <div className="np-card np-lesson" role="alert">
+          <div className="np-cardicon" style={{ color: "var(--danger)" }}>Couldn’t load this concept</div>
+          <p className="np-lessontext">{error || "The concept guide is unavailable right now."}</p>
+          <button type="button" className="np-btn np-secondary" style={{ marginTop: 10 }} onClick={onRetry}>Try again</button>
+        </div>
+      </div>
+    );
+  }
+
+  const tryThis = content.tryThisQuestion || null;
+  return (
+    <div className="fade-up">
+      {browseLink}
+
+      <div className="np-qmeta" style={{ marginTop: 14, marginBottom: 12 }}>
+        <SubjectGlyph subject={subject} />
+        <span className="np-metaline">{SUBJECTS[subject] ? SUBJECTS[subject].label.toUpperCase() : ""}</span>
+      </div>
+      <h2 className="np-h1" style={{ color }}>{content.concept}</h2>
+
+      {content.overview && (
+        <div className="np-card np-lesson">
+          <div className="np-cardicon" style={{ color }}>Overview</div>
+          <p className="np-lessontext">{content.overview}</p>
+        </div>
+      )}
+
+      {Array.isArray(content.keyIdeas) && content.keyIdeas.length > 0 && (
+        <div className="np-card np-lesson">
+          <div className="np-cardicon" style={{ color }}>Key ideas</div>
+          <ul className="np-selfqs">
+            {content.keyIdeas.map((idea, i) => <li key={i}>{idea}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {content.whyItWorks && (
+        <div className="np-card np-lesson">
+          <div className="np-cardicon" style={{ color }}>Why it works</div>
+          <p className="np-lessontext">{content.whyItWorks}</p>
+        </div>
+      )}
+
+      {Array.isArray(content.pitfalls) && content.pitfalls.length > 0 && (
+        <div className="np-card np-lesson">
+          <div className="np-cardicon" style={{ color }}>Common pitfalls</div>
+          <ul className="np-selfqs">
+            {content.pitfalls.map((p, i) => <li key={i}>{p}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {Array.isArray(content.socraticQuestions) && content.socraticQuestions.length > 0 && (
+        <div className="np-card np-lesson">
+          <div className="np-cardicon" style={{ color }}>Ask yourself</div>
+          <p className="np-lessontext" style={{ color: "var(--muted)", marginBottom: 10 }}>
+            Think these through before practicing. Explaining your reasoning out loud counts.
+          </p>
+          <ul className="np-selfqs">
+            {content.socraticQuestions.map((q, i) => <li key={i}>{q}</li>)}
+          </ul>
+        </div>
+      )}
+
+      <div className="np-card np-lesson">
+        <div className="np-cardicon" style={{ color }}>Practice this concept</div>
+        {content.tryThis && (
+          <p className="np-lessontext" style={{ color: "var(--muted)", marginBottom: 12 }}>{content.tryThis}</p>
+        )}
+        {tryThis && onPractice ? (
+          <button
+            type="button"
+            className="np-btn np-primary np-btn--subject"
+            style={{ "--subject": color }}
+            onClick={() => onPractice(subject, tryThis)}
+          >
+            Practice this concept
+          </button>
+        ) : (
+          <p className="np-hint" style={{ margin: 0 }}>
+            A practice question for this concept is coming soon. Explore the full library below in the meantime.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ----------------------------- app ----------------------------- */
 export default function Noobtopro() {
   const [stage, setStage] = useState("intro"); // intro | signin | diagnostic | scoring | dashboard | practice
@@ -354,6 +447,7 @@ export default function Noobtopro() {
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [user, setUser] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false); // server-verified via /api/admin/me; gates the Admin tab
+  const navScrolled = useScrolled(); // drives the shared TopNav condense-on-scroll
 
   const [questions, setQuestions] = useState([]);
   const [qi, setQi] = useState(0);
@@ -375,10 +469,9 @@ export default function Noobtopro() {
   const [learnBusy, setLearnBusy] = useState(false);
   const [learnError, setLearnError] = useState("");
   // The active "try this" practice question for the open concept ({question,
-  // targetConcept, difficulty}) — seeded from the cached guide, replaceable via
-  // "Regenerate" (session-only). And a flag for that regenerate request.
+  // targetConcept, difficulty, token}) — the bundled guide question wired to the
+  // deep-link's "Practice this concept" button (FIX 1).
   const [learnQuestion, setLearnQuestion] = useState(null);
-  const [learnRegen, setLearnRegen] = useState(false);
   // The curriculum concept key currently generating an AI practice drill (increment 3) —
   // drives the concept-page button's spinner; null when idle.
   const [drillBusy, setDrillBusy] = useState(null);
@@ -671,6 +764,17 @@ export default function Noobtopro() {
   // returns, so answering naturally interleaves subjects and hides grading
   // latency); a stale run is superseded via diagRun.
   async function beginDiagnostic() {
+    // FIX 6: a re-baseline OVERWRITES the signed-in user's accumulated scores (the
+    // diagnostic finalize upserts all three subjects — README §17). Confirm before
+    // discarding existing progress; on cancel, do nothing (no navigation, no fetch).
+    // Guests aren't gated (their scores are local + this is their normal first run);
+    // a signed-in user with NO scores yet is taking their first diagnostic, so no prompt.
+    if (user && scores && typeof window !== "undefined" && typeof window.confirm === "function") {
+      const ok = window.confirm(
+        "Re-taking the diagnostic will replace your current scores with a fresh baseline. Your accumulated progress will be lost. Continue?"
+      );
+      if (!ok) return;
+    }
     setError("");
     setDiagError("");
     setBusy(true);
@@ -864,7 +968,6 @@ export default function Noobtopro() {
     setLearnConcept({ subject, concept });
     setLearnError("");
     setLearnQuestion(null);
-    setLearnRegen(false); // clear any "Generating…" inherited from a prior concept's in-flight regenerate
 
     const key = `${subject}::${concept}`;
     const cached = learnCacheRef.current[key];
@@ -1245,10 +1348,6 @@ export default function Noobtopro() {
   // used to — once there's progress or a session, outside the sign-in screen.
   // Chrome-less stages (intro / sign-in) keep a minimal centered header instead.
   const chrome = (user || scores) && stage !== "signin";
-  // np-shell--dash (the viewport-tall height-lock) applies only to the ranked bento
-  // grid; the not-ranked empty state keeps normal page scroll so a short viewport
-  // can't clip its "Prove it" CTA.
-  const dashLock = view === "dashboard" && user && scores;
 
   // The public marketing landing page IS the intro stage now. It renders for anyone
   // on "intro" (guest OR a signed-in user who hasn't been ranked yet) — gating on the
@@ -1297,7 +1396,7 @@ export default function Noobtopro() {
               Save your progress
             </h2>
             <p id="np-save-desc" className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
-              Nice work — you've got your starting scores. Sign in to keep them across devices; your guest
+              Nice work. You've got your starting scores. Sign in to keep them across devices; your guest
               results carry over automatically.
             </p>
             <button
@@ -1311,79 +1410,38 @@ export default function Noobtopro() {
         </div>
       )}
 
-      {chrome && (
-        <aside className="np-side" inert={bgInert}>
-          <button className="np-brand" onClick={reset} title="Restart">
-            noob<span className="np-arrow">→</span>topro
-          </button>
-          <nav className="np-nav" aria-label="Primary">
-            <button className={"np-tab" + (view === "practice" ? " active" : "")} onClick={() => setView("practice")}>
-              <Icon name="target" size={16} /> Practice
-            </button>
-            {scores && (
-              <button className={"np-tab" + (view === "learn" ? " active" : "")} onClick={() => setView("learn")}>
-                <Icon name="book" size={16} /> Learn
-              </button>
-            )}
-            {/* One merged Dashboard tab (was Progress + Profile). Shown whenever the
-                nav shows; a guest who clicks it gets the sign-in gate. */}
-            <button className={"np-tab" + (view === "dashboard" ? " active" : "")} onClick={() => setView("dashboard")}>
-              <Icon name="grid" size={16} /> Dashboard
-            </button>
-            {user && isAdmin && (
-              <button className={"np-tab" + (view === "admin" ? " active" : "")} onClick={() => setView("admin")}>
-                <Icon name="shield" size={16} /> Admin
-              </button>
-            )}
-          </nav>
-          <div className="np-side-foot">
-            <SidebarIdentity user={user} scores={scores} />
-            <ThemeToggle />
-            {user ? (
-              <button className="np-signinbtn" onClick={handleSignOut} title={user.email || ""}>
-                <Icon name="logout" size={16} /> Sign out
-              </button>
-            ) : (
-              <button
-                className="np-signinbtn"
-                onClick={() => (isSupabaseConfigured ? openSignIn() : setShowAuthNote(true))}
-              >
-                <Icon name="login" size={16} /> Sign in
-              </button>
-            )}
-          </div>
-        </aside>
-      )}
+      <div className="np-app" inert={bgInert}>
+        {/* ONE shared sticky TopNav. With app chrome it carries the view tabs +
+            identity + sign-out; on the chrome-less sign-in screen it falls back
+            to just the brand + theme (+ a sign-in for a returning guest). The
+            brand is the Restart control everywhere. */}
+        <TopNav
+          scrolled={navScrolled}
+          onBrand={reset}
+          brandTitle="Restart"
+          tabs={chrome ? [
+            { id: "practice", label: "Practice", icon: "target", active: view === "practice", onClick: () => setView("practice") },
+            ...(scores ? [{ id: "learn", label: "Learn", icon: "book", active: view === "learn", onClick: () => setView("learn") }] : []),
+            // One merged Dashboard tab (was Progress + Profile); a guest who clicks it gets the sign-in gate.
+            { id: "dashboard", label: "Dashboard", icon: "grid", active: view === "dashboard", onClick: () => setView("dashboard") },
+            ...(user && isAdmin ? [{ id: "admin", label: "Admin", icon: "shield", active: view === "admin", onClick: () => setView("admin") }] : []),
+          ] : undefined}
+          user={chrome ? user : undefined}
+          scores={chrome ? scores : undefined}
+          signIn={
+            // Sign-in button: in app chrome for a guest; on chrome-less non-intro
+            // stages for a returning guest. (The intro/sign-in screens surface their
+            // own entry points, so we don't double up there.)
+            (chrome && !user) || (!chrome && !user && stage !== "intro" && stage !== "signin")
+              ? { onClick: () => (isSupabaseConfigured ? openSignIn() : setShowAuthNote(true)), label: "Sign in" }
+              : undefined
+          }
+          signOut={chrome && user ? { onClick: handleSignOut, label: "Sign out", title: user.email || "" } : undefined}
+        />
 
-      <div className={"np-frame" + (chrome ? " np-frame--side" : "")} inert={bgInert}>
-        <div className={"np-shell" + (dashLock ? " np-shell--dash" : "")}>
-          {!chrome && (
-            <header className="np-top">
-              <button className="np-brand" onClick={reset} title="Restart">
-                noob<span className="np-arrow">→</span>topro
-              </button>
-              <span className="np-tag">prove what you know</span>
-              <div className="np-signin">
-                <ThemeToggle />
-                {/* Guests on the intro see Sign in beside the primary CTA instead, so
-                    the top-right button is hidden there to avoid two sign-in buttons
-                    (and the sign-in screen needs no second entry point). */}
-                {!user && stage !== "intro" && stage !== "signin" && (
-                  isSupabaseConfigured ? (
-                    <button className="np-signinbtn" onClick={openSignIn}>
-                      <Icon name="login" size={16} /> Sign in
-                    </button>
-                  ) : (
-                    <button className="np-signinbtn" onClick={() => setShowAuthNote(true)}>
-                      <Icon name="login" size={16} /> Sign in
-                    </button>
-                  )
-                )}
-              </div>
-            </header>
-          )}
-
-          <main className={"np-main" + (view === "dashboard" && user ? " np-main--wide" : "")}>
+        <div className="np-frame">
+          <div className="np-shell">
+          <main className="np-main">
         {showAuthNote && (
           <div className="np-banner fade-up">
             <span>Google sign-in runs through Supabase. Add your Supabase URL + anon key and enable the Google provider by following the README ("Supabase setup"). The app works fully as a guest in the meantime.</span>
@@ -1429,26 +1487,43 @@ export default function Noobtopro() {
             onOverlayActiveChange={setOverlayActive}
           />
         ) : view === "learn" && scores ? (
-          <LearnTab onPractice={startConceptDrill} busyConcept={drillBusy} />
+          // FIX 1: a deep-linked "Learn this" concept (learnConcept set) renders the
+          // fetched /api/learn guide; otherwise the generic curriculum browser.
+          learnConcept ? (
+            <LearnConceptGuide
+              concept={learnConcept}
+              content={learnContent}
+              busy={learnBusy}
+              error={learnError}
+              onPractice={startPracticeWithQuestion}
+              onBrowse={() => { setLearnConcept(null); setLearnError(""); }}
+              onRetry={() => openLearn(learnConcept.subject, learnConcept.concept)}
+            />
+          ) : (
+            <LearnTab onPractice={startConceptDrill} busyConcept={drillBusy} />
+          )
         ) : (
           <>
-            {/* INTRO */}
+            {/* INTRO (signed-in but not yet ranked — guests see the Landing instead) */}
             {stage === "intro" && (
               <div className="fade-up">
-                <h1 className="np-h1">Stop memorizing.<br />Start thinking. Climb.</h1>
-                <p className="np-lede">
-                  School makes you memorize. Most apps make you chase streaks. noobtopro does neither: it hands you real
-                  problems, reads <em>how you reason</em>, and scores each subject 0–350 — Elementary to Doctorate. Stuck? It won't hand over the
-                  answer — it asks the right question and teaches the one concept you're missing. For students and
-                  self-learners who'd rather understand than cram.
-                </p>
+                <div className="np-pagehead">
+                  <span className="np-eyebrow--mono">Reasoning-first STEM assessment</span>
+                  <h1 className="np-h1">Stop memorizing. Start thinking. Climb.</h1>
+                  <p className="np-lede">
+                    School makes you memorize. Most apps make you chase streaks. noobtopro does neither: it hands you real
+                    problems, reads <em>how you reason</em>, and scores each subject 0 to 350, Elementary to Doctorate. Stuck? It won't hand over the
+                    answer; it asks the right question and teaches the one concept you're missing. For students and
+                    self-learners who'd rather understand than cram.
+                  </p>
+                </div>
                 <div className="np-steps">
                   {[
-                    ["01", "Prove it", "Nine open problems — beginner, intermediate, and hard in each of math, physics, and chemistry. Explain every step, or tap “I don’t know” to skip."],
-                    ["02", "Get ranked", "Your reasoning is graded on a 9-axis rubric and mapped to a 0–350 rank per subject — Elementary up to Doctorate."],
-                    ["03", "Climb", "Pick a subject. Get calibrated problems. Sound reasoning moves your score — even when the answer's wrong."],
+                    ["01", "Prove it", "Nine open problems: beginner, intermediate, and hard in each of math, physics, and chemistry. Explain every step, or tap “I don’t know” to skip."],
+                    ["02", "Get ranked", "Your reasoning is graded on a 9-axis rubric and mapped to a 0 to 350 rank per subject, Elementary up to Doctorate."],
+                    ["03", "Climb", "Pick a subject. Get calibrated problems. Sound reasoning moves your score, even when the answer's wrong."],
                   ].map(([n, t, d]) => (
-                    <div key={n} className="np-card np-step">
+                    <div key={n} className="np-card np-lift np-step">
                       <div className="np-stepnum">{n}</div>
                       <div className="np-steptitle">{t}</div>
                       <div className="np-stepdesc">{d}</div>
@@ -1483,8 +1558,12 @@ export default function Noobtopro() {
             {/* DIAGNOSTIC */}
             {stage === "diagnostic" && curQ && (
               <div className="fade-up" key={qi}>
+                <div className="np-pagehead">
+                  <span className="np-eyebrow--mono">Adaptive placement</span>
+                  <h2 className="np-h2">Prove what you know</h2>
+                </div>
                 {/* Progress: 3 subject groups × stepsTotal pips, filled by the steps
-                    ANSWERED per subject (the §8 adaptive walk — band varies per step,
+                    ANSWERED per subject (the §8 adaptive walk, band varies per step,
                     so pips count steps, not tiers). */}
                 <div className="np-diag-progress">
                   {ORDER.map((s) => (
@@ -1519,7 +1598,7 @@ export default function Noobtopro() {
                   }
                   loading={false}
                 />
-                <p className="np-hint">noobtopro grades your <em>thinking</em>, so explain your full approach — or attach a photo of your worked notes. Each answer is scored while you work on the next subject, and the difficulty adapts to you.</p>
+                <p className="np-hint">noobtopro grades your <em>thinking</em>, so explain your full approach, or attach a photo of your worked notes. Each answer is scored while you work on the next subject, and the difficulty adapts to you.</p>
               </div>
             )}
 
@@ -1556,13 +1635,16 @@ export default function Noobtopro() {
                     </button>
                   </div>
                 )}
-                <h2 className="np-h2">Where you stand</h2>
-                <p className="np-lede" style={{ marginBottom: 22 }}>{SCALE_NOTE}</p>
+                <div className="np-pagehead">
+                  <span className="np-eyebrow--mono">Your results</span>
+                  <h2 className="np-h2">Where you stand</h2>
+                  <p className="np-lede">{SCALE_NOTE}</p>
+                </div>
                 <div className="np-grid3">
                   {ORDER.map((k) => {
                     const s = scores[k] || { score: 0, weakConcepts: [], comment: "" };
                     return (
-                      <div key={k} className="np-card np-scorecard">
+                      <div key={k} className="np-card np-lift np-scorecard">
                         <div className="np-scorehead">
                           <SubjectGlyph subject={k} size={20} />
                           <span className="np-scorelabel">{SUBJECTS[k].label}</span>
@@ -1604,6 +1686,10 @@ export default function Noobtopro() {
                 <button className="np-ghost" style={{ marginBottom: 14 }} onClick={() => setStage("dashboard")}>
                   <Icon name="back" size={15} /> Back to scores
                 </button>
+                <div className="np-pagehead">
+                  <span className="np-eyebrow--mono">Practice</span>
+                  <h2 className="np-h2">Climb {pSubject ? SUBJECTS[pSubject].label : "your subjects"}</h2>
+                </div>
 
                 {busy && !pQuestion && <Loader subject={pSubject ? SUBJECTS[pSubject].label : ""} />}
 
@@ -1651,7 +1737,7 @@ export default function Noobtopro() {
                             <div className="np-eyebrow">Reasoning quality this attempt</div>
                             <div className="np-feedscore">{feedback.reasoningScore}<span style={{ color: "var(--muted)", fontSize: 18 }}>/100</span></div>
                           </div>
-                          <div className="np-feedsub">Your <em>reasoning</em> is scored — not the final answer. The breakdown below shows exactly how.</div>
+                          <div className="np-feedsub">Your <em>reasoning</em> is scored, not the final answer. The breakdown below shows exactly how.</div>
                         </div>
 
                         {/* How this score is computed — per-axis value × weight = points, summing
@@ -1741,9 +1827,10 @@ export default function Noobtopro() {
         )}
           </main>
 
-          <footer className={"np-foot" + (view === "dashboard" && user ? " np-foot--wide" : "")}>
+          <footer className="np-foot">
             © {new Date().getFullYear()} noobtopro · your reasoning is graded by AI against a nine-axis rubric
           </footer>
+          </div>
         </div>
       </div>
     </div>

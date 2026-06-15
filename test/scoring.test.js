@@ -638,7 +638,7 @@ describe("lowestRubricDimensions", () => {
 });
 
 // ---- diagnosticPathScore (the §8 adaptive walk's aggregate) -----------------
-import { diagnosticPathScore, diagnosticSeedFromReasoning as _seedFR } from "@/lib/scoring";
+import { diagnosticPathScore, diagnosticSeedFromReasoning as _seedFR, DIAG_PLACEMENT_CEILING } from "@/lib/scoring";
 
 describe("diagnosticPathScore (path-weighted, no full-weight floor)", () => {
   it("is the plain difficulty-weighted mean over the walked bands", () => {
@@ -678,8 +678,8 @@ describe("diagnosticPathScore (path-weighted, no full-weight floor)", () => {
       { difficulty: "phd", reasoningScore: 75, rubric },
     ];
     const seed = _seedFR(qs, { pathWeighted: true });
-    // The aggregate is a QUALITY (0–100); the seeded score lands on the 0–350
-    // subject scale (×3.5, rounded by the squash round-trip).
-    expect(seed.score).toBe(Math.round((diagnosticPathScore(qs) * 350) / 100));
+    // The aggregate is a QUALITY (0–100); FIX 7 maps it onto the subject scale through
+    // the conservative DIAG_PLACEMENT_CEILING (rounded by the squash round-trip).
+    expect(seed.score).toBe(Math.round((diagnosticPathScore(qs) * DIAG_PLACEMENT_CEILING) / 100));
   });
 });

@@ -239,6 +239,62 @@ describe("db/schema.sql — Elo ranking + leaderboard invariants (PR 3)", () => 
   });
 });
 
+describe("db/schema.sql — verified leaderboard / guest-laundering defense (FIX 8)", () => {
+  it("scores carries server_graded + verified columns (default 0 / false)", () => {
+    expect(schema).toMatch(/server_graded int not null default 0/);
+    expect(schema).toMatch(/verified boolean not null default false/);
+    expect(schema).toContain("alter table public.scores add column if not exists server_graded int not null default 0;");
+    expect(schema).toContain("alter table public.scores add column if not exists verified boolean not null default false;");
+  });
+
+  it("migrate_guest_data lands a migrated guest score UNVERIFIED and RD-reset", () => {
+    const fn = fnBody("migrate_guest_data");
+    // verified=false / server_graded=0 in the scores insert column list + literals.
+    expect(fn).toMatch(/server_graded, verified, updated_at/);
+    // The imported glicko's RD is reset to the seed max via the helper.
+    expect(fn).toContain("public._reset_glicko_rd(s->'glicko')");
+  });
+
+  it("_reset_glicko_rd hard-sets every axis rd to the seed max (350), preserving rating/vol", () => {
+    const fn = fnBody("_reset_glicko_rd");
+    expect(fn).toContain("'rd', 350");
+    expect(fn).toContain("set search_path = public");
+  });
+
+  it("save_progress_for counts ONLY graded 'attempt' writes and verifies at >= 5", () => {
+    const fn = fnBody("save_progress_for");
+    // A baseline does NOT advance verification — only type 'attempt'.
+    expect(fn).toMatch(/coalesce\(p_attempt->>'type', 'attempt'\) = 'attempt'/);
+    // The count accumulates and verified flips at >= 5.
+    expect(fn).toContain("server_graded = public.scores.server_graded + excluded.server_graded");
+    expect(fn).toMatch(/verified = \(public\.scores\.server_graded \+ excluded\.server_graded\) >= 5/);
+  });
+
+  it("leaderboard_tiers counts ONLY verified rows and returns a provisional position for an unverified caller", () => {
+    const body = fnBody("leaderboard_tiers");
+    // Distribution is over verified rows only.
+    expect(body).toMatch(/where verified = true/);
+    // The caller's own position is provisional when unverified (no real rank/above).
+    expect(body).toContain("'provisional', true");
+    expect(body).toContain("'provisional', false");
+    // Still anonymous + service-role only (the existing invariants must hold).
+    expect(body).toContain("security definer");
+    expect(body).not.toMatch(/email/i);
+    expect(schema).toContain("grant execute on function public.leaderboard_tiers(uuid) to service_role");
+    expect(schema).not.toMatch(/grant execute on function public\.leaderboard_tiers\(uuid\) to authenticated/);
+  });
+
+  it("rate_limit_refund (FIX 2 durable budget refund) is SECURITY DEFINER + service-role only, floored at 0", () => {
+    const fn = fnBody("rate_limit_refund");
+    expect(fn).toContain("security definer");
+    expect(fn).toContain("set search_path = public");
+    expect(fn).toMatch(/greatest\(0, hits - v_n\)/); // floored at 0
+    expect(schema).toContain("revoke all on function public.rate_limit_refund(text, int) from public, anon, authenticated");
+    expect(schema).toContain("grant execute on function public.rate_limit_refund(text, int) to service_role");
+    expect(schema).not.toMatch(/grant execute on function public\.rate_limit_refund\(text, int\) to authenticated/);
+  });
+});
+
 describe("db/schema.sql — concept_mastery (per-concept mastery, migration 0010)", () => {
   it("the table is RLS-enabled with a SELECT-own policy and all client writes revoked", () => {
     expect(schema).toContain("alter table public.concept_mastery enable row level security;");

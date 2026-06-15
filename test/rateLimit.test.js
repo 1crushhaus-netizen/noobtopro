@@ -11,6 +11,8 @@ import {
   rateLimit,
   clientKey,
   checkRateLimit,
+  chargeGlobalGroq,
+  refundGlobalGroq,
   _resetRateLimits,
   _resetRateLimitClient,
   _rateLimitSize,
@@ -111,6 +113,54 @@ describe("checkRateLimit (durable, with in-memory fallback)", () => {
     const opts = { max: 1, windowMs: 1000, now: 0 };
     expect((await checkRateLimit("k", opts)).ok).toBe(true); // first -> in-memory allows
     expect((await checkRateLimit("k", opts)).ok).toBe(false); // second -> in-memory blocks
+  });
+});
+
+describe("refundGlobalGroq (budget refund on grade failure — audit P2-2)", () => {
+  // Drive the GLOBAL groq budget to its (small) cap, then prove a refund frees a slot.
+  // No service-role store -> the in-memory global:groq bucket is the budget.
+  it("refunds a charged Groq token so an outage doesn't keep the slot consumed", async () => {
+    const SMALL = 2;
+    process.env.GLOBAL_GROQ_BUDGET_PER_MIN = String(SMALL);
+    try {
+      // Two charges exhaust the window; a third is denied.
+      expect((await chargeGlobalGroq(1)).ok).toBe(true);
+      expect((await chargeGlobalGroq(1)).ok).toBe(true);
+      expect((await chargeGlobalGroq(1)).ok).toBe(false); // window exhausted
+
+      // The second charge represents a grade that FAILED upstream — refund it.
+      await refundGlobalGroq(1);
+
+      // The freed slot is available again (the refund decremented, floored at 0).
+      expect((await chargeGlobalGroq(1)).ok).toBe(true);
+    } finally {
+      delete process.env.GLOBAL_GROQ_BUDGET_PER_MIN;
+    }
+  });
+
+  it("floors at 0 — over-refunding can't lend extra budget", async () => {
+    const SMALL = 1;
+    process.env.GLOBAL_GROQ_BUDGET_PER_MIN = String(SMALL);
+    try {
+      expect((await chargeGlobalGroq(1)).ok).toBe(true);
+      // Refund far more than was charged: the count floors at 0, never negative.
+      await refundGlobalGroq(10);
+      // Exactly ONE slot is available again (not 10) — the cap still binds at SMALL.
+      expect((await chargeGlobalGroq(1)).ok).toBe(true);
+      expect((await chargeGlobalGroq(1)).ok).toBe(false);
+    } finally {
+      delete process.env.GLOBAL_GROQ_BUDGET_PER_MIN;
+    }
+  });
+
+  it("refunds the durable counter via the rate_limit_refund RPC when configured", async () => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://x.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "svc";
+    _resetRateLimitClient();
+    supa.rpc.mockResolvedValue({ data: null, error: null });
+    await refundGlobalGroq(1, { img: 1 });
+    expect(supa.rpc).toHaveBeenCalledWith("rate_limit_refund", { p_bucket: "global:groq", p_n: 1 });
+    expect(supa.rpc).toHaveBeenCalledWith("rate_limit_refund", { p_bucket: "global:img", p_n: 1 });
   });
 });
 

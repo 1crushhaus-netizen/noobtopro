@@ -19,12 +19,23 @@ vi.mock("@/lib/adminAuth", () => ({ requireUser: (...a) => auth.requireUser(...a
 const storage = vi.hoisted(() => ({ getAdmin: vi.fn(() => null) }));
 vi.mock("@/lib/supabaseAdmin", () => ({ getSupabaseAdmin: () => storage.getAdmin() }));
 
-vi.mock("@/lib/abuseDetection", () => ({ reportInjection: vi.fn(), reportRateLimit: vi.fn() }));
+// reportInjection returns the scan result (the route uses it for the HIGH-confidence
+// auto-dock, audit P2-3). Default: a clean scan (no dock). A test can override
+// inject.reportInjection to return a flagged HIGH scan. shouldDockForInjection mirrors
+// the real pure threshold (dock only on severity 'high').
+const inject = vi.hoisted(() => ({
+  reportInjection: vi.fn(() => ({ flagged: false, severity: null, matches: [] })),
+}));
+vi.mock("@/lib/abuseDetection", () => ({
+  reportInjection: (...a) => inject.reportInjection(...a),
+  reportRateLimit: vi.fn(),
+  shouldDockForInjection: (scan) => !!(scan && scan.flagged && scan.severity === "high"),
+}));
 
 import { POST } from "@/app/api/score/route";
 import { signQuestion, signDiagState, verifyDiagToken } from "@/lib/questionToken";
 import { _resetRateLimits } from "@/lib/rateLimit";
-import { ORDER, updateAxisRatings, scoreFromRubric, defaultDifficultyForBand, normalizeRubric, diagnosticPathScore } from "@/lib/scoring";
+import { ORDER, updateAxisRatings, scoreFromRubric, defaultDifficultyForBand, normalizeRubric, diagnosticPathScore, DIAG_PLACEMENT_CEILING } from "@/lib/scoring";
 import { diagnosticItemById, DIAG_STEPS_PER_SUBJECT } from "@/lib/diagnosticBank";
 
 // Complete 9-axis rubric helper (the grader emits these; the server derives the headline).
@@ -188,6 +199,8 @@ beforeEach(() => {
   delete process.env.GLOBAL_GROQ_BUDGET_PER_MIN;
   _resetRateLimits();
   auth.requireUser.mockReset();
+  inject.reportInjection.mockReset();
+  inject.reportInjection.mockReturnValue({ flagged: false, severity: null, matches: [] });
   storage.getAdmin.mockReset();
   storage.getAdmin.mockReturnValue(null);
 });
@@ -424,6 +437,45 @@ describe("POST /api/score practice — server-authoritative Glicko-2 score", () 
     const res = await POST(req({ kind: "practice", token: tok(), reasoning: REASONING }, { authHeader: true }));
     expect(res.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(2); // first 429, retried once -> ok
+  });
+});
+
+// ---- HIGH-confidence injection auto-dock (audit P2-3) -----------------------
+describe("POST /api/score practice — HIGH-confidence injection auto-dock", () => {
+  it("docks a flagged HIGH injection to ~0, persists it, and never calls Groq", async () => {
+    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
+    const { sb, calls } = fakeAdmin({ scoresRows: [{ subject: "math", score: 175, weak_concepts: [], comment: "", rubric: null, glicko: null }] });
+    storage.getAdmin.mockReturnValue(sb);
+    // A successful injection could otherwise inflate the persisted rating — the route
+    // reads the scan from reportInjection and docks on a HIGH verdict.
+    inject.reportInjection.mockReturnValue({ flagged: true, severity: "high", matches: [{ label: "grading-override", severity: "high", snippet: "x" }] });
+    const failFetch = vi.fn(() => { throw new Error("must not call Groq on an injection-docked attempt"); });
+    vi.stubGlobal("fetch", failFetch);
+
+    const res = await POST(req({ kind: "practice", token: tok(), reasoning: REASONING }, { authHeader: true }));
+    expect(res.status).toBe(200);
+    const j = await res.json();
+    expect(j.docked).toBe(true);
+    expect(j.reasoningScore).toBeLessThan(10);
+    expect(Object.values(j.rubric).every((v) => v === 0)).toBe(true);
+    expect(j.workedSolution).toBe(""); // no solution leaked to a docked attempt
+    expect(failFetch).not.toHaveBeenCalled(); // the LLM grade was skipped entirely
+    // The dock outcome (a low quality) is persisted — a high-band injection can't pin a 100.
+    const save = calls.rpc.find((c) => c.fn === "save_progress_for");
+    expect(save).toBeTruthy();
+    expect(save.args.p_attempt.reasoning_score).toBeLessThan(10);
+  });
+
+  it("a clean scan (benign keyword) grades normally — no false-positive dock", async () => {
+    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
+    storage.getAdmin.mockReturnValue(fakeAdmin({ scoresRows: [{ subject: "math", score: 175 }] }).sb);
+    inject.reportInjection.mockReturnValue({ flagged: false, severity: null, matches: [] });
+    const fetchMock = mockGroq(PRACTICE_GRADE);
+    const res = await POST(req({ kind: "practice", token: tok(), reasoning: REASONING }, { authHeader: true }));
+    expect(res.status).toBe(200);
+    const j = await res.json();
+    expect(j.docked).toBeFalsy();
+    expect(fetchMock).toHaveBeenCalled(); // graded by the LLM
   });
 });
 
@@ -697,7 +749,8 @@ describe("POST /api/score diagnostic — FINALIZE (aggregate the signed walks)",
     // The seed target is the REAL path-weighted aggregate over the walked bands.
     const quality = scoreFromRubric(normalizeRubric(DIAG_GRADE.rubric));
     const walked = ["intermediate", "advanced", "phd"].map((d) => ({ difficulty: d, reasoningScore: quality }));
-    expect(j.scores.math.score).toBe(Math.round((diagnosticPathScore(walked) * 350) / 100)); // quality aggregate → 0–350 placement
+    // FIX 7: quality aggregate maps through the conservative DIAG_PLACEMENT_CEILING.
+    expect(j.scores.math.score).toBe(Math.round((diagnosticPathScore(walked) * DIAG_PLACEMENT_CEILING) / 100));
     expect(j.masteryUpdates).toHaveLength(ORDER.length * DIAG_STEPS_PER_SUBJECT);
   });
 

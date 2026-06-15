@@ -72,8 +72,8 @@ function ConceptChip({ subject, concept, state, onOpen, titleExtra, namePrefix }
     <button
       type="button"
       className={`np-concepttag${colored ? ` np-concepttag--${state}` : ""}`}
-      title={`${concept.label}${detail ? ` · ${detail}` : ""}${colored ? ` — ${MASTERY_LABELS[state]}` : ""}`}
-      aria-label={colored || namePrefix ? `${baseName}${colored ? ` — ${MASTERY_LABELS[state]}` : ""}` : undefined}
+      title={`${concept.label}${detail ? ` · ${detail}` : ""}${colored ? `: ${MASTERY_LABELS[state]}` : ""}`}
+      aria-label={colored || namePrefix ? `${baseName}${colored ? `: ${MASTERY_LABELS[state]}` : ""}` : undefined}
       onClick={onOpen}
     >
       <span className="np-ctlabel">{concept.label}</span>
@@ -144,7 +144,7 @@ function UpNext({ mastery, stateFor, onOpen }) {
           .sort((a, b) => (PRIORITY[a.state] ?? 3) - (PRIORITY[b.state] ?? 3))
           .slice(0, 3);
         return (
-          <div key={subject} className="np-card np-upnext-card">
+          <div key={subject} className="np-card np-lift np-upnext-card">
             <div className="np-upnext-head">
               <SubjectGlyph subject={subject} />
               <span className="np-upnext-subject">{SUBJECTS[subject].label}</span>
@@ -165,7 +165,7 @@ function UpNext({ mastery, stateFor, onOpen }) {
                 ))}
               </div>
             ) : (
-              <p className="np-statsub" style={{ margin: 0 }}>Rank complete — keep climbing.</p>
+              <p className="np-statsub" style={{ margin: 0 }}>Rank complete. Keep climbing.</p>
             )}
           </div>
         );
@@ -207,11 +207,14 @@ function CurriculumList({ stateFor, mastery, onOpen }) {
 
   return (
     <div className="fade-up">
-      <h2 className="np-h2">Learn</h2>
-      <p className="np-lede" style={{ marginBottom: 14 }}>
-        The full concept curriculum, organized by subject and rank — from Elementary up to Doctorate.
-        Open any concept for its foundations, a written guide with a worked example, and practice.
-      </p>
+      <div className="np-pagehead" style={{ marginBottom: 18 }}>
+        <span className="np-eyebrow--mono">Learn</span>
+        <h2 className="np-h2">The concept library</h2>
+        <p className="np-lede">
+          The full concept curriculum, organized by subject and rank, from Elementary up to Doctorate.
+          Open any concept for its foundations, a written guide with a worked example, and practice.
+        </p>
+      </div>
 
       <UpNext mastery={mastery} stateFor={stateFor} onOpen={onOpen} />
 
@@ -293,7 +296,7 @@ function CurriculumList({ stateFor, mastery, onOpen }) {
                   aria-label={
                     wip
                       ? RANK_LABELS[rank]
-                      : `${RANK_LABELS[rank]} — ${cov.mastered} of ${concepts.length} mastered`
+                      : `${RANK_LABELS[rank]} · ${cov.mastered} of ${concepts.length} mastered`
                   }
                   onClick={() => toggle(subject, rank)}
                 >
@@ -377,7 +380,7 @@ function ConceptPage({ concept, state, stateFor, onOpen, onBack, onPractice, bus
         </span>
       </div>
 
-      <h2 className="np-h1" style={{ fontSize: "clamp(26px, 4vw, 38px)", color }}>{label}</h2>
+      <h2 className="np-h1" style={{ color }}>{label}</h2>
 
       {/* The learner's standing on THIS concept (state also shown in text, not color alone). */}
       {state && state !== "grey" && (
@@ -391,8 +394,8 @@ function ConceptPage({ concept, state, stateFor, onOpen, onBack, onPractice, bus
           <p className="np-lessontext">
             Your recent attempts here struggled.{" "}
             {roots.length > 0
-              ? "Before practicing this again, work through the root concepts below — they are what this concept is built on."
-              : "There's nothing lower to fall back on here — try a gentler practice round on this concept before moving up."}
+              ? "Before practicing this again, work through the root concepts below; they are what this concept is built on."
+              : "There's nothing lower to fall back on here. Try a gentler practice round on this concept before moving up."}
           </p>
         </div>
       )}
@@ -403,7 +406,7 @@ function ConceptPage({ concept, state, stateFor, onOpen, onBack, onPractice, bus
           name and navigate into that subject's concept page. */}
       {roots.length > 0 || crossRoots.length > 0 ? (
         <div className="np-card" style={{ marginBottom: 16 }}>
-          <div className="np-cardicon" style={{ color }}>Root concepts — understand these first</div>
+          <div className="np-cardicon" style={{ color }}>Root concepts: understand these first</div>
           {roots.length > 0 && (
             <div className="np-weaktags" style={{ marginTop: 8 }}>
               {roots.map((r) => (
@@ -440,7 +443,7 @@ function ConceptPage({ concept, state, stateFor, onOpen, onBack, onPractice, bus
         </div>
       ) : (
         <p className="np-hint" style={{ marginBottom: 16 }}>
-          This is a foundational concept — it has no lower-rank prerequisites.
+          This is a foundational concept; it has no lower-rank prerequisites.
         </p>
       )}
 
@@ -459,11 +462,11 @@ function ConceptPage({ concept, state, stateFor, onOpen, onBack, onPractice, bus
           Get a reasoning question aimed right at <strong style={{ color: "var(--text)" }}>{label}</strong>,
           framed at the {RANK_LABELS[rank] || rank} level.{" "}
           {state === "red"
-            ? "Since you've been struggling here, the next question comes one notch gentler — rebuild from the core idea."
+            ? "Since you've been struggling here, the next question comes one notch gentler, to rebuild from the core idea."
             : state === "green"
               ? "You've shown mastery here, so expect a stretch question one notch up."
               : ""}{state === "red" || state === "green" ? " " : ""}Explain your thinking and it's graded on
-          reasoning — your attempts update this concept's standing above.
+          reasoning; your attempts update this concept's standing above.
         </p>
         {onPractice ? (
           <button
@@ -520,7 +523,7 @@ function ConceptGuide({ guide, color }) {
       <div className="np-card np-lesson">
         <div className="np-cardicon" style={{ color }}>Ask yourself</div>
         <p className="np-lessontext" style={{ color: "var(--muted)", marginBottom: 10 }}>
-          Think these through before practicing — explaining your reasoning out loud counts.
+          Think these through before practicing; explaining your reasoning out loud counts.
         </p>
         <ul className="np-selfqs">
           {guide.selfQuestions.map((q, i) => (
