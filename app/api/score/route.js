@@ -201,7 +201,7 @@ async function handlePractice(req, body) {
 
   const { token, reasoning, image } = body || {};
   // SERVER-ISSUED QUESTION BINDING (audit P1-1). The token is signed by
-  // /api/generate (or /api/learn's "try this") at serve time; EVERY rating-relevant
+  // /api/generate at serve time; EVERY rating-relevant
   // field — subject, question text, difficulty band, topic bucket, reasoning
   // surface/trap — comes from the VERIFIED payload, never the request body. Before
   // this, a signed-in user could self-author an easy question labeled `phd` and

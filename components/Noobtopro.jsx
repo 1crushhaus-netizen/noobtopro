@@ -863,9 +863,6 @@ export default function Noobtopro() {
     setLearnConcept(concept ? { subject, ...concept } : null);
   }
 
-  // Regenerate the "try this" question for the open concept — a fresh, level-
-  // calibrated problem (this DOES call the LLM, only on explicit request) shown
-  // for the session only; the shared cached guide/question is left untouched.
   /* --- practice --- */
   async function startPractice(subject) {
     const myRun = ++practiceRun.current;
@@ -966,9 +963,10 @@ export default function Noobtopro() {
     }
   }
 
-  // Enter the practice flow with an ALREADY-KNOWN question (the cached "try this"
-  // problem from a concept guide, or a regenerated one) — no /api/generate call,
-  // so practicing a concept costs zero generation tokens. Grading is unchanged.
+  // Enter the practice flow with an ALREADY-FETCHED question object (the concept
+  // drill's generated question from startConceptDrill) — this function makes no
+  // /api/generate call itself; it just hands the question to the normal practice +
+  // grading flow. Grading is unchanged.
   function startPracticeWithQuestion(subject, questionObj) {
     if (!questionObj || !questionObj.question) return;
     practiceRun.current++; // supersede any in-flight startPractice generation
