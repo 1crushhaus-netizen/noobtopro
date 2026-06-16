@@ -16,12 +16,29 @@ updates:
       prefix: "deps"
       prefix-development: "deps-dev"
     groups:
+      # vitest + its companion packages are PEER-LOCKED to the same version
+      # (@vitest/coverage-v8 requires the exact vitest version), so they MUST bump
+      # together — including majors — or a split PR fails `npm install` with ERESOLVE.
+      # Listed first so it wins for these packages and keeps them in ONE PR.
+      vitest:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+        update-types:
+          - "minor"
+          - "patch"
+          - "major"
       # Batch low-risk minor/patch bumps into one PR to cut review noise;
       # majors still come as individual PRs so they can be gated deliberately.
       minor-and-patch:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      # Next.js majors are breaking — handle them as deliberate, separately-tested
+      # upgrades, not auto-proposed Dependabot PRs. Patch/minor 15.x bumps still flow.
+      - dependency-name: "next"
+        update-types: ["version-update:semver-major"]
 
   # GitHub Actions used by the CI workflow (.github/workflows/ci.yml).
   - package-ecosystem: "github-actions"

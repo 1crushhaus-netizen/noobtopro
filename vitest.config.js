@@ -13,6 +13,11 @@ export default defineConfig({
     include: ["test/**/*.test.{js,jsx}"],
     // Resets the jsdom URL between tests (see test/setup.js); harmless in node.
     setupFiles: ["./test/setup.js"],
+    // A whole test gets more headroom than a SINGLE async query (asyncUtilTimeout=5s in
+    // test/setup.js). Under vitest 4, next/dynamic's lazy components resolve more slowly, so a
+    // test that chains several findBy waits across a dynamic-loaded view could otherwise blow
+    // the default 5s TEST timeout even though each query is fine. 20s leaves ample room.
+    testTimeout: 20000,
     // Coverage gate (audit 08 P1: "no coverage gate"). Only active under `--coverage`
     // (the CI `test:coverage` step); the default `npm test` stays fast. Thresholds are set
     // conservatively BELOW the current numbers (≈88% lines / 81% branches / 78% functions)

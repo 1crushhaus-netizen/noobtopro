@@ -13,6 +13,7 @@ const store = vi.hoisted(() => ({
   loadMastery: vi.fn(async () => ({ mastery: {} })),
   loadReviews: vi.fn(async () => ({ reviews: [] })),
   loadSubscription: vi.fn(async () => ({ subscription: null })),
+  deleteAccount: vi.fn(async () => ({ ok: true })),
 }));
 vi.mock("@/lib/store", () => store);
 vi.mock("@/lib/supabase", () => ({
@@ -36,11 +37,14 @@ beforeEach(() => {
   store.saveProgress.mockResolvedValue({ history: [] });
   store.migrateGuestToAccount.mockResolvedValue({ migrated: false });
   store.resetAll.mockResolvedValue(undefined);
-  vi.stubGlobal("URL", {
-    ...URL,
-    createObjectURL: vi.fn(() => `blob:p${blobN++}`),
-    revokeObjectURL: vi.fn(),
-  });
+  // Stub the blob-URL helpers WITHOUT breaking `new URL()`: subclass the real URL so it
+  // stays a constructor (the previous `{ ...URL, ... }` plain-object replacement made
+  // `new URL()` throw, which under vitest 4 broke the dynamic import of next/dynamic
+  // components — e.g. the lazy LearnTab stayed stuck on its loading fallback).
+  class StubURL extends URL {}
+  StubURL.createObjectURL = vi.fn(() => `blob:p${blobN++}`);
+  StubURL.revokeObjectURL = vi.fn();
+  vi.stubGlobal("URL", StubURL);
 });
 afterEach(() => {
   cleanup();
