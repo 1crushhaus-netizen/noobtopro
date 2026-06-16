@@ -218,8 +218,13 @@ async function handlePractice(req, body) {
   const dayCapBucket = `acct:${uid}:practice:day`;
   let chargedDailyCap = false;
   if (!pro && proIsAvailable()) {
-    const cap = Number(process.env.FREE_DAILY_PRACTICE_CAP) > 0 ? Number(process.env.FREE_DAILY_PRACTICE_CAP) : 5;
-    const dayRl = await checkRateLimit(dayCapBucket, { max: cap, windowMs: 24 * 60 * 60 * 1000 });
+    // Honor an explicit 0 (audit 03 P2-11): cap=0 is a deliberate "free practice off"
+    // emergency switch, not a value to ignore. Only unset/empty/non-numeric/negative → 5.
+    const capRaw = Number(process.env.FREE_DAILY_PRACTICE_CAP);
+    const cap = Number.isFinite(capRaw) && capRaw >= 0 ? capRaw : 5;
+    const dayRl = cap > 0
+      ? await checkRateLimit(dayCapBucket, { max: cap, windowMs: 24 * 60 * 60 * 1000 })
+      : { ok: false, retryAfter: 0 }; // cap 0 → no free graded practice at all
     if (!dayRl.ok) {
       return NextResponse.json(
         {
@@ -400,9 +405,16 @@ async function handlePractice(req, body) {
     const seedDifficulty = defaultDifficultyForBand(bandKey);
 
     // The calibrated item difficulty for the (clamped) bucket.
-    const diffRes = await sb.from("item_difficulty").select("difficulty").eq("subject", subject).eq("topic", topicSlug).eq("band", bandKey).maybeSingle();
+    // MIN-ATTEMPTS FLOOR (audit 05 P2-7): a (subject,topic,band) bucket is ONE shared global
+    // value, so an early handful of attempts from a single user could drag the difficulty that
+    // everyone in that bucket is then rated against. Trust the calibrated value only once the
+    // bucket has accumulated enough attempts; until then use the band's seed anchor. The
+    // calibration itself keeps accumulating (bump_item_difficulty) — this only gates when it's
+    // TRUSTED for rating, so a thin bucket can't be self-skewed before the population corrects it.
+    const MIN_BUCKET_ATTEMPTS = 20;
+    const diffRes = await sb.from("item_difficulty").select("difficulty, attempts").eq("subject", subject).eq("topic", topicSlug).eq("band", bandKey).maybeSingle();
     const itemDifficulty =
-      diffRes && diffRes.data && Number.isFinite(Number(diffRes.data.difficulty))
+      diffRes && diffRes.data && Number.isFinite(Number(diffRes.data.difficulty)) && Number(diffRes.data.attempts) >= MIN_BUCKET_ATTEMPTS
         ? Number(diffRes.data.difficulty)
         : seedDifficulty;
 

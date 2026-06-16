@@ -179,3 +179,38 @@ describe("clientKey", () => {
     expect(clientKey(make({}))).toBe("unknown");
   });
 });
+
+describe("fail-closed global budget + partial-charge refund (audit 03 P1-B / P1-D)", () => {
+  it("a fail-closed bucket DENIES (doesn't downgrade to in-memory) when the durable store errors", async () => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://x.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "svc";
+    _resetRateLimitClient();
+    supa.rpc.mockResolvedValue({ data: null, error: { message: "boom" } });
+    const res = await checkRateLimit("global:groq", { max: 1, failClosed: true });
+    expect(res.ok).toBe(false);
+    expect(res.degraded).toBe(true);
+  });
+
+  it("chargeGlobalGroq is fail-closed: a durable-store outage denies instead of dropping the spend ceiling", async () => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://x.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "svc";
+    _resetRateLimitClient();
+    supa.rpc.mockResolvedValue({ data: null, error: { message: "down" } });
+    expect((await chargeGlobalGroq(1)).ok).toBe(false);
+  });
+
+  it("refunds the groq slot already charged when a later image charge is denied (no leak)", async () => {
+    process.env.GLOBAL_GROQ_BUDGET_PER_MIN = "2";
+    process.env.GLOBAL_IMG_BUDGET_PER_MIN = "1";
+    try {
+      expect((await chargeGlobalGroq(1, { img: 1 })).ok).toBe(true);  // groq#1 + img#1
+      expect((await chargeGlobalGroq(1, { img: 1 })).ok).toBe(false); // groq#2 charged, img denied -> groq#2 refunded
+      // The refunded groq slot is available again (proving the mid-loop charge was given back).
+      expect((await chargeGlobalGroq(1)).ok).toBe(true);   // reuses the refunded slot
+      expect((await chargeGlobalGroq(1)).ok).toBe(false);  // budget (2) now genuinely exhausted
+    } finally {
+      delete process.env.GLOBAL_GROQ_BUDGET_PER_MIN;
+      delete process.env.GLOBAL_IMG_BUDGET_PER_MIN;
+    }
+  });
+});

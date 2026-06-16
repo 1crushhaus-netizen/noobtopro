@@ -11,7 +11,8 @@
     "start": "next start",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "validate": "node scripts/validate-guides.mjs && node scripts/validate-diagnostic-items.mjs"
   },
   "dependencies": {
     "@polar-sh/sdk": "^0.48.1",

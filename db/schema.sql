@@ -1037,6 +1037,23 @@ grant execute on function public.submit_concept_report(text, text, text) to auth
 -- tables go through SECURITY DEFINER RPCs / the service-role admin client.
 --   - internal (RLS on, no policy): no browser write at all.
 revoke insert, update, delete, truncate on public.security_events from anon, authenticated;
+-- Retention prune (migration 0022): bound the PII-bearing security_events/concept_reports
+-- so they don't grow forever. Service-role only; the admin-data route calls it opportunistically.
+create or replace function public.prune_security_data(p_days int default 90)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  cutoff timestamptz := now() - make_interval(days => greatest(1, coalesce(p_days, 90)));
+begin
+  delete from public.security_events where created_at < cutoff;
+  delete from public.concept_reports where status <> 'open' and created_at < cutoff;
+end;
+$$;
+revoke all on function public.prune_security_data(int) from public, anon, authenticated;
+grant execute on function public.prune_security_data(int) to service_role;
 --   - public-read content (writes service-role only): keep SELECT, drop writes.
 revoke insert, update, delete, truncate on public.concept_guides, public.concept_topics from anon, authenticated;
 --   - concept_reports: writes go ONLY through submit_concept_report (0011) — the

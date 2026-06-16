@@ -46,6 +46,10 @@ jobs:
       - name: Dependency audit (full — advisory)
         run: npm audit || true
 
+      # Content validators (curated guides + diagnostic items) — previously orphaned scripts.
+      - name: Validate content data
+        run: npm run validate
+
       # Unit tests WITH coverage thresholds (vitest.config.js: ~80% lines / 70% branches).
       - name: Unit tests + coverage gate
         run: npm run test:coverage

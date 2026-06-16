@@ -31,6 +31,15 @@ export async function POST(req) {
   const sb = getSupabaseAdmin();
   if (!sb) return NextResponse.json({ error: "Admin storage is not configured." }, { status: 503 });
 
+  // Opportunistic retention prune (audit 04 P2-8): admins load this infrequently, so it's a
+  // natural low-frequency hook to age out old PII-bearing security_events/concept_reports.
+  // Best-effort — never block or fail the dashboard load on it.
+  try {
+    await sb.rpc("prune_security_data", { p_days: 90 });
+  } catch {
+    /* prune is best-effort; ignore */
+  }
+
   try {
     const [guidesRes, eventsRes, reportsRes] = await Promise.all([
       // Curation queue: anything not already public+ready (hidden guides + pending stubs).
