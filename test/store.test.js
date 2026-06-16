@@ -348,27 +348,53 @@ describe("saveProgress (atomic score + attempt write)", () => {
 });
 
 describe("loadReviews (answer review)", () => {
-  it("signed-in: reads the user's own attempt_reviews (RLS-scoped) newest-first", async () => {
-    mocks.session = signedIn;
-    mocks.db.reviewsSelect = {
-      data: [
-        { subject: "math", created_at: "t2", question: "Q2", answer: "A2", target_concept: "addition", difficulty: "foundational", reasoning_score: 70, delta: 5, rubric: { conceptual_understanding: 3 }, feedback: { strengths: ["good"], improvements: ["more"], workedSolution: "S2" } },
-      ],
-      error: null,
-    };
-    const res = await loadReviews();
-    expect(res.reviews).toHaveLength(1);
-    expect(res.reviews[0]).toMatchObject({ subject: "math", question: "Q2", answer: "A2", targetConcept: "addition", reasoningScore: 70 });
-    expect(res.reviews[0].feedback.workedSolution).toBe("S2");
-    // RLS-scoping filter applied.
-    expect(mocks.calls.attempt_reviews.eq).toContainEqual(["user_id", "u1"]);
+  // P0-2: answer history is a PRO feature read through the server route /api/reviews
+  // (direct client SELECT on attempt_reviews is revoked), so the signed-in path now
+  // fetches with the session bearer token rather than querying the table directly.
+  it("signed-in: loads answer history through the Pro-gated /api/reviews route", async () => {
+    mocks.session = { data: { session: { user: { id: "u1" }, access_token: "tok-1" } } };
+    // The route returns already-mapped (camelCase) items; loadReviews passes them through.
+    const reviews = [
+      { subject: "math", t: "t2", question: "Q2", answer: "A2", targetConcept: "addition", difficulty: "foundational", reasoningScore: 70, delta: 5, rubric: { conceptual_understanding: 3 }, feedback: { strengths: ["good"], improvements: ["more"], workedSolution: "S2" } },
+    ];
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ reviews }) }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const res = await loadReviews();
+      expect(res.reviews).toHaveLength(1);
+      expect(res.reviews[0]).toMatchObject({ subject: "math", question: "Q2", answer: "A2", targetConcept: "addition", reasoningScore: 70 });
+      expect(res.reviews[0].feedback.workedSolution).toBe("S2");
+      // Calls the server route with the bearer token (no direct table read).
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/reviews",
+        expect.objectContaining({ method: "POST", headers: expect.objectContaining({ Authorization: "Bearer tok-1" }) })
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
-  it("signed-in: surfaces a DB error instead of an empty list", async () => {
-    mocks.session = signedIn;
-    mocks.db.reviewsSelect = { data: null, error: { message: "boom" } };
-    const res = await loadReviews();
-    expect(res.error).toBeTruthy();
+  it("signed-in: surfaces an error from /api/reviews instead of an empty list", async () => {
+    mocks.session = { data: { session: { user: { id: "u1" }, access_token: "tok-1" } } };
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, json: async () => ({ error: "boom" }) })));
+    try {
+      const res = await loadReviews();
+      expect(res.error).toBeTruthy();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("signed-in NON-Pro: surfaces a Pro-required error on a 402", async () => {
+    mocks.session = { data: { session: { user: { id: "u1" }, access_token: "tok-1" } } };
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 402, json: async () => ({ error: "Pro" }) })));
+    try {
+      const res = await loadReviews();
+      expect(res.error).toBeTruthy();
+      expect(String(res.error.message || res.error)).toMatch(/pro/i);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("guest: returns the review detail embedded in local history (newest-first)", async () => {

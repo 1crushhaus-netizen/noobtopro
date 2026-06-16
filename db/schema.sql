@@ -104,13 +104,14 @@ create table if not exists public.attempt_reviews (
   feedback jsonb,            -- { strengths[], improvements[], workedSolution, correctnessNote, socraticHint, microLesson }
   created_at timestamptz not null default now()
 );
+-- "Answer history" is a PRO feature (P0-2 / migration 0018): there is NO client SELECT on
+-- attempt_reviews. RLS stays enabled (deny-by-default) with no SELECT policy, and ALL
+-- direct DML is revoked from anon/authenticated. Reads go through /api/reviews, which
+-- checks the Pro entitlement and queries via the service role; the SECURITY DEFINER writer
+-- migrate_guest_data (privileged owner) is unaffected by these grants.
 alter table public.attempt_reviews enable row level security;
 drop policy if exists "read own attempt reviews" on public.attempt_reviews;
-create policy "read own attempt reviews"
-  on public.attempt_reviews for select
-  to authenticated
-  using ((select auth.uid()) = user_id);
-revoke insert, update, delete, truncate on public.attempt_reviews from anon, authenticated;
+revoke select, insert, update, delete, truncate on public.attempt_reviews from anon, authenticated;
 create index if not exists attempt_reviews_user_created_idx
   on public.attempt_reviews (user_id, created_at desc);
 

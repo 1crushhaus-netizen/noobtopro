@@ -129,15 +129,18 @@ describe("db/schema.sql — server-authoritative scoring (the trust boundary)", 
     );
   });
 
-  it("attempt_reviews (PR 6) is RLS SELECT-own with writes revoked (only save_progress_for writes it)", () => {
+  it("attempt_reviews is Pro-gated: RLS on, NO select policy, ALL client access revoked (P0-2)", () => {
     expect(schema).toMatch(/create table if not exists public\.attempt_reviews/);
     expect(schema).toMatch(/alter table public\.attempt_reviews enable row level security/);
-    // Read policy is SELECT, scoped to the owner via auth.uid().
-    expect(schema).toMatch(/create policy "read own attempt reviews"\s+on public\.attempt_reviews for select/);
-    expect(schema).toContain("(select auth.uid()) = user_id");
-    // No client write path (all writes go through the service-role save_progress_for).
-    expect(schema).toMatch(/revoke insert, update, delete, truncate on public\.attempt_reviews from anon, authenticated/);
-    // save_progress_for writes the review row in the SAME transaction as the attempt.
+    // P0-2: "answer history" is a Pro feature. There is NO client read policy — the old
+    // SELECT-own policy is dropped and SELECT is revoked alongside all write DML, so a
+    // non-Pro user can't read review rows directly. Reads go through /api/reviews (Pro gate)
+    // via the service role.
+    expect(schema).not.toMatch(/create policy "read own attempt reviews"\s+on public\.attempt_reviews for select/);
+    expect(schema).toMatch(/drop policy if exists "read own attempt reviews" on public\.attempt_reviews/);
+    expect(schema).toMatch(/revoke select, insert, update, delete, truncate on public\.attempt_reviews from anon, authenticated/);
+    // save_progress_for (service role) writes the review row in the SAME transaction as the
+    // attempt; migrate_guest_data (SECURITY DEFINER) also writes it. Both bypass the grants.
     expect(fnBody("save_progress_for")).toContain("attempt_reviews");
   });
 
