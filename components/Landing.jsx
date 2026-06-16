@@ -208,6 +208,8 @@ export default function Landing({
   return (
     <div className={"np-lp" + (armed ? " is-armed" : "")} ref={rootRef}>
       <script type="application/ld+json">{faqLd}</script>
+      {/* A11y P1-4: skip-to-content as the first focusable element (hidden until focused). */}
+      <a className="np-skiplink" href="#np-main-content">Skip to content</a>
       {/* ----------------------------- nav (shared TopNav) ----------------------------- */}
       <TopNav
         scrolled={scrolled}
@@ -222,6 +224,9 @@ export default function Landing({
         cta={{ label: busy ? "Setting up…" : "Get started", onClick: onProveIt, disabled: busy }}
       />
 
+      {/* A11y P1-4: the primary content lives in a <main> landmark (TopNav is the
+          <header>; the footer stays outside) so AT landmark navigation works. */}
+      <main id="np-main-content">
       {(error || showAuthNote) && (
         <div className="np-lp-container np-lp-banners">
           {error && (
@@ -484,6 +489,7 @@ export default function Landing({
           </button>
         </div>
       </section>
+      </main>
 
       {/* ----------------------------- footer ----------------------------- */}
       <footer className="np-lp-foot">

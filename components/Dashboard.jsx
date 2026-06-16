@@ -20,6 +20,11 @@ import ReviewList from "@/components/ReviewList";
 import { useScrollReveal } from "@/components/useReveal";
 import { SubjectGlyph, deltaColor } from "@/components/ui";
 
+// A11y P1-2: map each subject to its accessible TEXT color token (darker in the
+// light theme so small tinted labels reach WCAG AA). The bright SUBJECTS[k].color
+// accents stay for charts / large / graphical use.
+const SUBJECT_TEXT = { math: "var(--math-text)", physics: "var(--phys-text)", chemistry: "var(--chem-text)" };
+
 /* ---------------------------------------------------------------------------
    Dashboard — the user's home base. Merges the former Profile (identity, KPIs,
    by-subject, anonymous leaderboard, reset) and Progress (reasoning radar, trend
@@ -178,7 +183,10 @@ function BySubject({ scores, mastery, onPractice }) {
               <button className="np-ghost" onClick={() => onPractice && onPractice(k)} style={{ whiteSpace: "nowrap" }}>Practice</button>
             </div>
             <div className="np-dash-subgate">
-              <span className="np-dash-subband" style={{ "--subject": SUBJECTS[k].color }}>{g.rank.name}</span>
+              {/* A11y P1-2: the small rank pill is meaningful text, so it uses the
+                  accessible per-subject TEXT variant (darker in light theme), not the
+                  bright graphical accent. */}
+              <span className="np-dash-subband" style={{ "--subject": SUBJECT_TEXT[k] }}>{g.rank.name}</span>
               {g.gated ? (
                 // The score qualifies for a higher band, but §7 holds the rank until
                 // the blocking curriculum is mastered (state in text, not color alone).
@@ -310,6 +318,10 @@ export default function Dashboard({
   loadLeaderboard,
   loadReviews,
   loadMastery,
+  // FRONTEND P1-2: mastery is now LIFTED into the shell and passed in (fetched once
+  // for both Dashboard + LearnTab). When provided, we use it directly and skip the
+  // self-fetch; the loadMastery prop remains a fallback for standalone/legacy callers.
+  mastery: masteryProp,
   onStartDiagnostic,
   onPractice,
   onLearn,
@@ -340,22 +352,25 @@ export default function Dashboard({
   useEffect(() => { resettingRef.current = resetting; }, [resetting]);
   // Tasteful staggered scroll-reveal for the bento's main panels (shared hook).
   const { ref: revealRef, armed } = useScrollReveal();
-  // Per-concept mastery map for the §7 breadth gate (same injected-loader pattern
-  // as loadLeaderboard/loadReviews). Signed-in only (the guest gate fetches
-  // nothing); a load failure just renders ungated bands — nothing is lost.
-  const [mastery, setMastery] = useState({});
+  // Per-concept mastery map for the §7 breadth gate. Prefer the LIFTED prop (fetched
+  // once in the shell — FRONTEND P1-2); only self-fetch via the injected loader when
+  // no prop is supplied (standalone/legacy use). Signed-in only (the guest gate
+  // fetches nothing); a load failure just renders ungated bands — nothing is lost.
+  const [fetchedMastery, setFetchedMastery] = useState({});
+  const mastery = masteryProp ?? fetchedMastery;
   useEffect(() => {
+    if (masteryProp != null) return; // mastery supplied by the parent — don't double-fetch
     if (!user || !loadMastery) return;
     let alive = true;
     loadMastery()
       .then((res) => {
-        if (alive && res && res.mastery) setMastery(res.mastery);
+        if (alive && res && res.mastery) setFetchedMastery(res.mastery);
       })
       .catch(() => {});
     return () => {
       alive = false;
     };
-  }, [user, loadMastery]);
+  }, [user, loadMastery, masteryProp]);
 
   // Make the page background inert while a drawer is open (proper modal focus
   // containment). The guest gate does NOT inert the page — it's scoped to the
@@ -399,7 +414,8 @@ export default function Dashboard({
         </div>
         <div className="np-surface-elevated np-dash-gatecard" role="dialog" aria-modal="false" aria-labelledby="np-gate-title">
           <div className="np-modal-spark" aria-hidden="true"><Icon name="lock" size={22} /></div>
-          <h2 id="np-gate-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>Sign in to see your Dashboard</h2>
+          {/* A11y P1-5: the gate is this view's primary content → a real <h1>. */}
+          <h1 id="np-gate-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>Sign in to see your Dashboard</h1>
           <p className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
             Your scores, reasoning profile, leaderboard rank, and answer history live here. Sign in to unlock your dashboard
             {scores ? "; your guest results carry over automatically." : "."}
@@ -441,7 +457,8 @@ export default function Dashboard({
       <div className="fade-up">
         {identity}
         <div className="np-card" style={{ textAlign: "center", padding: "36px 24px", marginTop: 16 }}>
-          <h2 className="np-h2">Not ranked yet</h2>
+          {/* A11y P1-5: primary heading of the not-ranked view → a real <h1>. */}
+          <h1 className="np-h2">Not ranked yet</h1>
           <p className="np-lede" style={{ margin: "0 auto 20px" }}>
             Prove what you know across nine problems (beginner, intermediate, and hard in each subject) to get your starting scores in math, physics, and chemistry.
           </p>
@@ -461,14 +478,15 @@ export default function Dashboard({
     <div className={"fade-up np-dash-frame" + (armed ? " is-armed" : "")} ref={revealRef}>
       <div className="np-pagehead np-dash-pagehead">
         <span className="np-eyebrow--mono">Where you stand</span>
-        <h2 className="np-h2">
+        {/* A11y P1-5: primary heading of the signed-in dashboard → a real <h1>. */}
+        <h1 className="np-h2">
           Your dashboard
           {isPro && (
             <span className="np-dash-rankchip" style={{ marginLeft: 10, verticalAlign: "middle" }} title="You're a Pro subscriber">
               Pro
             </span>
           )}
-        </h2>
+        </h1>
         <p className="np-lede">Your scores, reasoning profile, rank, and recent progress, all in one place.</p>
       </div>
       <div className="np-dash">

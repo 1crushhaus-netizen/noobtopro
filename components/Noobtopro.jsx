@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   SUBJECTS,
   ORDER,
@@ -177,6 +177,11 @@ async function prepareImage(file) {
 
 const now = () => new Date().toISOString();
 
+// A11y P1-2: accessible TEXT color per subject for small meaning-bearing labels
+// (the score-card rank band tag). Darker than SUBJECTS[k].color in the light theme
+// so 12px tinted text reaches WCAG AA; the bright accents stay for the rings/glyphs.
+const SUBJECT_TEXT = { math: "var(--math-text)", physics: "var(--phys-text)", chemistry: "var(--chem-text)" };
+
 // Stable identity (audit P2-14): authApi is module-level, so this never changes —
 // the Leaderboard's fetch effect depends on it, and an inline arrow re-created on
 // every Noobtopro render made each drawer toggle refetch (and visibly blank) the
@@ -238,19 +243,46 @@ function Ring({ value, color, size = 96, stroke = 9, label }) {
 }
 
 const SKIP_LOCK_SECONDS = 10;
-function AnswerComposer({ value, onText, img, onAttach, onRemoveImg, onSubmit, onSkip, submitLabel, loading, placeholder, lockKey }) {
+// FRONTEND P1-1 (bounded extraction): the answer textarea now owns its own LOCAL
+// text state instead of being controlled by the 1900-line shell's state. A keystroke
+// re-renders ONLY this memoized child, not the whole app shell + TopNav + footer +
+// every sibling stage branch. The value is lifted up to the parent on blur (onText)
+// and passed explicitly to onSubmit(text) so the submit handlers grade the freshest
+// text without the shell ever holding it per-keystroke. `initialValue`/`lockKey`
+// re-seed the field when the QUESTION changes (a fresh question = a fresh empty box).
+// React.memo + the stabilized (useCallback) handler props from the parent keep a
+// shell re-render (e.g. the live-score updating) from re-rendering this subtree.
+const AnswerComposer = React.memo(function AnswerComposer({
+  initialValue = "",
+  onText,
+  img,
+  onAttach,
+  onRemoveImg,
+  onSubmit,
+  onSkip,
+  submitLabel,
+  loading,
+  placeholder,
+  lockKey,
+}) {
   const fileRef = useRef(null);
-  const canSubmit = (value && value.trim().length > 0) || img;
+  const [text, setText] = useState(initialValue);
+  // Re-seed the local field when the question changes (lockKey). Keyed on lockKey
+  // (not initialValue) so the parent's per-keystroke blur sync can't clobber the box.
+  useEffect(() => {
+    setText(initialValue);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lockKey]);
+  const canSubmit = (text && text.trim().length > 0) || img;
   // The "I don't know" skip is TIME-LOCKED for SKIP_LOCK_SECONDS after each new question,
   // so a learner can't reflexively skip without giving it a moment's thought. The countdown
   // resets when lockKey (the question identity) changes.
   const [skipIn, setSkipIn] = useState(onSkip ? SKIP_LOCK_SECONDS : 0);
   // The timer must restart ONLY when the QUESTION changes (lockKey), never on a
-  // parent re-render (audit P2-15): both call sites pass a freshly-created onSkip
-  // each render, and with onSkip in the deps every keystroke in this controlled
-  // textarea reset the 10s countdown — locking the skip for "10s since the last
-  // keystroke" instead of "10s per question". hasSkip (a stable boolean) keeps the
-  // mount/unmount behavior; the click handler reads the live prop.
+  // parent re-render (audit P2-15). With local text state, typing no longer touches
+  // the parent at all — but the lockKey-only dep is kept as the correct invariant.
+  // hasSkip (a stable boolean) keeps the mount/unmount behavior; the click handler
+  // reads the live prop.
   const hasSkip = !!onSkip;
   useEffect(() => {
     if (!hasSkip) return undefined;
@@ -267,8 +299,11 @@ function AnswerComposer({ value, onText, img, onAttach, onRemoveImg, onSubmit, o
       <textarea
         className="np-input"
         aria-label="Your reasoning"
-        value={value}
-        onChange={(e) => onText(e.target.value)}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        // Lift the value up on blur so any parent read (e.g. the diagnostic answers
+        // map) stays roughly in sync; submit also passes the freshest text directly.
+        onBlur={() => onText && onText(text)}
         placeholder={placeholder || "Show your full reasoning: every step, not just the answer."}
         rows={6}
       />
@@ -285,6 +320,7 @@ function AnswerComposer({ value, onText, img, onAttach, onRemoveImg, onSubmit, o
           ref={fileRef}
           type="file"
           accept="image/*"
+          aria-label="Upload a photo of your work"
           style={{ display: "none" }}
           onChange={async (e) => {
             const f = e.target.files && e.target.files[0];
@@ -305,14 +341,14 @@ function AnswerComposer({ value, onText, img, onAttach, onRemoveImg, onSubmit, o
               {skipLocked ? `I don't know (${skipIn}s)` : "I don't know"}
             </button>
           )}
-          <button className="np-btn np-primary" disabled={!canSubmit || loading} onClick={onSubmit}>
+          <button className="np-btn np-primary" disabled={!canSubmit || loading} onClick={() => onSubmit(text)}>
             {loading ? "Working…" : submitLabel} {!loading && <Icon name="arrow" size={16} />}
           </button>
         </div>
       </div>
     </div>
   );
-}
+});
 
 // Signed-in identity (avatar + name + email + overall rank) now lives in the
 // shared TopNav (components/TopNav.jsx) — its only home, the Dashboard bento has
@@ -378,6 +414,12 @@ export default function Noobtopro() {
   const [scores, setScores] = useState(null);
   const [history, setHistory] = useState([]);
 
+  // FRONTEND P1-2: per-concept mastery is lifted into the shell and fetched ONCE,
+  // then passed to BOTH Dashboard and LearnTab — they no longer each fire their own
+  // uncached loadMastery round-trip (two per session). A load failure leaves this {}
+  // so both surfaces just render uncolored/ungated chips (nothing is lost).
+  const [mastery, setMastery] = useState({});
+
   const [pSubject, setPSubject] = useState(null);
   const [pQuestion, setPQuestion] = useState(null);
   const [pText, setPText] = useState("");
@@ -421,6 +463,16 @@ export default function Noobtopro() {
   // `error` banner so a recoverable step failure doesn't look fatal).
   const [diagAnswered, setDiagAnswered] = useState({});
   const [diagError, setDiagError] = useState("");
+  // FRONTEND P1-4: when a step grade returns a malformed-but-2xx shape (no next /
+  // finalToken), retrying re-sends the same bad payload and dead-ends. This flag
+  // surfaces a hard-fail message + a "Restart diagnostic" recovery path on the
+  // waiting card so the learner is never stuck on a spinner with a hopeless retry.
+  const [diagFatal, setDiagFatal] = useState(false);
+  // FRONTEND P1-5 / A11y P1-5: in-app confirm for re-baselining (replaces the
+  // blocking, mobile-webview-suppressible window.confirm). null when closed.
+  const [showRebaselineConfirm, setShowRebaselineConfirm] = useState(false);
+  const rebaselineCancelRef = useRef(null); // default focus = the safe "Keep my scores"
+  const rebaselinePrevFocus = useRef(null); // focus to restore on close
 
   // Monotonic token so a slow in-flight startPractice generation can't land its
   // question after the user has moved to a different practice question/subject —
@@ -544,6 +596,20 @@ export default function Noobtopro() {
     }
   }
 
+  // FRONTEND P1-2: refresh the per-concept mastery map (signed-in DB rows or the guest
+  // localStorage copy). Fetched once on load and after a graded attempt, then handed to
+  // Dashboard + LearnTab — replacing their two independent per-mount fetches. Deny-by-
+  // default on failure: keep {} so chips/gates just render uncolored/ungated.
+  async function refreshMastery() {
+    try {
+      if (typeof loadMastery !== "function") return;
+      const res = await loadMastery();
+      if (res && res.mastery) setMastery(res.mastery);
+    } catch {
+      /* leave mastery as-is — uncolored chips */
+    }
+  }
+
   // Start a Polar checkout: POST (with the verified JWT) and navigate to the returned
   // hosted checkout URL. Identity is bound server-side to the verified uid, so the client
   // sends no identity. Used after we KNOW the caller is signed in (the pending-upgrade
@@ -601,6 +667,7 @@ export default function Noobtopro() {
   useEffect(() => {
     const sb = getSupabase();
     hydrate();
+    refreshMastery(); // FRONTEND P1-2: fetch mastery once for both Dashboard + LearnTab
     if (!sb) return;
     sb.auth.getUser().then(({ data }) => {
       const u = (data && data.user) || null;
@@ -618,6 +685,7 @@ export default function Noobtopro() {
         hydrate(); // migrates guest progress, then loads the account
         checkAdmin(); // reveal the Admin tab if this account is an admin
         refreshPro(); // load the account's Pro entitlement
+        refreshMastery(); // FRONTEND P1-2: load the account's per-concept mastery
         // Resume a pending "Upgrade to Pro" the guest started before signing in (the
         // purchase needs an account). authApi reads the token from the fresh session, so
         // it works even before `user` state lands. Cleared so it fires exactly once.
@@ -659,6 +727,7 @@ export default function Noobtopro() {
         setHistory([]);
         setScoreDelta(null);
         setLearnConcept(null);
+        setMastery({}); // FRONTEND P1-2: drop the prior user's mastery coloring too
         setIsAdmin(false); // hide the Admin tab immediately on sign-out
         setSubscription(null); // drop the prior user's Pro entitlement
         setUpgradeNudge(null);
@@ -666,6 +735,7 @@ export default function Noobtopro() {
         // concepts aren't exposed to the next person on a shared device.
         resetAll();
         hydrate();
+        refreshMastery(); // reload mastery for the now-guest (empty) session
       }
     });
     return () => sub && sub.subscription && sub.subscription.unsubscribe();
@@ -723,6 +793,9 @@ export default function Noobtopro() {
     setFeedback(null);
     setScoreDelta(null);
     setError("");
+    setDiagError("");
+    setDiagFatal(false);
+    setShowRebaselineConfirm(false);
     setView("practice");
 
     if (user) {
@@ -737,6 +810,7 @@ export default function Noobtopro() {
       await resetAll();
       setScores(null);
       setHistory([]);
+      setMastery({}); // FRONTEND P1-2: the guest blob (incl. mastery) was wiped
       setStage("intro");
     }
   }
@@ -769,6 +843,7 @@ export default function Noobtopro() {
       await deleteAllUserData();
       setScores(null);
       setHistory([]);
+      setMastery({}); // FRONTEND P1-2: progress deleted → drop mastery coloring
       setLearnConcept(null);
       setView("practice");
       setStage("intro");
@@ -834,14 +909,24 @@ export default function Noobtopro() {
     // discarding existing progress; on cancel, do nothing (no navigation, no fetch).
     // Guests aren't gated (their scores are local + this is their normal first run);
     // a signed-in user with NO scores yet is taking their first diagnostic, so no prompt.
-    if (user && scores && typeof window !== "undefined" && typeof window.confirm === "function") {
-      const ok = window.confirm(
-        "Re-taking the diagnostic will replace your current scores with a fresh baseline. Your accumulated progress will be lost. Continue?"
-      );
-      if (!ok) return;
+    // FRONTEND P1-5: gate the re-baseline behind a styled, accessible in-app modal
+    // (the Dashboard reset/delete pattern) instead of the blocking window.confirm —
+    // which janks the main thread and is silently suppressed in some mobile webviews.
+    if (user && scores) {
+      if (typeof document !== "undefined") rebaselinePrevFocus.current = document.activeElement;
+      setShowRebaselineConfirm(true);
+      return;
     }
+    return startDiagnostic();
+  }
+
+  // The actual diagnostic generation, split out of beginDiagnostic so the
+  // re-baseline confirm modal can invoke it directly on "Yes".
+  async function startDiagnostic() {
+    setShowRebaselineConfirm(false);
     setError("");
     setDiagError("");
+    setDiagFatal(false);
     setBusy(true);
     // Funnel analytics: the learner is starting the placement diagnostic (top of funnel).
     track("diagnostic_started", { signedIn: !!user, rebaseline: !!(user && scores) });
@@ -917,9 +1002,11 @@ export default function Noobtopro() {
   // queued question — answering subject B while subject A grades is what hides
   // the per-step latency. Advancing past the end of `questions` is the WAITING
   // state (curQ goes null); the pending append then materializes questions[qi].
-  function nextDiagnostic() {
+  function nextDiagnostic(text) {
     const q = curQ;
-    const a = curAns;
+    // The composer owns its text now (FRONTEND P1-1); grade the value it just passed
+    // (falling back to any blur-synced map text), keeping the attached image.
+    const a = { text: typeof text === "string" ? text : curAns.text, img: curAns.img };
     setDiagAnswered((m) => ({ ...m, [q.subject]: (m[q.subject] || 0) + 1 }));
     submitDiagStep(q, a);
     setQi(qi + 1);
@@ -959,10 +1046,23 @@ export default function Noobtopro() {
         diagFinal.current[q.subject] = data.finalToken;
         if (ORDER.every((s) => typeof diagFinal.current[s] === "string")) finalizeDiagnostic();
       } else {
-        throw new Error("Unexpected placement response. Please try again.");
+        // FRONTEND P1-4: a malformed-but-2xx payload (no next AND no finalToken).
+        // Re-submitting the same step would just hit this again, so don't queue it
+        // for the plain "Try again" — flag a FATAL state that surfaces a clear
+        // message + a "Restart diagnostic" recovery on the waiting card.
+        const err = new Error("We couldn't read the grader's response. Please restart the diagnostic.");
+        err.fatal = true;
+        throw err;
       }
     } catch (e) {
       if (myRun !== diagRun.current) return;
+      if (e && e.fatal) {
+        // Unexpected response shape: a retry can't fix it. Don't push to the retry
+        // queue; show the hard-fail + restart instead.
+        setDiagFatal(true);
+        setDiagError(e.message);
+        return;
+      }
       diagFailed.current.push({ q, a });
       setDiagError(e.message || "Grading hit a snag. Please try again.");
     }
@@ -972,6 +1072,7 @@ export default function Noobtopro() {
   // tokens are still valid, so a transient outage costs nothing but the retry.
   function retryDiagnostic() {
     setDiagError("");
+    setDiagFatal(false);
     const failed = diagFailed.current.splice(0);
     for (const f of failed) submitDiagStep(f.q, f.a);
     if (failed.length === 0 && ORDER.every((s) => typeof diagFinal.current[s] === "string")) {
@@ -1011,6 +1112,7 @@ export default function Noobtopro() {
       }
 
       setStage("dashboard");
+      refreshMastery(); // FRONTEND P1-2: the baseline updated mastery — refresh the shared map
       // The diagnostic answer images are no longer rendered once we move to the
       // dashboard; release their preview blob URLs (the base64 was already sent to
       // the grader) so a completed diagnostic doesn't leak them for the page's life.
@@ -1180,7 +1282,7 @@ export default function Noobtopro() {
   }
 
 
-  async function submitPractice(skip = false) {
+  async function submitPractice(skip = false, composerText) {
     // Capture the practice run token: sign-out / Restart / "Reset my progress" /
     // starting another practice all bump practiceRun. If any happens while this grade
     // is in flight, bail BEFORE persisting — otherwise saveProgress re-resolves the
@@ -1194,7 +1296,9 @@ export default function Noobtopro() {
       // "I don't know" skip: submit an EMPTY answer (no reasoning, no image) so the server
       // docks it with NO Groq grade — saving tokens and letting the learner move on rather
       // than being forced to type a throwaway answer.
-      const reasoning = skip ? "" : pText;
+      // The composer owns its text (FRONTEND P1-1) and passes it on submit; fall back to
+      // pText (the blur-synced copy) when called without it.
+      const reasoning = skip ? "" : (typeof composerText === "string" ? composerText : pText);
       const imagePayload = skip || !pImg ? undefined : { mime: pImg.mime, data: pImg.data };
       // Default for a subject not yet in scores (e.g. practicing an un-baselined
       // subject after a partial diagnostic) — guards the guest blend path below.
@@ -1324,6 +1428,9 @@ export default function Noobtopro() {
       // base64 was already sent to the grader) instead of leaking it until the next action.
       revokePreview(pImg);
       setPImg(null);
+      // FRONTEND P1-2: a concept-tagged attempt updates mastery — refresh the shared
+      // map so the Learn chips / dashboard gates re-color without a second fetch.
+      if (pQuestion && pQuestion.conceptKey) refreshMastery();
     } catch (e) {
       if (myRun !== practiceRun.current) return; // abandoned — don't surface a stale error on the reset UI
       // A Pro paywall (the free daily practice cap, or photo-of-work grading) comes back
@@ -1335,6 +1442,20 @@ export default function Noobtopro() {
       if (myRun === practiceRun.current) setBusy(false);
     }
   }
+
+  // FRONTEND P1-1 / P2-12: stable handler identities for the memoized practice
+  // AnswerComposer, so a shell re-render that DOESN'T change the question (e.g. the
+  // live score landing) doesn't re-render the composer subtree. submitPractice reads
+  // a lot of changing state, so the stable callbacks dispatch through a ref that always
+  // points at the LATEST submitPractice — never a stale closure from the first render.
+  const submitPracticeRef = useRef(submitPractice);
+  useEffect(() => { submitPracticeRef.current = submitPractice; });
+  const onPracticeSubmit = useCallback((text) => submitPracticeRef.current(false, text), []);
+  const onPracticeSkip = useCallback(() => submitPracticeRef.current(true), []);
+  const onPracticeRemoveImg = useCallback(() => {
+    revokePreview(pImgRef.current);
+    setPImg(null);
+  }, []);
 
   // Save-progress modal: Escape to close, move focus into the dialog on open,
   // and restore focus to the triggering element on close (ARIA dialog pattern).
@@ -1355,6 +1476,21 @@ export default function Noobtopro() {
     };
   }, [showSaveModal]);
 
+  // Re-baseline confirm modal (FRONTEND P1-5): focus the safe default ("Keep my
+  // scores") on open, Escape to cancel, restore focus to the trigger on close —
+  // mirrors the Dashboard reset/delete dialog pattern.
+  useEffect(() => {
+    if (!showRebaselineConfirm) return undefined;
+    rebaselineCancelRef.current?.focus();
+    const onKey = (e) => { if (e.key === "Escape") setShowRebaselineConfirm(false); };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      const prev = rebaselinePrevFocus.current;
+      if (prev && typeof prev.focus === "function") prev.focus();
+    };
+  }, [showRebaselineConfirm]);
+
   // While the save modal or a dashboard drawer is open, make the rest of the page
   // inert so keyboard/screen-reader users can't reach background controls (proper
   // modal focus containment).
@@ -1365,7 +1501,7 @@ export default function Noobtopro() {
     return () => clearTimeout(t);
   }, [resetNotice]);
 
-  const bgInert = (showSaveModal && !user) || !!upgradeNudge || overlayActive ? true : undefined;
+  const bgInert = (showSaveModal && !user) || !!upgradeNudge || showRebaselineConfirm || overlayActive ? true : undefined;
 
   // Transient "progress was reset" toast. Rendered in EVERY return branch — a reset
   // lands the learner on the intro/Landing branch (below), not the app shell — so it
@@ -1423,6 +1559,9 @@ export default function Noobtopro() {
 
   return (
     <div className="np-root">
+      {/* A11y P1-4: skip-to-content as the first focusable element of the app shell
+          (visually hidden until focused) so keyboard users bypass the whole TopNav. */}
+      <a className="np-skiplink" href="#np-main-content">Skip to content</a>
       {showSaveModal && !user && (
         <div className="np-modal-backdrop" onClick={() => setShowSaveModal(false)}>
           <div
@@ -1497,6 +1636,43 @@ export default function Noobtopro() {
         </div>
       )}
 
+      {/* Re-baseline confirm (FRONTEND P1-5): a styled, focus-managed, Escape-closable
+          dialog replacing the blocking window.confirm. The safe default ("Keep my
+          scores") is focused on open; "Re-take" discards the accumulated baseline. */}
+      {showRebaselineConfirm && (
+        <div className="np-modal-backdrop" onClick={() => setShowRebaselineConfirm(false)}>
+          <div
+            className="np-surface-elevated np-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="np-rebaseline-title"
+            aria-describedby="np-rebaseline-desc"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="np-modal-spark" aria-hidden="true"><Icon name="refresh" size={22} /></div>
+            <h2 id="np-rebaseline-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+              Re-take the diagnostic?
+            </h2>
+            <p id="np-rebaseline-desc" className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
+              Re-taking the diagnostic will replace your current scores with a fresh baseline.
+              Your accumulated progress will be lost. This can't be undone.
+            </p>
+            <div className="np-modal-actions">
+              <button
+                ref={rebaselineCancelRef}
+                className="np-btn np-secondary"
+                onClick={() => setShowRebaselineConfirm(false)}
+              >
+                Keep my scores
+              </button>
+              <button className="np-btn np-danger" onClick={startDiagnostic}>
+                Re-take diagnostic
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="np-app" inert={bgInert}>
         {/* ONE shared sticky TopNav. With app chrome it carries the view tabs +
             identity + sign-out; on the chrome-less sign-in screen it falls back
@@ -1528,7 +1704,7 @@ export default function Noobtopro() {
 
         <div className="np-frame">
           <div className="np-shell">
-          <main className="np-main">
+          <main className="np-main" id="np-main-content">
         {showAuthNote && (
           <div className="np-banner fade-up">
             <span>Google sign-in runs through Supabase. Add your Supabase URL + anon key and enable the Google provider by following the README ("Supabase setup"). The app works fully as a guest in the meantime.</span>
@@ -1579,7 +1755,7 @@ export default function Noobtopro() {
             upgradeBusy={upgradeBusy}
             loadLeaderboard={loadLeaderboard}
             loadReviews={loadReviews}
-            loadMastery={loadMastery}
+            mastery={mastery}
             onStartDiagnostic={() => { setView("practice"); beginDiagnostic(); }}
             onPractice={(s) => { setView("practice"); startPractice(s); }}
             onLearn={openLearn}
@@ -1601,6 +1777,7 @@ export default function Noobtopro() {
             busyConcept={drillBusy}
             openConcept={learnConcept}
             onConceptConsumed={() => setLearnConcept(null)}
+            mastery={mastery}
           />
         ) : (
           <>
@@ -1660,7 +1837,8 @@ export default function Noobtopro() {
               <div className="fade-up" key={qi}>
                 <div className="np-pagehead">
                   <span className="np-eyebrow--mono">Adaptive placement</span>
-                  <h2 className="np-h2">Prove what you know</h2>
+                  {/* A11y P1-5: one real <h1> per signed-in view (visual style kept via np-h2). */}
+                  <h1 className="np-h2">Prove what you know</h1>
                 </div>
                 {/* Progress: 3 subject groups × stepsTotal pips, filled by the steps
                     ANSWERED per subject (the §8 adaptive walk, band varies per step,
@@ -1683,7 +1861,7 @@ export default function Noobtopro() {
                 </div>
                 <div className="np-card np-question">{curQ.question}</div>
                 <AnswerComposer
-                  value={curAns.text}
+                  initialValue={curAns.text}
                   onText={setCurText}
                   img={curAns.img}
                   onAttach={attachCur}
@@ -1708,9 +1886,21 @@ export default function Noobtopro() {
             {stage === "diagnostic" && !curQ && (
               <div className="fade-up">
                 {diagError ? (
-                  <div className="np-card" style={{ textAlign: "center", padding: "32px 24px" }}>
+                  <div className="np-card" role="alert" style={{ textAlign: "center", padding: "32px 24px" }}>
                     <p className="np-lessontext" style={{ marginBottom: 16 }}>{diagError}</p>
-                    <button className="np-btn np-primary" onClick={retryDiagnostic}>Try again</button>
+                    {/* FRONTEND P1-4: when the failure is a recoverable hiccup, offer
+                        "Try again"; when the response shape is unexpected (fatal — a
+                        retry can't fix it), offer only "Restart diagnostic" so the
+                        learner is never stuck on a hopeless retry loop. A restart is
+                        always available as an escape hatch. */}
+                    <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
+                      {!diagFatal && (
+                        <button className="np-btn np-primary" onClick={retryDiagnostic}>Try again</button>
+                      )}
+                      <button className={diagFatal ? "np-btn np-primary" : "np-btn np-secondary"} onClick={startDiagnostic}>
+                        Restart diagnostic
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <Loader subject="scoring your last answer" />
@@ -1737,7 +1927,8 @@ export default function Noobtopro() {
                 )}
                 <div className="np-pagehead">
                   <span className="np-eyebrow--mono">Your results</span>
-                  <h2 className="np-h2">Where you stand</h2>
+                  {/* A11y P1-5: one real <h1> per signed-in view (visual style kept via np-h2). */}
+                  <h1 className="np-h2">Where you stand</h1>
                   <p className="np-lede">{SCALE_NOTE}</p>
                 </div>
                 <div className="np-grid3">
@@ -1750,7 +1941,8 @@ export default function Noobtopro() {
                           <span className="np-scorelabel">{SUBJECTS[k].label}</span>
                         </div>
                         <Ring value={s.score} color={SUBJECTS[k].color} label={SUBJECTS[k].label} />
-                        <div className="np-bandtag" style={{ color: SUBJECTS[k].color }}>{band(s.score)}</div>
+                        {/* A11y P1-2: the rank band is small meaningful text → accessible text variant. */}
+                        <div className="np-bandtag" style={{ color: SUBJECT_TEXT[k] }}>{band(s.score)}</div>
                         {s.comment && <div className="np-comment">{s.comment}</div>}
                         {s.weakConcepts && s.weakConcepts.length > 0 && (
                           <div className="np-weakwrap">
@@ -1794,7 +1986,8 @@ export default function Noobtopro() {
                 </button>
                 <div className="np-pagehead">
                   <span className="np-eyebrow--mono">Practice</span>
-                  <h2 className="np-h2">Climb {pSubject ? SUBJECTS[pSubject].label : "your subjects"}</h2>
+                  {/* A11y P1-5: one real <h1> per signed-in view (visual style kept via np-h2). */}
+                  <h1 className="np-h2">Climb {pSubject ? SUBJECTS[pSubject].label : "your subjects"}</h1>
                 </div>
 
                 {busy && !pQuestion && <Loader subject={pSubject ? SUBJECTS[pSubject].label : ""} />}
@@ -1807,8 +2000,18 @@ export default function Noobtopro() {
                         {SUBJECTS[pSubject].label.toUpperCase()} · {(pQuestion.difficulty || "").toUpperCase()}
                       </span>
                       {pQuestion.targetConcept && <span className="np-topic">{pQuestion.targetConcept}</span>}
-                      <span className="np-livescore" style={{ borderColor: SUBJECTS[pSubject].color }}>
-                        {scores[pSubject]?.score ?? 0}<span style={{ color: "var(--muted)" }}>/350</span>
+                      {/* A11y P1-3: announce the live score + its delta when the grade lands. */}
+                      {/* FRONTEND P1-3: guard the BASE — `scores` can be null on the
+                          partial-baseline path (a subject practiced before it was ranked),
+                          so `scores[pSubject]` would throw before the `?.` ran. */}
+                      <span
+                        className="np-livescore"
+                        style={{ borderColor: SUBJECTS[pSubject].color }}
+                        role="status"
+                        aria-live="polite"
+                        aria-label={`Current score ${scores?.[pSubject]?.score ?? 0} of 350${scoreDelta ? `, ${scoreDelta > 0 ? "up" : "down"} ${Math.abs(scoreDelta)}` : ""}`}
+                      >
+                        {scores?.[pSubject]?.score ?? 0}<span style={{ color: "var(--muted)" }}>/350</span>
                         {scoreDelta !== null && scoreDelta !== 0 && (
                           <span style={{ color: deltaColor(scoreDelta), marginLeft: 6 }}>
                             {scoreDelta > 0 ? "+" : ""}{scoreDelta}
@@ -1821,13 +2024,13 @@ export default function Noobtopro() {
                     {!feedback && (
                       <>
                         <AnswerComposer
-                          value={pText}
+                          initialValue={pText}
                           onText={setPText}
                           img={pImg}
                           onAttach={attachP}
-                          onRemoveImg={() => { revokePreview(pImg); setPImg(null); }}
-                          onSubmit={() => submitPractice(false)}
-                          onSkip={() => submitPractice(true)}
+                          onRemoveImg={onPracticeRemoveImg}
+                          onSubmit={onPracticeSubmit}
+                          onSkip={onPracticeSkip}
                           lockKey={pQuestion.question}
                           submitLabel="Submit reasoning"
                           loading={busy}
@@ -1837,7 +2040,11 @@ export default function Noobtopro() {
                     )}
 
                     {feedback && (
-                      <div className="fade-up">
+                      // A11y P1-3: the grading result lands asynchronously (replacing
+                      // the composer), so wrap it in a polite live region — screen
+                      // readers announce the reasoning score + delta + feedback when
+                      // they appear, instead of going silent after "Working…".
+                      <div className="fade-up" role="status" aria-live="polite">
                         <div className="np-card np-feedhead">
                           <div>
                             <div className="np-eyebrow">Reasoning quality this attempt</div>
