@@ -37,9 +37,11 @@ jobs:
         run: npm ci
 
       # Dependency scan (audit 08 P1). GATE on production deps only — a high/critical vuln
-      # in anything shipped to users fails the build. The dev toolchain (vitest/vite/esbuild)
-      # has known high-severity advisories that are NOT reachable in the prod bundle and need
-      # a semver-major vitest 4 migration; surface them advisory-only (non-blocking) until then.
+      # in anything shipped to users fails the build. Currently 0 high / 0 critical: the only
+      # open advisories are moderate (postcss GHSA-qx2v-qp2m-jg93, transitively via next →
+      # @vercel/analytics, @vercel/speed-insights, geist), which sit below the high gate and
+      # whose fix needs a future next bump — so the full audit below surfaces them
+      # advisory-only (non-blocking).
       - name: Dependency audit (production — gate on high/critical)
         run: npm audit --omit=dev --audit-level=high
 

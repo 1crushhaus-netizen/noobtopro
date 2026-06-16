@@ -268,6 +268,16 @@ async function handlePractice(req, body) {
   const tok = verifyQuestionToken(token);
   if (!tok.ok) return NextResponse.json({ error: tok.error }, { status: 400 });
   const issued = tok.q;
+  // ACCOUNT BINDING (audit F2): a token signed for one account can't be scored by another
+  // (no pooling/sharing one generation across colluding accounts). The bind is enforced
+  // only when the token carries a signed uid — tokens issued before this field existed, or
+  // by an unauthenticated generate, have none and fall through (backward-compatible).
+  if (issued.uid && issued.uid !== uid) {
+    return NextResponse.json(
+      { error: "This question was issued to a different account — please generate a new question." },
+      { status: 400 }
+    );
+  }
   const subject = issued.subject;
   if (!ORDER.includes(subject)) {
     return NextResponse.json({ error: "Unknown subject." }, { status: 400 });
