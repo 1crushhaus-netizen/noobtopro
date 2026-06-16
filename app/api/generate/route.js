@@ -185,8 +185,10 @@ export async function POST(req) {
     // Roll a fresh variation spec per call so the conditioning changes every time —
     // the core defense against the model collapsing onto the canonical exemplar.
     // GLOBAL Groq budget (audit P2-3): the per-IP cap is rotation-defeatable on this
-    // unauthenticated route; the platform-wide window bounds total spend.
-    const glob = await chargeGlobalGroq(1);
+    // unauthenticated route; the platform-wide window bounds total spend. Split pool
+    // (Finding 3): a signed-in caller charges the isolated AUTH window so a guest flood
+    // on this same route can't 429 authenticated users out of generation.
+    const glob = await chargeGlobalGroq(1, { pool: authedUser ? "auth" : "guest" });
     if (!glob.ok) {
       reportRateLimit({ req, route: "/api/generate" });
       return NextResponse.json(

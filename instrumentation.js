@@ -24,4 +24,18 @@ export async function register() {
         "spend cap silently disable (audit P1-5) — fix the deployment's environment configuration."
     );
   }
+
+  // ADVISORY (red-team Finding 2): when QUESTION_TOKEN_SECRET is unset, lib/questionToken.js
+  // DERIVES the HMAC signing key from SUPABASE_SERVICE_ROLE_KEY. That works (domain-separated
+  // by a "qtoken:" prefix), but it COUPLES two secrets of very different blast radius: rotating
+  // the service-role key silently invalidates every outstanding question token, and any leak of
+  // one secret is a leak of both. Recommend an explicit, independent secret in production
+  // (`openssl rand -hex 32`, marked Sensitive in Vercel). Non-fatal — token signing still works.
+  if (!process.env.QUESTION_TOKEN_SECRET) {
+    console.warn(
+      "[instrumentation] QUESTION_TOKEN_SECRET is unset — question/diagnostic token signing is " +
+        "falling back to SUPABASE_SERVICE_ROLE_KEY (coupled rotation + blast radius). Set an " +
+        "explicit secret (openssl rand -hex 32) in production and mark it Sensitive."
+    );
+  }
 }

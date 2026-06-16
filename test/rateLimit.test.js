@@ -164,6 +164,34 @@ describe("refundGlobalGroq (budget refund on grade failure — audit P2-2)", () 
   });
 });
 
+describe("split global Groq budget pools (red-team Finding 3 — guest/auth isolation)", () => {
+  it("an EXHAUSTED guest pool does not block the AUTH pool (a guest flood can't 429 signed-in users)", async () => {
+    process.env.GLOBAL_GROQ_BUDGET_PER_MIN = "1"; // guest pool: 1
+    process.env.GLOBAL_GROQ_BUDGET_AUTH_PER_MIN = "1"; // auth pool: 1, independent window
+    try {
+      // Saturate the guest pool.
+      expect((await chargeGlobalGroq(1, { pool: "guest" })).ok).toBe(true);
+      expect((await chargeGlobalGroq(1, { pool: "guest" })).ok).toBe(false); // guest exhausted
+      // The auth pool is untouched — a signed-in caller still gets through.
+      expect((await chargeGlobalGroq(1, { pool: "auth" })).ok).toBe(true);
+      expect((await chargeGlobalGroq(1, { pool: "auth" })).ok).toBe(false); // its own window now exhausted
+    } finally {
+      delete process.env.GLOBAL_GROQ_BUDGET_PER_MIN;
+      delete process.env.GLOBAL_GROQ_BUDGET_AUTH_PER_MIN;
+    }
+  });
+
+  it("refunds the AUTH pool's distinct buckets when pool:'auth' is passed", async () => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://x.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "svc";
+    _resetRateLimitClient();
+    supa.rpc.mockResolvedValue({ data: null, error: null });
+    await refundGlobalGroq(1, { img: 1, pool: "auth" });
+    expect(supa.rpc).toHaveBeenCalledWith("rate_limit_refund", { p_bucket: "global:groq:auth", p_n: 1 });
+    expect(supa.rpc).toHaveBeenCalledWith("rate_limit_refund", { p_bucket: "global:img:auth", p_n: 1 });
+  });
+});
+
 describe("clientKey", () => {
   const make = (headers) => ({ headers: { get: (h) => headers[h] ?? null } });
 

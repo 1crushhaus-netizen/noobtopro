@@ -1,4 +1,5 @@
 import "./globals.css";
+import { headers } from "next/headers";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 import { SpeedInsights } from "@vercel/speed-insights/next";
@@ -70,7 +71,9 @@ export const viewport = {
 
 // Resolve the saved theme BEFORE first paint so there is never a flash of the
 // wrong theme. Dark is the product default; "system" is an explicit opt-in via
-// the theme switcher. Runs inline in <head> (CSP allows 'unsafe-inline').
+// the theme switcher. Runs inline in <head> — it carries the per-request CSP nonce
+// (Finding 5: middleware sets a nonce-based script-src, so this inline script needs
+// the nonce to execute; an injected inline script without it is blocked).
 const THEME_INIT = `(function(){try{var p=localStorage.getItem("np-theme");var t=p==="light"?"light":p==="system"&&window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.setAttribute("data-theme",t);}catch(e){document.documentElement.setAttribute("data-theme","dark");}})();`;
 
 // SEO P2-4: Organization + SoftwareApplication/Offer structured data for rich
@@ -134,8 +137,12 @@ function buildStructuredData() {
   }).replace(/[<>&]/g, (c) => ({ "<": "\\u003c", ">": "\\u003e", "&": "\\u0026" }[c]));
 }
 
-export default function RootLayout({ children }) {
+export default async function RootLayout({ children }) {
   const structuredData = buildStructuredData();
+  // Per-request CSP nonce set by middleware.js (Finding 5). Undefined in contexts without
+  // the middleware (e.g. a unit test rendering the layout directly) — React simply omits the
+  // attribute, and the legacy 'unsafe-inline' fallback in lib/csp.js keeps that path working.
+  const nonce = (await headers()).get("x-nonce") || undefined;
   return (
     <html
       lang="en"
@@ -144,10 +151,11 @@ export default function RootLayout({ children }) {
       suppressHydrationWarning
     >
       <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
         {/* SEO P2-4: Organization + SoftwareApplication/Offer structured data (a plain
-            text child — already unicode-escaped above, so no dangerouslySetInnerHTML). */}
-        <script type="application/ld+json">{structuredData}</script>
+            text child — already unicode-escaped above, so no dangerouslySetInnerHTML).
+            ld+json is non-executable data, but carry the nonce too for consistency. */}
+        <script nonce={nonce} type="application/ld+json">{structuredData}</script>
       </head>
       <body>
         {children}
