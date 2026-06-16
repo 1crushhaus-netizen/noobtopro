@@ -72,7 +72,7 @@ Score bands (global scale, RANKS_PLAN §3): **0–69** Elementary · **70–139*
 
 | Thing | Value |
 |---|---|
-| **Production URL** | <https://noobtopro-umber.vercel.app> (also `noobtopro-1crushhaus-netizens-projects.vercel.app`, `noobtopro-git-main-…vercel.app`) |
+| **Production URL** | <https://noobto.pro> (canonical; matches `SITE_URL` in `app/layout.js`). Vercel preview/alias hosts such as `noobtopro-umber.vercel.app`, `noobtopro-1crushhaus-netizens-projects.vercel.app`, and `noobtopro-git-main-…vercel.app` also resolve, but `noobto.pro` is the production origin OAuth/OG/Polar are configured against. |
 | **GitHub repo** | `1crushhaus-netizen/noobtopro` (default branch `main`, protected) |
 | **Vercel project** | `noobtopro` (team `1crushhaus-netizens-projects`); framework auto-detect is overridden by `vercel.json`; Node 24.x; **Deployment Protection is OFF** (public). Speed Insights enabled. |
 | **Supabase project** | ref `vwvhgnlgubctrgksyohr`, region `us-east-1`, org `noobtopro` |

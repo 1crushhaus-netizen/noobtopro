@@ -12,9 +12,9 @@ is **all configuration, no app code**. Each provider is three steps:
 Steps are verified against Supabase's current docs (auth-github / auth-discord).
 
 **Your fixed values**
-- **Supabase callback URL** (the providers redirect here): `https://vwvhgnlgubctrgksyohr.supabase.co/auth/v1/callback`
-- **Production URL**: `https://noobtopro-umber.vercel.app`
-- The **Redirect URLs** allow-list in Supabase (Authentication → URL Configuration) was already set up for Google and covers these too — no change needed.
+- **Supabase callback URL** (the providers redirect here): `https://vwvhgnlgubctrgksyohr.supabase.co/auth/v1/callback` — this is what each provider's "callback URL" must point at, and it never changes per deploy.
+- **Production URL** (canonical): `https://noobto.pro` — this is the site origin (matches `SITE_URL` in `app/layout.js`); use it for provider "Homepage URL" fields and anywhere a user-facing site URL is asked for. Vercel preview hosts (e.g. `noobtopro-umber.vercel.app`) still resolve, but `noobto.pro` is the production origin.
+- The **Redirect URLs** allow-list in Supabase (Authentication → URL Configuration) must include the production origin `https://noobto.pro/**` (and any preview wildcard such as `https://noobtopro-*.vercel.app/**`). It was already set up for Google and covers these providers too — no change needed.
 
 ---
 
@@ -24,8 +24,8 @@ Steps are verified against Supabase's current docs (auth-github / auth-discord).
 1. Go to <https://github.com/settings/developers> → **OAuth Apps** → **New OAuth App** (or `Register a new application`).
 2. Fill in:
    - **Application name:** `noobtopro`
-   - **Homepage URL:** `https://noobtopro-umber.vercel.app`
-   - **Authorization callback URL:** `https://vwvhgnlgubctrgksyohr.supabase.co/auth/v1/callback`  ← the Supabase callback, **not** your Vercel URL
+   - **Homepage URL:** `https://noobto.pro`
+   - **Authorization callback URL:** `https://vwvhgnlgubctrgksyohr.supabase.co/auth/v1/callback`  ← the Supabase callback, **not** your site URL
    - **Enable Device Flow:** leave **unchecked**
 3. **Register application.**
 4. Copy the **Client ID**. Click **Generate a new client secret** → copy the **Client secret** (shown once).

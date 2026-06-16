@@ -199,7 +199,7 @@ I'll walk this checklist with you on the live URL and confirm each:
 These are minor and safe; I'll do them on a branch and show you the diff before anything is committed/pushed:
 
 1. **Add `.env.example`** — ✅ done. Documents every variable (`GROQ_API_KEY`, optional `GROQ_MODEL` / `GROQ_VISION_MODEL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`) with no real secrets.
-2. **Pin the Node version** — ✅ done. `package.json` declares `"engines": { "node": ">=20.19.0" }` and a `.nvmrc` (Node 24) is present so Vercel and local builds match.
+2. **Pin the Node version** — ✅ done. `package.json` declares `"engines": { "node": ">=24" }` and a `.nvmrc` (Node 24) is present so Vercel and local builds match. Target Node 24.x — do not build on Node 20, which the engines pin rejects.
 3. **Flatten the app to the repo root** — ✅ done. Removed the nested `noobtopro/` subfolder so Vercel needs no Root Directory override (§3).
 4. **A short "Deploy on Vercel" section in the README**, replacing the GitHub-push-only instructions, so the repo documents the real workflow.
 5. **(Only if you want it later)** local→account progress migration on first sign-in, and per-preview redirect handling if you adopt a custom domain.
