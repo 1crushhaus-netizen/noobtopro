@@ -197,6 +197,7 @@ beforeEach(() => {
   process.env.GROQ_API_KEY = "test-key";
   process.env.QUESTION_TOKEN_SECRET = "test-token-secret";
   delete process.env.GLOBAL_GROQ_BUDGET_PER_MIN;
+  delete process.env.GLOBAL_GROQ_BUDGET_AUTH_PER_MIN; // Finding 3: practice charges the AUTH pool
   _resetRateLimits();
   auth.requireUser.mockReset();
   inject.reportInjection.mockReset();
@@ -532,7 +533,9 @@ describe("POST /api/score practice — numeric verifier (sandboxed arithmetic ch
 
   it("falls back to FIELD-LEVEL correction when the global Groq budget denies the re-grade (a successful grade is never 429'd)", async () => {
     signedIn();
-    process.env.GLOBAL_GROQ_BUDGET_PER_MIN = "1"; // the primary grade consumes the whole window
+    // Practice is auth-REQUIRED, so it charges the AUTH pool (Finding 3): the primary grade
+    // consumes the whole AUTH window, denying the re-grade's charge.
+    process.env.GLOBAL_GROQ_BUDGET_AUTH_PER_MIN = "1";
     const fetchMock = mockGroqSeq([VERIFY_BAD, VERIFY_FIXED]);
     const res = await POST(req({ kind: "practice", token: tok(), reasoning: REASONING }, { authHeader: true }));
     expect(res.status).toBe(200);

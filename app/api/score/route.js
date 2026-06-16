@@ -447,8 +447,10 @@ async function handlePractice(req, body) {
     if (dock) await refundDailyCap();
     if (!dock) {
       // GLOBAL Groq budget (audit P2-3): the per-IP/per-account caps are the fairness
-      // layer; this platform-wide window bounds total spend under IP rotation.
-      const glob = await chargeGlobalGroq(1, { img: img.image ? 1 : 0 });
+      // layer; this platform-wide window bounds total spend under IP rotation. Practice
+      // is auth-REQUIRED, so it charges the isolated AUTH pool (Finding 3) — a guest flood
+      // on the unauthenticated routes can never throttle a signed-in learner's grade.
+      const glob = await chargeGlobalGroq(1, { img: img.image ? 1 : 0, pool: "auth" });
       if (!glob.ok) {
         reportRateLimit({ req, route: "/api/score" });
         return NextResponse.json(
@@ -499,7 +501,7 @@ async function handlePractice(req, body) {
         regrade: makeRegrade({
           image: img.image,
           system: PRACTICE_GRADE_SYS,
-          charge: chargeGlobalGroq,
+          charge: (nn) => chargeGlobalGroq(nn, { pool: "auth" }), // Finding 3: re-grade hits the AUTH pool too
           call: (system) => gradeOne({ ...gradeArgs, system }),
         }),
       });
@@ -681,7 +683,7 @@ async function handlePractice(req, body) {
     // for the rest of the window and over-throttle everyone. A grade that succeeded
     // (then a persist/verify failure) keeps its charge — the Groq spend really happened.
     if (!gradeSucceeded && chargedGroq > 0) {
-      await refundGlobalGroq(chargedGroq, { img: chargedImg });
+      await refundGlobalGroq(chargedGroq, { img: chargedImg, pool: "auth" }); // Finding 3: refund the AUTH pool
     }
     console.error("[/api/score practice]", e);
     return NextResponse.json({ error: "Grading is temporarily unavailable. Please try again." }, { status: 500 });
@@ -791,9 +793,12 @@ async function handleDiagnosticStep(req, body) {
   let chargedGroq = 0;
   let chargedImg = 0;
   let gradeSucceeded = false;
+  // Split pool (Finding 3): a SIGNED-IN diagnostic charges the isolated AUTH window; a guest
+  // step uses the shared guest window — so a guest flood can't 429 a signed-in placement.
+  const groqPool = who.uid ? "auth" : "guest";
   if (!dock) {
     // GLOBAL Groq budget (audit P2-3): one token per LIVE grade; docks are free.
-    const glob = await chargeGlobalGroq(1, { img: img.image ? 1 : 0 });
+    const glob = await chargeGlobalGroq(1, { img: img.image ? 1 : 0, pool: groqPool });
     if (!glob.ok) return tooManyDiag(req, glob.retryAfter);
     chargedGroq = 1;
     chargedImg = img.image ? 1 : 0;
@@ -835,7 +840,7 @@ async function handleDiagnosticStep(req, body) {
         regrade: makeRegrade({
           image: img.image,
           system: DIAG_GRADE_SYS,
-          charge: chargeGlobalGroq,
+          charge: (nn) => chargeGlobalGroq(nn, { pool: groqPool }), // Finding 3: re-grade hits the same pool
           call: (system) => gradeOne({ ...gradeArgs, system }),
         }),
       });
@@ -889,7 +894,7 @@ async function handleDiagnosticStep(req, body) {
     // Refund the pre-charged global budget when the charged grade never succeeded
     // (audit P2-2 fix) — an outage shouldn't keep throttling the whole platform.
     if (!gradeSucceeded && chargedGroq > 0) {
-      await refundGlobalGroq(chargedGroq, { img: chargedImg });
+      await refundGlobalGroq(chargedGroq, { img: chargedImg, pool: groqPool }); // Finding 3: refund the same pool
     }
     console.error("[/api/score diagnostic step]", e);
     return NextResponse.json({ error: "Grading is temporarily unavailable. Please try again." }, { status: 500 });
