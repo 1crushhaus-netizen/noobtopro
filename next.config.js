@@ -16,6 +16,14 @@ const securityHeaders = [
   // so a modern browser honoring frame-ancestors and a legacy browser honoring only
   // X-Frame-Options should agree on "no framing at all".
   { key: "X-Frame-Options", value: "DENY" },
+  // Origin isolation (Lighthouse "Trust & Safety"): put each document in its own
+  // browsing-context group so a cross-origin window can't reach it via window.opener
+  // (a side-channel for XS-Leaks / Spectre-style attacks). Safe at `same-origin`
+  // because the app NEVER opens popups — Google OAuth and Polar checkout are both
+  // full-page top-level redirects (window.location), which COOP does not affect — so
+  // there is no opener/openee relationship to sever. (COEP is intentionally NOT set:
+  // require-corp would block the cross-origin Google avatar images the app loads.)
+  { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
   // Deny every powerful feature the app never uses (it only renders text + reads an
