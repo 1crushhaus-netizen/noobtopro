@@ -1956,7 +1956,24 @@ export default function Noobtopro() {
                   <span className="np-eyebrow--mono">Your results</span>
                   {/* A11y P1-5: one real <h1> per signed-in view (visual style kept via np-h2). */}
                   <h1 className="np-h2">Where you stand</h1>
-                  <p className="np-lede">{SCALE_NOTE}</p>
+                  {/* The 0–350 rank ladder as a segmented scale bar (brightens
+                      Elementary → Doctorate). SCALE_NOTE stays as the screen-reader
+                      label so the same info reaches assistive tech. */}
+                  <div className="np-scale" role="img" aria-label={`Score scale, 0 to 350. ${SCALE_NOTE}`}>
+                    {[
+                      ["Elementary", "0–69"],
+                      ["Middle", "70–139"],
+                      ["High", "140–209"],
+                      ["University", "210–279"],
+                      ["Doctorate", "280–350"],
+                    ].map(([name, range]) => (
+                      <div className="np-scale-tier" key={name}>
+                        <span className="np-scale-seg" aria-hidden="true" />
+                        <span className="np-scale-name">{name}</span>
+                        <span className="np-scale-range">{range}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
                 <div className="np-grid3">
                   {ORDER.map((k) => {
