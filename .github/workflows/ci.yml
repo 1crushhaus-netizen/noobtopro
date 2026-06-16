@@ -36,6 +36,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Static analysis (ESLint flat config, eslint.config.mjs). Fast fail-first gate.
+      # `npm run lint` exits non-zero on ERRORS only — warnings are advisory (no
+      # --max-warnings). Enforces correctness (incl. react-hooks/rules-of-hooks) and the
+      # server-only-secret import boundary (no GROQ/Polar/service-role module in a client).
+      - name: Lint (ESLint)
+        run: npm run lint
+
       # Dependency scan (audit 08 P1). GATE on production deps only — a high/critical vuln
       # in anything shipped to users fails the build. Currently 0 high / 0 critical: the only
       # open advisories are moderate (postcss GHSA-qx2v-qp2m-jg93, transitively via next →

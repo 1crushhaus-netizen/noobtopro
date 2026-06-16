@@ -1,0 +1,47 @@
+name: CodeQL
+
+# GitHub-native static security analysis (SAST). Complements the unit suite + npm
+# audit in ci.yml with dataflow-based vulnerability detection (injection, unsafe
+# sinks, etc.). Results appear under the repo's Security → Code scanning tab.
+#
+# NOTE: Code scanning must be enabled for the repository (free for public repos;
+# requires GitHub Advanced Security for private repos). If it is not enabled the
+# upload step will fail — enable it in Settings → Code security, or remove this file.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly (Mon 03:27 UTC) so newly-published CodeQL queries re-scan the default branch.
+    - cron: "27 3 * * 1"
+
+# Cancel superseded runs on the same ref (mirrors ci.yml).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (javascript-typescript)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      # Least privilege: only what CodeQL needs to read code and publish findings.
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          # JS + JSX (this repo is JavaScript, no TS) — the combined pack covers both.
+          languages: javascript-typescript
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"
