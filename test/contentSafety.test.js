@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isConceptSafe, isContentSafe } from "@/lib/contentSafety";
+import { isConceptSafe, isContentSafe, redactUnsafe } from "@/lib/contentSafety";
 
 describe("isContentSafe — free-text screen for generated content (audit 06 P1-1)", () => {
   it("accepts legitimate STEM question prose with digits, operators, and length", () => {
@@ -12,6 +12,34 @@ describe("isContentSafe — free-text screen for generated content (audit 06 P1-
     expect(isContentSafe("write a sentence about porn")).toBe(false);
     expect(isContentSafe("this is shit")).toBe(false);
     expect(isContentSafe("f​uck this question")).toBe(false); // zero-width split slur
+  });
+  it("catches leetspeak + separator evasions (audit-round2 hardening)", () => {
+    expect(isContentSafe("this is sh1t")).toBe(false); // 1 -> i
+    expect(isContentSafe("f4ggot")).toBe(false); // 4 -> a
+    expect(isContentSafe("n1gg3r")).toBe(false); // leet
+    expect(isContentSafe("f u c k this")).toBe(false); // spaced
+    expect(isContentSafe("f.u.c.k")).toBe(false); // punctuation-separated
+  });
+  it("does NOT false-positive on legitimate STEM/English prose after folding", () => {
+    expect(isContentSafe("Complete the assignment using the class method and pass the test")).toBe(true);
+    expect(isContentSafe("Count the moles, then compute the rate and verify the units")).toBe(true);
+  });
+});
+
+describe("redactUnsafe — screen model-authored output (audit-round2)", () => {
+  it("passes safe text through unchanged", () => {
+    const s = "Strong setup; next, apply the chain rule to the inner function.";
+    expect(redactUnsafe(s)).toBe(s);
+    expect(redactUnsafe("")).toBe("");
+  });
+  it("replaces unsafe text (incl. leet evasion) with the placeholder", () => {
+    expect(redactUnsafe("you are sh1t at this")).toBe("(removed for safety)");
+    expect(redactUnsafe("nice work", "X")).toBe("nice work");
+    expect(redactUnsafe("porn", "X")).toBe("X");
+  });
+  it("passes non-strings through unchanged", () => {
+    expect(redactUnsafe(null)).toBe(null);
+    expect(redactUnsafe(undefined)).toBe(undefined);
   });
 });
 

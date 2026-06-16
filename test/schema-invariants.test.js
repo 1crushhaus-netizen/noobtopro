@@ -174,6 +174,14 @@ describe("db/schema.sql — audit-hardening invariants", () => {
     expect(fnBody("save_progress_for")).toContain("pg_advisory_xact_lock(hashtextextended(p_user::text, 0))");
   });
 
+  it("save_progress_for: a diagnostic re-baseline never LOWERS an earned score (0023)", () => {
+    const fn = fnBody("save_progress_for");
+    // A baseline (re-)placement only writes when it would RAISE the score; practice writes
+    // stay unconditional — so re-taking the free diagnostic can't launder a regression.
+    expect(fn).toMatch(/v_is_baseline boolean :=/);
+    expect(fn).toMatch(/where not v_is_baseline or excluded\.score > public\.scores\.score/);
+  });
+
   it("revokes default client DML on the concept-hub / internal tables (keeps public SELECT + report INSERT)", () => {
     expect(schema).toMatch(/revoke insert, update, delete, truncate on public\.security_events from anon, authenticated/);
     // 0013: diagnostic_pool + try_add_diagnostic were DROPPED (superseded by the
@@ -415,7 +423,10 @@ describe("db/schema.sql — Pro subscriptions / entitlements (Polar, migration 0
     // than the last applied one, so a stale `active` can't resurrect access after a cancel.
     expect(fn).toContain("p_event_modified_at");
     expect(fn).toMatch(/where s\.event_modified_at is null/);
-    expect(fn).toMatch(/excluded\.event_modified_at >= s\.event_modified_at/);
+    // 0023: a NULL incoming timestamp must sort OLDEST (coalesce → 'epoch'), not act as a
+    // wildcard that always overwrites — else a malformed/partial event could resurrect Pro.
+    expect(fn).toMatch(/coalesce\(excluded\.event_modified_at, 'epoch'::timestamptz\) >= s\.event_modified_at/);
+    expect(fn).not.toMatch(/or excluded\.event_modified_at is null/);
   });
 
   it("one Polar subscription maps to exactly one account (unique polar_subscription_id)", () => {

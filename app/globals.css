@@ -60,7 +60,11 @@
      -text variants mirror them here; the light theme overrides them darker. */
   --math-text: #97804d;
   --phys-text: #56897e;
-  --chem-text: #9d685e;
+  /* A11y AA fix: the bright accent #9d685e is only 4.01:1 on the #141414 panel
+     (and 4.31:1 on #0a0a0a), missing AA for small text. Lifted to #c0897e
+     (≈6.25:1 on #141414) so the chemistry rank/band/mastery labels pass AA while
+     staying the rust/terracotta chemistry hue. --chem (non-text fills) is unchanged. */
+  --chem-text: #c0897e;
   --math-soft: rgba(151, 128, 77, .14);
   --phys-soft: rgba(86, 137, 126, .14);
   --chem-soft: rgba(157, 104, 94, .14);

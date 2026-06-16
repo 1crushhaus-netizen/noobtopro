@@ -3,6 +3,7 @@ import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Analytics } from "@vercel/analytics/next";
+import { proIsAvailable } from "@/lib/polar";
 
 // Canonical production origin. metadataBase makes the auto-generated
 // opengraph-image / twitter-image URLs absolute, which crawlers and link
@@ -78,51 +79,63 @@ const THEME_INIT = `(function(){try{var p=localStorage.getItem("np-theme");var t
 // so it ships in the SSR HTML and can never break out of the <script> as a plain
 // text child (no dangerouslySetInnerHTML). Claims stay truthful + price-consistent
 // with the Landing pricing card (€9.99/mo).
-const STRUCTURED_DATA = JSON.stringify({
-  "@context": "https://schema.org",
-  "@graph": [
+//
+// Built per-request (server-only) so the priced Pro Offer is emitted ONLY when Pro
+// is actually sellable (proIsAvailable() — POLAR_* configured). Advertising a priced
+// Offer for a tier nobody can buy is a Google Rich Results mismatch, so when Pro is
+// off the offers array carries the Free offer alone. lib/polar is server-only (reads
+// secrets, no NEXT_PUBLIC_*) — safe here since this is a server component.
+function buildStructuredData() {
+  const offers = [
     {
-      "@type": "Organization",
-      "@id": `${SITE_URL}/#organization`,
-      name: "noobtopro",
-      url: SITE_URL,
-      logo: `${SITE_URL}/icon.svg`,
+      "@type": "Offer",
+      name: "Free",
+      price: "0",
+      priceCurrency: "EUR",
     },
-    {
-      "@type": "WebSite",
-      "@id": `${SITE_URL}/#website`,
-      name: "noobtopro",
-      url: SITE_URL,
-      publisher: { "@id": `${SITE_URL}/#organization` },
-    },
-    {
-      "@type": "SoftwareApplication",
-      name: "noobtopro",
-      description: DESCRIPTION,
-      url: SITE_URL,
-      applicationCategory: "EducationalApplication",
-      operatingSystem: "Web",
-      publisher: { "@id": `${SITE_URL}/#organization` },
-      offers: [
-        {
-          "@type": "Offer",
-          name: "Free",
-          price: "0",
-          priceCurrency: "EUR",
-        },
-        {
-          "@type": "Offer",
-          name: "Pro",
-          price: "9.99",
-          priceCurrency: "EUR",
-          category: "subscription",
-        },
-      ],
-    },
-  ],
-}).replace(/[<>&]/g, (c) => ({ "<": "\\u003c", ">": "\\u003e", "&": "\\u0026" }[c]));
+  ];
+  if (proIsAvailable()) {
+    offers.push({
+      "@type": "Offer",
+      name: "Pro",
+      price: "9.99",
+      priceCurrency: "EUR",
+      category: "subscription",
+    });
+  }
+  return JSON.stringify({
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": `${SITE_URL}/#organization`,
+        name: "noobtopro",
+        url: SITE_URL,
+        logo: `${SITE_URL}/icon.svg`,
+      },
+      {
+        "@type": "WebSite",
+        "@id": `${SITE_URL}/#website`,
+        name: "noobtopro",
+        url: SITE_URL,
+        publisher: { "@id": `${SITE_URL}/#organization` },
+      },
+      {
+        "@type": "SoftwareApplication",
+        name: "noobtopro",
+        description: DESCRIPTION,
+        url: SITE_URL,
+        applicationCategory: "EducationalApplication",
+        operatingSystem: "Web",
+        publisher: { "@id": `${SITE_URL}/#organization` },
+        offers,
+      },
+    ],
+  }).replace(/[<>&]/g, (c) => ({ "<": "\\u003c", ">": "\\u003e", "&": "\\u0026" }[c]));
+}
 
 export default function RootLayout({ children }) {
+  const structuredData = buildStructuredData();
   return (
     <html
       lang="en"
@@ -134,7 +147,7 @@ export default function RootLayout({ children }) {
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
         {/* SEO P2-4: Organization + SoftwareApplication/Offer structured data (a plain
             text child — already unicode-escaped above, so no dangerouslySetInnerHTML). */}
-        <script type="application/ld+json">{STRUCTURED_DATA}</script>
+        <script type="application/ld+json">{structuredData}</script>
       </head>
       <body>
         {children}

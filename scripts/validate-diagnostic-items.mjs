@@ -11,7 +11,7 @@
 // ---------------------------------------------------------------------------
 
 import { readFileSync } from "node:fs";
-import { BAND_LADDER, conceptByKey } from "../lib/curriculum.js";
+import { BAND_LADDER, RANK_TO_BAND, conceptByKey } from "../lib/curriculum.js";
 
 // lib/taxonomy.js imports through the "@/" alias, which plain node can't
 // resolve — parse the slug vocabulary from source text instead. (Slug checks
@@ -56,7 +56,15 @@ for (const subject of only ? [only] : SUBJECTS) {
     if (!q.id.startsWith(`${subject}:${q.band}:`)) bad(`${where}: id must be "${subject}:${q.band}:<n>"`);
     cells[q.band] = (cells[q.band] || 0) + 1;
     if (!ALL_SLUGS.has(q.topicSlug)) bad(`${where}: topicSlug "${q.topicSlug}" is not a taxonomy slug`);
-    if (!conceptByKey(subject, q.conceptKey)) bad(`${where}: conceptKey "${q.conceptKey}" is not a ${subject} curriculum concept`);
+    const concept = conceptByKey(subject, q.conceptKey);
+    if (!concept) bad(`${where}: conceptKey "${q.conceptKey}" is not a ${subject} curriculum concept`);
+    // The item's band MUST match its concept's curriculum rank (RANK_TO_BAND),
+    // so a served item is actually calibrated at the difficulty it claims. The ONE
+    // documented exception: phd-band items map to the hardest existing university-
+    // rank concept (the doctorate curriculum cells are WIP — see diagnosticBank.js).
+    else if (q.band !== "phd" && RANK_TO_BAND[concept.rank] !== q.band) {
+      bad(`${where}: band "${q.band}" but conceptKey "${q.conceptKey}" is ${concept.rank}-rank (expected band "${RANK_TO_BAND[concept.rank]}")`);
+    }
     if (!SURFACES.includes(q.reasoningSurface)) bad(`${where}: reasoningSurface "${q.reasoningSurface}" not allow-listed`);
     if (q.reasoningSurface === "trap" && (typeof q.trap !== "string" || q.trap.trim().length < 10)) bad(`${where}: trap surface needs a trap description`);
     if (q.reasoningSurface !== "trap" && q.trap) bad(`${where}: trap text on a non-trap surface`);

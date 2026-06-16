@@ -31,6 +31,7 @@
 import { NextResponse, after } from "next/server";
 import { groqJSON, fenceGuard, PRACTICE_GRADE_SYS, DIAG_GRADE_SYS } from "@/lib/groq";
 import { verifyQuestionToken, verifyDiagToken, signDiagState } from "@/lib/questionToken";
+import { redactUnsafe } from "@/lib/contentSafety";
 import {
   ORDER,
   normalizeRubric,
@@ -654,13 +655,15 @@ async function handlePractice(req, body) {
       errors, // typed error taxonomy (Socratic prompts on reasoning errors)
       finalAnswerMatches, // diagnostic only — did the learner's final answer match the grader's
       verification, // the numeric verifier's verdict on the grader's own arithmetic
-      strengths, // what the answer did well
-      improvements: lockSolutions ? [] : improvements, // (Pro) specific, actionable steps to reach 100
-      workedSolution: lockSolutions ? "" : workedSolution, // (Pro) full solution, revealed post-grade (empty on a dock)
+      // Screen the model-authored, user-visible free text (audit: output was unscreened) —
+      // redactUnsafe only replaces a field that trips the safety blocklist; no-op on STEM.
+      strengths: (strengths || []).map((s) => redactUnsafe(s)), // what the answer did well
+      improvements: lockSolutions ? [] : (improvements || []).map((s) => redactUnsafe(s)), // (Pro) actionable steps to reach 100
+      workedSolution: lockSolutions ? "" : redactUnsafe(workedSolution), // (Pro) full solution, revealed post-grade (empty on a dock)
       workedSolutionLocked: lockSolutions && !dock, // tell the client to show the upgrade nudge
-      correctnessNote,
-      socraticHint,
-      microLesson,
+      correctnessNote: redactUnsafe(correctnessNote),
+      socraticHint: redactUnsafe(socraticHint),
+      microLesson: redactUnsafe(microLesson),
       weakConcepts,
       newScore: saved.newScore,
       delta: saved.delta,
@@ -905,6 +908,10 @@ async function handleDiagnosticFinalize(req, body) {
   const uid = who.uid;
   let sb = null;
   if (uid) {
+    // Durable PER-ACCOUNT cap (audit): the step path caps acct:<uid>:diag but finalize
+    // did not, so a re-baseline could be replayed across IPs. Share the steps' bucket.
+    const acctRl = await checkRateLimit(`acct:${uid}:diag`, { max: 60 });
+    if (!acctRl.ok) return tooManyDiag(req, acctRl.retryAfter);
     // Resolve persistence UP FRONT: if saving is impossible, fail before touching
     // anything (same rule the batch path had).
     sb = getSupabaseAdmin();
