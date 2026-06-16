@@ -34,7 +34,7 @@ export default function LegalLayout({ title, lastUpdated = "[Effective Date]", c
         <div
           role="note"
           style={{
-            border: "1px solid var(--border)",
+            border: "1px solid var(--line)",
             background: "var(--tint-1)",
             borderRadius: 10,
             padding: "12px 14px",
@@ -55,7 +55,7 @@ export default function LegalLayout({ title, lastUpdated = "[Effective Date]", c
           {children}
         </article>
 
-        <hr style={{ border: 0, borderTop: "1px solid var(--border)", margin: "48px 0 20px" }} />
+        <hr style={{ border: 0, borderTop: "1px solid var(--line)", margin: "48px 0 20px" }} />
         <nav style={{ display: "flex", gap: 18, flexWrap: "wrap", fontSize: 14 }} aria-label="Legal pages">
           <Link href="/privacy" style={{ color: "var(--muted)", textDecoration: "none" }}>Privacy Policy</Link>
           <Link href="/terms" style={{ color: "var(--muted)", textDecoration: "none" }}>Terms of Service</Link>

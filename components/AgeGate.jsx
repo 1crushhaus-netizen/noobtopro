@@ -100,7 +100,7 @@ export default function AgeGate({ onConfirm, onUnderage }) {
           onChange={(e) => setDob(e.target.value)}
           required
           className="np-input"
-          style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 15 }}
+          style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--line-strong)", background: "var(--bg)", color: "var(--text)", fontSize: 16 }}
         />
         {err && (
           <p role="alert" style={{ color: "var(--danger)", fontSize: 13.5, margin: "10px 0 0" }}>{err}</p>

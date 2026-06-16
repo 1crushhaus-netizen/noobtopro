@@ -34,7 +34,8 @@ export default function SignIn({ providers, onProvider, onBack }) {
       <button className="np-ghost" style={{ marginBottom: 14 }} onClick={onBack}><Icon name="back" size={14} /> Back</button>
       <div className="np-pagehead">
         <span className="np-eyebrow--mono">Sign in</span>
-        <h2 className="np-h2">Save your progress</h2>
+        {/* h1: this is the page's primary heading on the sign-in view (a11y heading order) */}
+        <h1 className="np-h2">Save your progress</h1>
         <p className="np-lede">
           Sign in to keep your scores across devices. Identity is handled by your provider; noobtopro never
           sees or stores a password.

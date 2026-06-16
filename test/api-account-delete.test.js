@@ -16,17 +16,26 @@ const polar = vi.hoisted(() => ({ getPolar: vi.fn(() => null) }));
 vi.mock("@/lib/polar", () => ({ getPolar: () => polar.getPolar() }));
 
 import { POST as deletePOST } from "@/app/api/account/delete/route";
+import { _resetRateLimits } from "@/lib/rateLimit";
 
 // Fake service-role admin: subscriptions read -> `subRow`; auth.admin.deleteUser -> deleteResult.
 function fakeAdmin({ subRow = null, deleteResult = { error: null } } = {}) {
   const deleteUser = vi.fn(async () => deleteResult);
+  const secEventsDelete = vi.fn(async () => ({ error: null }));
   return {
     from() {
-      const chain = { select: () => chain, eq: () => chain, maybeSingle: async () => ({ data: subRow, error: null }) };
+      const chain = {
+        select: () => chain,
+        eq: () => chain,
+        maybeSingle: async () => ({ data: subRow, error: null }),
+        // security_events scrub: .delete().eq("user_id", uid)
+        delete: () => ({ eq: (_c, _v) => secEventsDelete() }),
+      };
       return chain;
     },
     auth: { admin: { deleteUser } },
     _deleteUser: deleteUser,
+    _secEventsDelete: secEventsDelete,
   };
 }
 
@@ -34,6 +43,7 @@ const req = () =>
   new Request("http://test.local/api/account/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
 
 beforeEach(() => {
+  _resetRateLimits(); // each case starts with clean per-IP + per-account buckets
   auth.requireUser.mockReset();
   storage.getAdmin.mockReset().mockReturnValue(null);
   polar.getPolar.mockReset().mockReturnValue(null);
@@ -58,6 +68,16 @@ describe("POST /api/account/delete (P0-11 right to erasure)", () => {
     const res = await deletePOST(req());
     expect(res.status).toBe(200);
     expect((await res.json()).deleted).toBe(true);
+    expect(admin._deleteUser).toHaveBeenCalledWith("u1");
+  });
+
+  it("scrubs the user's security_events rows on deletion (P1-5 erasure completeness)", async () => {
+    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
+    const admin = fakeAdmin();
+    storage.getAdmin.mockReturnValue(admin);
+    const res = await deletePOST(req());
+    expect(res.status).toBe(200);
+    expect(admin._secEventsDelete).toHaveBeenCalled();
     expect(admin._deleteUser).toHaveBeenCalledWith("u1");
   });
 

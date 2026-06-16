@@ -1,3 +1,10 @@
+> ⚠️ **STALE — SUPERSEDED.** The `npm audit` figures below are **out of date**. As of
+> 2026-06-16 the live tree has **5 moderate, 0 high, 0 critical** (all from `postcss`
+> bundled inside `next` → GHSA-qx2v-qp2m-jg93). The "1 critical (vitest)" and
+> "2 high (vite/esbuild)" reported here were resolved by the Vitest 4 migration
+> (commit `b031ef9`) and no longer exist. See **`audit/00-INDEPENDENT-AUDIT-2026-06.md`**
+> (§ DevOps / dependencies) for the current, verified state. Kept for history only.
+
 # DevOps / Config / Dependency / Secrets-Hygiene Audit — noobtopro
 
 **Auditor stance:** Adversarial. Assume config wrong / deps vulnerable until proven otherwise.
