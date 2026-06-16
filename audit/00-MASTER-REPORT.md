@@ -35,6 +35,38 @@ None of these are exotic; all are fixable in a focused sprint. The deep engine
 
 ---
 
+## 1b. P0 remediation status (fixed in this PR)
+
+All 12 launch-blocker P0s are addressed on `claude/nice-shannon-68zw9u` (full suite green
+at 841 tests; production build passes). P1/P2 remain for follow-up PRs.
+
+| P0 | Status | How |
+|---|---|---|
+| P0-1 product-id check | ✅ Fixed | Server gate requires the sub to be the configured `POLAR_PRODUCT_ID_PRO` (comma-list supported) — `lib/proStatus.js`, `lib/entitlements.js` |
+| P0-2 answer history client-gated | ✅ Fixed | New Pro-gated `/api/reviews`; client SELECT on `attempt_reviews` revoked (migration 0018) |
+| P0-3 worked solutions free | ✅ Fixed | `workedSolution`/`improvements` withheld server-side from non-Pro on `/api/score` + `/api/grade`; upgrade nudge; FAQ copy corrected |
+| P0-4 "data export" unbuilt | ✅ Fixed | Removed the bullet from the Pro card |
+| P0-5 webhook verifier untested | ✅ Fixed | `test/polarWebhook.test.js` exercises the real verifier (forgery/replay/wrong-secret) |
+| P0-6 no Privacy Policy | ✅ Fixed (draft) | `/privacy` — fill placeholders + counsel review |
+| P0-7 no Terms | ✅ Fixed (draft) | `/terms` — fill placeholders + counsel review |
+| P0-8 no Refund policy | ✅ Fixed (draft) | `/refunds` — fill placeholders + counsel review |
+| P0-9 analytics w/o consent | ✅ Fixed | Cookieless analytics disclosed in Privacy Policy (no blocking banner needed) |
+| P0-10 no age gate | ✅ Fixed | `AgeGate` neutral self-declared age screen at sign-up (13+) |
+| P0-11 no account deletion | ✅ Fixed | `/api/account/delete` (cancels Polar + cascades erasure) + Dashboard "Delete account" |
+| P0-12 no funnel analytics | ✅ Fixed | `track()` for diagnostic/sign-in/checkout-start/checkout-success |
+
+**Deploy / operator actions required before this is live:**
+1. **Apply DB migration `0018`** — but only AFTER deploying the app code (it revokes
+   client SELECT on `attempt_reviews`; the new `/api/reviews` route must be live first, or
+   the review drawer breaks for Pro users). See the migration header.
+2. **Fill the legal placeholders** (`[Company Legal Name]`, `[Jurisdiction]`, contact
+   emails, `[Effective Date]`) and have counsel review `/privacy`, `/terms`, `/refunds`.
+3. **Set `POLAR_PRODUCT_ID_PRO`** in production (already required for checkout) — the P0-1
+   product check is enforced whenever it is set.
+4. **Note the intended behavior change:** worked solutions + "how to reach 100" are now
+   Pro-only (guests/free no longer receive them); existing accounts without an age
+   acknowledgement will see the age screen once on next sign-in.
+
 ## 2. Consolidated counts
 
 Raw per-domain counts (before cross-domain de-duplication):
