@@ -185,6 +185,15 @@ export default async function RootLayout({ children }) {
             text child — already unicode-escaped above, so no dangerouslySetInnerHTML).
             ld+json is non-executable data, but carry the nonce too for consistency. */}
         <script nonce={nonce} type="application/ld+json">{structuredData}</script>
+        {/* Ahrefs Web Analytics — cookieless organic-traffic/SEO tracking. Loaded from
+            analytics.ahrefs.com (allow-listed in lib/csp.js script-src + connect-src) and
+            carries the per-request CSP nonce. The data-key is a public site identifier. */}
+        <script
+          src="https://analytics.ahrefs.com/analytics.js"
+          data-key="T96nmRUfiiNKYhmeieDgOg"
+          nonce={nonce}
+          async
+        />
       </head>
       <body>
         {children}

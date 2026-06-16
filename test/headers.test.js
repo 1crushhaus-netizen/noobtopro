@@ -47,6 +47,14 @@ describe("security response headers", () => {
     expect(scriptSrc).not.toMatch(/'unsafe-inline'/);
   });
 
+  it("allow-lists Ahrefs Web Analytics in BOTH script-src and connect-src", () => {
+    const csp = buildContentSecurityPolicy("n");
+    const scriptSrc = csp.split(";").find((d) => d.trim().startsWith("script-src"));
+    const connectSrc = csp.split(";").find((d) => d.trim().startsWith("connect-src"));
+    expect(scriptSrc).toMatch(/https:\/\/analytics\.ahrefs\.com/);
+    expect(connectSrc).toMatch(/https:\/\/analytics\.ahrefs\.com/);
+  });
+
   it("falls back to 'unsafe-inline' script-src only when no nonce is supplied", () => {
     const scriptSrc = buildContentSecurityPolicy()
       .split(";")
