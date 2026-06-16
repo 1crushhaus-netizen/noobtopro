@@ -108,6 +108,13 @@ export async function POST(req) {
     if (error) throw error;
     return NextResponse.json({ received: true });
   } catch (e) {
+    // The user was deleted (account erasure) between the event and now: upsert hits the
+    // user_id FK (23503). There's no account to entitle, so ACK (202) instead of 500 —
+    // otherwise Polar retries the same doomed delivery for hours against a gone user.
+    if (e && e.code === "23503") {
+      console.warn("[/api/webhooks/polar] subscription event for a deleted user — acknowledging", userId);
+      return NextResponse.json({ received: true, userGone: true }, { status: 202 });
+    }
     // 500 -> Polar retries with backoff, so a transient DB hiccup doesn't drop the
     // entitlement update permanently.
     console.error("[/api/webhooks/polar] upsert_subscription failed", e);

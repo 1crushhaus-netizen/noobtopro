@@ -97,7 +97,11 @@ export default function PrivacyPage() {
         </p>
         <ul>
           <li>Delete your scores and history in-app via <em>Dashboard → Reset my progress</em>.</li>
-          <li>Request full deletion of your account and associated data by contacting us at <strong>[privacy@your-domain]</strong>.</li>
+          <li>
+            Permanently delete your entire account and all associated data (and cancel any Pro
+            subscription) in-app via <em>Dashboard → Delete account</em>, or by contacting us at
+            <strong> [privacy@your-domain]</strong>.
+          </li>
         </ul>
         <p>We will respond to verified requests within the timeframe required by applicable law.</p>
       </Section>

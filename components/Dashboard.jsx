@@ -314,6 +314,7 @@ export default function Dashboard({
   onPractice,
   onLearn,
   onReset,
+  onDeleteAccount,
   onSignIn,
   onUpgrade,
   onManageSubscription,
@@ -327,10 +328,11 @@ export default function Dashboard({
   const proLocked = proEnabled && !isPro;
   // Which slide-over drawer is open: null | "charts" | "reviews".
   const [drawer, setDrawer] = useState(null);
-  // "Reset my progress" confirmation modal (replaces window.confirm): a dimmed
-  // dialog with No (safe default) / Yes (destructive). `resetting` drives the
-  // in-flight spinner so a slow signed-in delete can't be double-fired.
-  const [confirmReset, setConfirmReset] = useState(false);
+  // Destructive-action confirmation modal (replaces window.confirm): a dimmed dialog with
+  // No (safe default) / Yes. One modal serves both "Reset my progress" and "Delete account"
+  // — confirmAction is null | "reset" | "delete". `resetting` drives the in-flight spinner
+  // so a slow operation can't be double-fired.
+  const [confirmAction, setConfirmAction] = useState(null);
   const [resetting, setResetting] = useState(false);
   const resetNoRef = useRef(null); // default focus = the safe "No" button
   const resetPrevFocus = useRef(null); // focus to restore when the dialog closes
@@ -359,23 +361,23 @@ export default function Dashboard({
   // containment). The guest gate does NOT inert the page — it's scoped to the
   // dashboard body so the nav stays usable for a guest who'd rather keep exploring.
   useEffect(() => {
-    onOverlayActiveChange?.(drawer !== null || confirmReset);
-  }, [drawer, confirmReset, onOverlayActiveChange]);
+    onOverlayActiveChange?.(drawer !== null || confirmAction !== null);
+  }, [drawer, confirmAction, onOverlayActiveChange]);
   useEffect(() => () => onOverlayActiveChange?.(false), [onOverlayActiveChange]);
 
   // Reset dialog: focus the safe "No" button on open; restore focus on close; let
   // Escape cancel (unless a reset is already in flight). The dimmed backdrop +
   // inert background (via onOverlayActiveChange) contain focus like the other modals.
   useEffect(() => {
-    if (!confirmReset) return;
+    if (!confirmAction) return;
     resetNoRef.current?.focus();
-    const onKey = (e) => { if (e.key === "Escape" && !resettingRef.current) setConfirmReset(false); };
+    const onKey = (e) => { if (e.key === "Escape" && !resettingRef.current) setConfirmAction(null); };
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
       resetPrevFocus.current?.focus?.();
     };
-  }, [confirmReset]);
+  }, [confirmAction]);
 
   const meta = (user && user.user_metadata) || {};
   const name = meta.full_name || meta.name || (user && user.email) || "You";
@@ -525,10 +527,18 @@ export default function Dashboard({
           <button
             className="np-btn np-danger np-dash-actbtn"
             style={isPro || proEnabled ? undefined : { marginLeft: "auto" }}
-            onClick={() => { resetPrevFocus.current = document.activeElement; setConfirmReset(true); }}
+            onClick={() => { resetPrevFocus.current = document.activeElement; setConfirmAction("reset"); }}
           >
             Reset my progress
           </button>
+          {onDeleteAccount && (
+            <button
+              className="np-btn np-danger np-dash-actbtn"
+              onClick={() => { resetPrevFocus.current = document.activeElement; setConfirmAction("delete"); }}
+            >
+              Delete account
+            </button>
+          )}
         </div>
       </div>
 
@@ -557,11 +567,11 @@ export default function Dashboard({
         <ReviewList loadReviews={loadReviews} onPractice={onPractice} onLearn={onLearn} />
       </Drawer>
 
-      {confirmReset &&
+      {confirmAction &&
         createPortal(
           <div
             className="np-modal-backdrop"
-            onClick={() => { if (!resetting) setConfirmReset(false); }}
+            onClick={() => { if (!resetting) setConfirmAction(null); }}
           >
             <div
               className="np-surface-elevated np-modal"
@@ -571,18 +581,20 @@ export default function Dashboard({
               aria-describedby="np-resetconfirm-desc"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="np-modal-spark" aria-hidden="true"><Icon name="refresh" size={22} /></div>
+              <div className="np-modal-spark" aria-hidden="true"><Icon name={confirmAction === "delete" ? "x" : "refresh"} size={22} /></div>
               <h2 id="np-resetconfirm-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
-                Are you sure?
+                {confirmAction === "delete" ? "Delete your account?" : "Are you sure?"}
               </h2>
               <p id="np-resetconfirm-desc" className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
-                This permanently deletes all your scores and history.
+                {confirmAction === "delete"
+                  ? "This permanently deletes your account and all your data, and cancels any Pro subscription. This can't be undone."
+                  : "This permanently deletes all your scores and history."}
               </p>
               <div className="np-modal-actions">
                 <button
                   ref={resetNoRef}
                   className="np-btn np-secondary"
-                  onClick={() => setConfirmReset(false)}
+                  onClick={() => setConfirmAction(null)}
                   disabled={resetting}
                 >
                   No
@@ -591,15 +603,15 @@ export default function Dashboard({
                   className="np-btn np-danger"
                   onClick={async () => {
                     setResetting(true);
-                    const ok = await onReset?.();
-                    // Success → the app switches to the intro view and unmounts this
-                    // dashboard (nothing to set). Failure → resetProgress surfaces the
-                    // error banner; close the dialog and clear the spinner.
-                    if (ok === false) { setResetting(false); setConfirmReset(false); }
+                    const ok = confirmAction === "delete" ? await onDeleteAccount?.() : await onReset?.();
+                    // Success → the app switches to the intro view (reset) or signs out
+                    // (delete) and unmounts this dashboard. Failure → the handler surfaces
+                    // the error banner; close the dialog and clear the spinner.
+                    if (ok === false) { setResetting(false); setConfirmAction(null); }
                   }}
                   disabled={resetting}
                 >
-                  {resetting ? "Resetting…" : "Yes"}
+                  {resetting ? (confirmAction === "delete" ? "Deleting…" : "Resetting…") : "Yes"}
                 </button>
               </div>
             </div>

@@ -15,7 +15,7 @@ import {
   defaultDifficultyForBand,
   explainRankMove,
 } from "@/lib/scoring";
-import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData, loadReviews, loadMastery, loadSubscription } from "@/lib/store";
+import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData, deleteAccount as requestAccountDeletion, loadReviews, loadMastery, loadSubscription } from "@/lib/store";
 import { getSupabase, isSupabaseConfigured, signInWithProvider, signOutUser, PROVIDERS } from "@/lib/supabase";
 import { track } from "@vercel/analytics";
 import { isActiveSubscription } from "@/lib/proStatus";
@@ -780,6 +780,23 @@ export default function Noobtopro() {
     }
   }
 
+  // Dashboard → "Delete account": permanent erasure (cancels any Pro subscription, deletes
+  // the auth user and all their data). On success the store signs out, which fires the
+  // SIGNED_OUT handler and returns the app to the intro view.
+  async function deleteAccount() {
+    diagRun.current++; // supersede any in-flight grade
+    practiceRun.current++;
+    setBusy(false);
+    try {
+      await requestAccountDeletion();
+      setError("");
+      return true;
+    } catch (e) {
+      setError(e.message || "Could not delete your account.");
+      return false;
+    }
+  }
+
   /* --- diagnostic --- */
   // ADAPTIVE placement start (RANKS_PLAN §8): /api/generate returns ONE signed
   // middle-band starter per subject; each graded step then returns the next item
@@ -1530,6 +1547,7 @@ export default function Noobtopro() {
             onPractice={(s) => { setView("practice"); startPractice(s); }}
             onLearn={openLearn}
             onReset={resetProgress}
+            onDeleteAccount={deleteAccount}
             onSignIn={() => (isSupabaseConfigured ? openSignIn() : setShowAuthNote(true))}
             onUpgrade={startCheckout}
             onManageSubscription={openPortal}
