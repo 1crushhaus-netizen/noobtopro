@@ -409,6 +409,23 @@ export default function Dashboard({
   const email = user && user.email;
   const showAvatar = avatar && !imgFailed;
 
+  // PERF (P2-3): the history-derived chart arrays change only with `history`; memoize
+  // them so a drawer/confirm-modal toggle (the things that actually re-render this
+  // component) doesn't redo the reduction every time. Declared HERE — before the
+  // `!user` / `!scores` early returns — so these hooks run unconditionally on every
+  // render (React Rules of Hooks; enforced by eslint react-hooks/rules-of-hooks).
+  const linePoints = useMemo(
+    () => history.filter((h) => typeof h.totalAfter === "number").map((h) => h.totalAfter),
+    [history]
+  );
+  const barItems = useMemo(
+    () =>
+      history
+        .filter((h) => h.type === "attempt")
+        .map((a) => ({ value: Math.round(a.delta || 0), glyph: SUBJECTS[a.subject]?.glyph || "·" })),
+    [history]
+  );
+
   // ---- Guest gate: blurred preview + sign-in prompt (no data, no auth fetches) ----
   if (!user) {
     return (
@@ -483,20 +500,6 @@ export default function Dashboard({
   }
 
   // ---- Signed-in dashboard: the bento grid ----
-  // PERF (P2-3): the history-derived chart arrays change only with `history`; memoize
-  // them so a drawer/confirm-modal toggle (the things that actually re-render this
-  // component) doesn't redo the reduction every time.
-  const linePoints = useMemo(
-    () => history.filter((h) => typeof h.totalAfter === "number").map((h) => h.totalAfter),
-    [history]
-  );
-  const barItems = useMemo(
-    () =>
-      history
-        .filter((h) => h.type === "attempt")
-        .map((a) => ({ value: Math.round(a.delta || 0), glyph: SUBJECTS[a.subject]?.glyph || "·" })),
-    [history]
-  );
 
   return (
     <div className={"fade-up np-dash-frame" + (armed ? " is-armed" : "")} ref={revealRef}>
