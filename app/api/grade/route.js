@@ -7,7 +7,8 @@ import { isCrossSiteRequest, isWrongContentType, readJsonLimited, MAX_BODY_BYTES
 import { proStatusFromRequest } from "@/lib/entitlements";
 import { proIsAvailable } from "@/lib/polar";
 import { reportInjection, reportRateLimit, shouldDockForInjection } from "@/lib/abuseDetection";
-import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, normalizeFeedbackList, capSolution, normalizeErrors, normalizeSolve, reasoningSurfaceContext } from "@/lib/gradeInput";
+import { capText, normalizeImage, normalizeDifficulty, resolveWeakConcepts, normalizeFeedbackList, capSolution, normalizeErrors, normalizeSolve, reasoningSurfaceContext } from "@/lib/gradeInput";
+import { weakConceptPromptBlock } from "@/lib/curriculum";
 import { withNumericVerification, makeRegrade } from "@/lib/numericVerify";
 
 export const dynamic = "force-dynamic";
@@ -76,6 +77,11 @@ export async function POST(req) {
   if (!ORDER.includes(subject)) {
     return NextResponse.json({ error: `Unknown subject "${subject}".` }, { status: 400 });
   }
+
+  // The curriculum concepts the grader picks weakConcepts FROM (by key), so every
+  // reported weakness maps to a real, prepared concept guide (lib/guides) — no
+  // ad-hoc generation. Injected into the grader prompt; resolved on the way out.
+  const conceptListBlock = weakConceptPromptBlock(subject);
 
   // Flag (don't block) obvious prompt-injection in the learner's reasoning/concept.
   // Capture the scan: a HIGH-confidence injection (audit P2-3) also DOCKS the attempt
@@ -183,6 +189,7 @@ export async function POST(req) {
           `Subject: ${subject}\n` +
           `Question difficulty band: ${safeDifficulty}\n` +
           (surfaceCtx ? surfaceCtx + "\n" : "") +
+          conceptListBlock +
           `Question:\n"""${fenceGuard(safeQuestion)}"""\n\n` +
           // fenceGuard (audit P2-12): learner text can't fake closing the untrusted block.
           `Learner's reasoning:\n"""${fenceGuard(work)}"""`,
@@ -209,7 +216,7 @@ export async function POST(req) {
         }),
       });
       const rubric = normalizeRubric(graded.rubric);
-      const weakConcepts = normalizeWeakConcepts(graded.weakConcepts);
+      const weakConcepts = resolveWeakConcepts(subject, graded.weakConcepts);
       // EXPLICIT response (audit P2-2): never spread raw model JSON to the client — a
       // model-emitted `error` key made the client discard a successful grade, and an
       // object-typed note field crashed the feedback panel as a React child.
@@ -259,6 +266,7 @@ export async function POST(req) {
         `Question difficulty band: ${safeDifficulty}\n` +
         (surfaceCtx ? surfaceCtx + "\n" : "") +
         `Learner's current level: ${safeScore}/350\n\n` +
+        conceptListBlock +
         // fenceGuard (audit P2-12): learner text can't fake closing the untrusted block.
         `Learner's reasoning:\n"""${fenceGuard(work)}"""`,
       image: img.image,
@@ -290,7 +298,7 @@ export async function POST(req) {
     // (an object-typed socraticHint crashed the app as a React child; a model-emitted
     // `error` key made the client discard a successful, Groq-billed grade).
     const rubric = normalizeRubric(graded.rubric);
-    const weakConcepts = normalizeWeakConcepts(graded.weakConcepts);
+    const weakConcepts = resolveWeakConcepts(subject, graded.weakConcepts);
     const reasoningScore = scoreFromRubric(rubric); // transparent weighted mean of the axes
     return NextResponse.json({
       reasoningScore,

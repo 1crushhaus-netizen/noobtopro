@@ -321,3 +321,36 @@ describe("LearnTab — mastery-calibrated drill (RANKS_PLAN §6)", () => {
     expect(screen.getByText(/one notch gentler/i)).toBeTruthy();
   });
 });
+
+describe("LearnTab — assumed mastery (inferred from prerequisites)", () => {
+  it("marks an untouched elementary prerequisite of a well-answered concept as 'assumed', and offers it as a filter", async () => {
+    // Answered quadratics well (q90) → its elementary prereqs are inferred mastered.
+    mocks.loadMastery.mockResolvedValue({
+      mastery: { math: { quadratics: { attempts: 1, greenHits: 1, lastQuality: 90, bestQuality: 90 } } },
+    });
+    await renderTab();
+    // multiplication_division (elementary, a transitive prereq) is never directly
+    // attempted, so it surfaces with the ASSUMED label in its accessible name.
+    fireEvent.change(screen.getByRole("searchbox", { name: /search concepts/i }), {
+      target: { value: "multiplication" },
+    });
+    expect(
+      screen.getByRole("button", { name: /Multiplication & division: Assumed mastered/i })
+    ).toBeTruthy();
+    // The legend/filter learns the new state.
+    expect(screen.getByRole("button", { name: /^Assumed$/ })).toBeTruthy();
+  });
+
+  it("does NOT infer when there's no green-quality demonstration", async () => {
+    mocks.loadMastery.mockResolvedValue({
+      mastery: { math: { quadratics: { attempts: 1, greenHits: 0, lastQuality: 50, bestQuality: 50 } } },
+    });
+    await renderTab();
+    fireEvent.change(screen.getByRole("searchbox", { name: /search concepts/i }), {
+      target: { value: "multiplication" },
+    });
+    // Plain (grey) chip — its accessible name is just the label, no "Assumed".
+    expect(screen.getByRole("button", { name: "Multiplication & division" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Multiplication & division: Assumed/i })).toBeNull();
+  });
+});

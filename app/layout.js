@@ -2,11 +2,36 @@ import "./globals.css";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 import { SpeedInsights } from "@vercel/speed-insights/next";
+import { Analytics } from "@vercel/analytics/next";
+
+// Canonical production origin. metadataBase makes the auto-generated
+// opengraph-image / twitter-image URLs absolute, which crawlers and link
+// unfurlers (Discord / Slack / iMessage / X) require to render a rich preview.
+const SITE_URL = "https://noobto.pro";
+const TITLE = "noobtopro: prove what you know";
+const DESCRIPTION =
+  "Real problems in math, physics, and chemistry. Your reasoning is graded, not just the answer. Get ranked from Elementary to Doctorate, then climb.";
 
 export const metadata = {
-  title: "noobtopro: prove what you know",
-  description:
-    "Real problems in math, physics, and chemistry. Your reasoning is graded, not just the answer. Get ranked from Elementary to Doctorate, then climb.",
+  metadataBase: new URL(SITE_URL),
+  title: TITLE,
+  description: DESCRIPTION,
+  applicationName: "noobtopro",
+  // The og:image / twitter:image are supplied automatically by
+  // app/opengraph-image.js + app/twitter-image.js (Next merges them in here).
+  openGraph: {
+    type: "website",
+    siteName: "noobtopro",
+    url: SITE_URL,
+    title: TITLE,
+    description: DESCRIPTION,
+    locale: "en_US",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: TITLE,
+    description: DESCRIPTION,
+  },
 };
 
 // viewport-fit=cover lets the app paint into the notch/home-indicator area; the
@@ -17,6 +42,9 @@ export const viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  // Tints the link-embed accent bar (e.g. Discord's left rail) and the mobile
+  // browser chrome. Uses the physics-teal subject accent for a calm, on-brand pop.
+  themeColor: "#56897e",
 };
 
 // Resolve the saved theme BEFORE first paint so there is never a flash of the
@@ -38,6 +66,7 @@ export default function RootLayout({ children }) {
       <body>
         {children}
         <SpeedInsights />
+        <Analytics />
       </body>
     </html>
   );

@@ -10,7 +10,9 @@ import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 
 const USER = { id: "u1", email: "u@example.com", user_metadata: { full_name: "U" } };
 const SCORES = {
-  math: { score: 50, weakConcepts: ["x"], comment: "", rubric: { conceptual_understanding: 2, logical_structure: 2, strategy: 2, execution_accuracy: 2, communication: 2 } },
+  // weak_concepts are CURRICULUM KEYS now (the grader reports keys) — a real,
+  // guided concept so opening it lands on its prepared library page.
+  math: { score: 50, weakConcepts: ["multiplication_division"], comment: "", rubric: { conceptual_understanding: 2, logical_structure: 2, strategy: 2, execution_accuracy: 2, communication: 2 } },
   physics: { score: 40, weakConcepts: [], comment: "", rubric: null },
   chemistry: { score: 30, weakConcepts: [], comment: "", rubric: null },
 };
@@ -130,25 +132,10 @@ describe("Noobtopro — signed-in practice is server-authoritative", () => {
   });
 });
 
-describe("Noobtopro — Learn deep-link renders the fetched concept guide (FIX 1)", () => {
-  const GUIDE = {
-    subject: "math",
-    concept: "x",
-    topic: "algebra_functions",
-    overview: "An overview of the concept x.",
-    keyIdeas: ["First key idea", "Second key idea"],
-    whyItWorks: "It works because of this derivation and mechanism.",
-    socraticQuestions: ["What if the input doubles?"],
-    pitfalls: ["A common mistake to avoid"],
-    tryThis: "Try this practice problem.",
-    tryThisQuestion: { question: "Solve for x.", targetConcept: "x", difficulty: "intermediate", token: "tok-learn-1" },
-    cached: false,
-  };
-
-  it("opening 'Learn this' from the dashboard renders the concept guide (overview / why it works), NOT the generic curriculum list", async () => {
+describe("Noobtopro — 'Learn this' opens the prepared library concept (draws from the curriculum)", () => {
+  it("opens the resolved concept's PREPARED page (label + 'Practice this concept'), never the old generator", async () => {
     const fetchMock = vi.fn(async (path) => {
       if (path === "/api/admin/me") return jsonRes({ isAdmin: false });
-      if (path === "/api/learn") return jsonRes(GUIDE);
       return jsonRes({});
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -158,24 +145,17 @@ describe("Noobtopro — Learn deep-link renders the fetched concept guide (FIX 1
     // The radar panel surfaces the weak concept with a "Learn this" action.
     fireEvent.click(await screen.findByRole("button", { name: /learn this/i }));
 
-    // The fetched guide renders its sections — proof the deep-link does NOT fall
-    // through to the generic <LearnTab> curriculum browser.
-    expect(await screen.findByText("An overview of the concept x.")).toBeTruthy();
-    expect(screen.getByText("Why it works")).toBeTruthy();
-    expect(screen.getByText("It works because of this derivation and mechanism.")).toBeTruthy();
-    expect(screen.getByText("First key idea")).toBeTruthy();
-    // The "Practice this concept" button is wired to the bundled try-this question.
+    // It lands on the LIBRARY concept page for the resolved curriculum key — the
+    // concept's label heading + its "Practice this concept" action — NOT a generated guide.
+    expect(await screen.findByRole("heading", { name: "Multiplication & division" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /practice this concept/i })).toBeTruthy();
-    // It fetched the guide exactly once (no wasted second call), and it is the guide
-    // surface — NOT the curriculum browser's "Search concepts" box.
-    expect(fetchMock.mock.calls.filter(([p]) => p === "/api/learn")).toHaveLength(1);
-    expect(screen.queryByRole("searchbox", { name: /search concepts/i })).toBeNull();
+    // The retired generation endpoint is NEVER called.
+    expect(fetchMock.mock.calls.some(([p]) => p === "/api/learn")).toBe(false);
   });
 
-  it("'Browse the full library' clears the concept and shows the curriculum browser", async () => {
+  it("'Back to concepts' returns to the curriculum browser", async () => {
     const fetchMock = vi.fn(async (path) => {
       if (path === "/api/admin/me") return jsonRes({ isAdmin: false });
-      if (path === "/api/learn") return jsonRes(GUIDE);
       return jsonRes({});
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -183,9 +163,9 @@ describe("Noobtopro — Learn deep-link renders the fetched concept guide (FIX 1
     render(<Noobtopro />);
     fireEvent.click(await screen.findByRole("button", { name: /^Dashboard$/i }));
     fireEvent.click(await screen.findByRole("button", { name: /learn this/i }));
-    await screen.findByText("An overview of the concept x.");
-    fireEvent.click(screen.getByRole("button", { name: /browse the full library/i }));
-    // Now the generic LearnTab curriculum browser is shown (its search box appears).
+    await screen.findByRole("heading", { name: "Multiplication & division" });
+    fireEvent.click(screen.getByRole("button", { name: /back to concepts/i }));
+    // Now the curriculum browser is shown (its search box appears).
     expect(await screen.findByRole("searchbox", { name: /search concepts/i })).toBeTruthy();
   });
 });

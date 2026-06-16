@@ -196,7 +196,10 @@ body {
 .np-topnav {
   position: sticky; top: 0; z-index: 30;
   background: color-mix(in srgb, var(--bg) 80%, transparent);
-  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  /* PERF (INP): blur cost rises steeply with radius and this sticky bar repaints
+     on every scroll/interaction. 10px keeps the frosted look at ~half the
+     rasterization cost of 14px. */
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line);
   transition: background .25s ease, box-shadow .25s ease;
 }
@@ -491,6 +494,21 @@ body {
   background: var(--tint-2); border: 1px solid var(--line-strong);
 }
 .np-modal-later { display: block; margin: 12px auto 0; }
+/* Side-by-side modal actions (e.g. the reset-progress confirm: No / Yes). */
+.np-modal-actions { display: flex; gap: 12px; justify-content: center; margin-top: 4px; }
+.np-modal-actions .np-btn { min-width: 116px; justify-content: center; }
+
+/* Transient confirmation toast (e.g. after "Reset my progress"); role=status. */
+.np-toast {
+  position: fixed; left: 50%; bottom: max(24px, env(safe-area-inset-bottom));
+  transform: translateX(-50%); z-index: 200;
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--line-strong); border-radius: 12px;
+  padding: 12px 18px; font-size: 14px; font-family: var(--ui);
+  box-shadow: var(--shadow-lg); max-width: calc(100vw - 32px);
+  animation: npToastIn .2s ease both;
+}
+@keyframes npToastIn { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 @keyframes npBackdropIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes npModalIn { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
 
@@ -572,20 +590,27 @@ body {
    DISTINCT leading glyph (✓ / … / !) so hue alone never carries the meaning
    (WCAG 1.4.1). */
 .np-concepttag--green,
+.np-concepttag--assumed,
 .np-concepttag--yellow,
 .np-concepttag--red { gap: 7px; }
 .np-concepttag--green::before,
+.np-concepttag--assumed::before,
 .np-concepttag--yellow::before,
 .np-concepttag--red::before {
   font-weight: 700; font-size: 11px; line-height: 1; flex: none;
 }
 .np-concepttag--green::before  { content: "✓"; }
+.np-concepttag--assumed::before { content: "✓"; }
 .np-concepttag--yellow::before { content: "…"; }
 .np-concepttag--red::before    { content: "!"; }
 .np-concepttag--green  { border-color: var(--phys);   color: var(--phys);   background: var(--phys-soft); }
+/* Assumed (inferred, not demonstrated): the mastered green, but HOLLOW + dashed so
+   it reads as tentative — distinct from earned solid green at a glance. */
+.np-concepttag--assumed { border-color: var(--phys); border-style: dashed; color: var(--phys); background: transparent; }
 .np-concepttag--yellow { border-color: var(--math);   color: var(--math);   background: var(--math-soft); }
 .np-concepttag--red    { border-color: var(--danger-border); color: var(--danger); background: var(--danger-soft); }
 .np-concepttag--green:hover  { border-color: var(--phys);   background: var(--phys-soft); }
+.np-concepttag--assumed:hover { border-color: var(--phys); background: var(--phys-soft); }
 .np-concepttag--yellow:hover { border-color: var(--math);   background: var(--math-soft); }
 .np-concepttag--red:hover    { border-color: var(--danger); background: var(--danger-soft); }
 
@@ -597,12 +622,14 @@ body {
 }
 .np-masterylegend-item::before { font-weight: 700; font-size: 11px; line-height: 1; flex: none; content: "·"; }
 .np-masterylegend--green::before  { content: "✓"; color: var(--phys); }
+.np-masterylegend--assumed::before { content: "✓"; color: var(--phys); opacity: 0.55; }
 .np-masterylegend--yellow::before { content: "…"; color: var(--math); }
 .np-masterylegend--red::before    { content: "!"; color: var(--danger); }
 
 /* Concept-page mastery status line + the "build the foundations first" card. */
 .np-masterystatus { font-size: 13.5px; margin: -4px 0 14px; color: var(--muted); }
 .np-masterystatus--green  { color: var(--phys); }
+.np-masterystatus--assumed { color: var(--phys); opacity: 0.8; font-style: italic; }
 .np-masterystatus--yellow { color: var(--math); }
 .np-masterystatus--red    { color: var(--danger); }
 .np-masterywarn { border-color: var(--danger-border); margin-bottom: 16px; }
@@ -948,13 +975,14 @@ summary.np-cardicon { min-height: 44px; }
 @keyframes npUnderline { from { background-size: 0% 2px; } to { background-size: 100% 2px; } }
 .np-lp-hero .np-lp-h1 em { animation: npUnderline .55s var(--ease) both; animation-delay: .72s; }
 
-/* Hero glow slowly breathes. */
-@keyframes npGlowBreathe {
-  0% { opacity: .7; transform: translateX(-50%) scale(1); }
-  50% { opacity: 1; transform: translateX(-50%) scale(1.06); }
-  100% { opacity: .7; transform: translateX(-50%) scale(1); }
-}
-.np-lp-glow { animation: npGlowBreathe 9s ease-in-out infinite; }
+/* Hero glow.
+   PERF (INP): this glow sits at the very top of the hero, directly behind the
+   sticky, backdrop-filtered .np-topnav. An *infinite* opacity/scale animation
+   here forced the browser to re-rasterize the nav's backdrop-blur on every frame
+   for the life of the page — a permanent main-thread/compositor tax that inflated
+   Interaction-to-Next-Paint (the page's worst Core Web Vital). The glow now
+   renders statically: the backdrop-blur only re-rasterizes on real scroll/paint,
+   not 60×/second forever. (Reduced-motion users were already spared this.) */
 
 /* (Nav condense lives on the shared .np-topnav in the app-shell section.) */
 
