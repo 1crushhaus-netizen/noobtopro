@@ -67,6 +67,31 @@ at 841 tests; production build passes). P1/P2 remain for follow-up PRs.
    Pro-only (guests/free no longer receive them); existing accounts without an age
    acknowledgement will see the age screen once on next sign-in.
 
+## 1c. P1 remediation status (fixed in this PR)
+
+The P1 themes are addressed (full suite green at 854 tests; production build passes). Two
+items are intentionally deferred with rationale.
+
+| Theme | Status | How |
+|---|---|---|
+| T1 webhook idempotency/ordering | ✅ Fixed | `upsert_subscription` records `event_modified_at` + ignores out-of-order/replayed events (migration 0020); UNIQUE on `polar_subscription_id` |
+| T2 anonymous-LLM cost/DoS | ✅ Fixed | `chargeGlobalGroq` refunds partial charges; global budget **fail-closed**; `clientKey` prefers platform IP; per-account cap on `/api/generate` |
+| T3 ranking gaming | ✅ Fixed | below-level farm damper; verify-at-level gate (migration 0021); bare-token pre-grade dock |
+| T4 content safety | ✅ Fixed | `isContentSafe` wired on `/api/generate`; docstring corrected; photo grading Pro-gated |
+| T5 DB integrity | ✅ Fixed | CHECK on scores.score & item_difficulty.difficulty; indexes (migration 0019) |
+| T6 frontend correctness/perf | ✅ Fixed | null-scores crash; single mastery fetch; diagnostic recovery; modal instead of window.confirm; memoized composer |
+| T7 marketing surface | ✅ Fixed | robots, sitemap, manifest, apple-icon, 404, canonical/env |
+| T8 accessibility (WCAG AA) | ✅ Fixed | contrast tokens; aria-live; landmarks+skip link; h1s; file-input label |
+| T9 deps (dev CVE chain) | ⚠️ Deferred | dev-only (vitest/vite/esbuild), not in the prod bundle; needs a semver-major vitest 4 migration (changes async test timing) — its own PR. Prod deps gated in CI. |
+| T10 CI gates | ◑ Partial | dependency-scan gate (prod high/critical) + coverage gate (≈86%/82%/79%) added. ESLint/typecheck gates deferred (large cleanup on a never-linted, untyped 30K-LOC repo). |
+| T11 docs/legal | ✅ Fixed | LICENSE, SECURITY.md, CONTRIBUTING, domain consistency, Node pin, env docs |
+| Free-cap fairness (02 P1-4) | ✅ Fixed | daily-practice slot refunded on duplicate/dock |
+| Checkout/portal caps (01/02 P1-3) | ✅ Fixed | durable per-account cap on `/api/checkout` + `/api/portal` |
+| Live env (T14 leaked-password) | ☐ Operator | enable Supabase leaked-password protection in the dashboard + prefer `ADMIN_USER_IDS` — config toggle, not code |
+
+**Additional deploy/operator actions (P1):** apply migrations **0019, 0020, 0021**; set
+`NEXT_PUBLIC_SITE_URL` for preview deploys; enable Supabase leaked-password protection.
+
 ## 2. Consolidated counts
 
 Raw per-domain counts (before cross-domain de-duplication):
