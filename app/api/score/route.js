@@ -51,7 +51,7 @@ import { BAND_LADDER } from "@/lib/curriculum";
 import { diagnosticItemById, pickDiagnosticItem, nextDiagBand, DIAG_STEPS_PER_SUBJECT } from "@/lib/diagnosticBank";
 import { isCurriculumConcept } from "@/lib/mastery";
 import { preGradeDock, injectionDock } from "@/lib/preGrade";
-import { checkRateLimit, clientKey, chargeGlobalGroq, refundGlobalGroq } from "@/lib/rateLimit";
+import { checkRateLimit, clientKey, chargeGlobalGroq, refundGlobalGroq, refundRateLimit } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType, readJsonLimited, MAX_BODY_BYTES_IMAGE } from "@/lib/requestGuard";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireUser } from "@/lib/adminAuth";
@@ -211,9 +211,15 @@ async function handlePractice(req, body) {
   // than a generic error. (The one-time diagnostic is NOT capped — only repeated practice.)
   // Only enforced when Pro is actually SELLABLE (proIsAvailable) — a Polar-less deployment
   // never caps free users with no way to upgrade.
+  // Tracks whether THIS request consumed a free daily-practice slot, so it can be REFUNDED
+  // (audit 02 P1-4) if the request turns out not to be a real graded attempt — a duplicate
+  // (replay) or a deterministic dock (empty/"idk"/gibberish). Without the refund those burned
+  // the free user's daily quota unfairly.
+  const dayCapBucket = `acct:${uid}:practice:day`;
+  let chargedDailyCap = false;
   if (!pro && proIsAvailable()) {
     const cap = Number(process.env.FREE_DAILY_PRACTICE_CAP) > 0 ? Number(process.env.FREE_DAILY_PRACTICE_CAP) : 5;
-    const dayRl = await checkRateLimit(`acct:${uid}:practice:day`, { max: cap, windowMs: 24 * 60 * 60 * 1000 });
+    const dayRl = await checkRateLimit(dayCapBucket, { max: cap, windowMs: 24 * 60 * 60 * 1000 });
     if (!dayRl.ok) {
       return NextResponse.json(
         {
@@ -223,7 +229,15 @@ async function handlePractice(req, body) {
         { status: 402, headers: { "Retry-After": String(dayRl.retryAfter) } }
       );
     }
+    chargedDailyCap = true;
   }
+  // Give back the daily slot for a request that didn't count as a real graded problem.
+  const refundDailyCap = async () => {
+    if (chargedDailyCap) {
+      chargedDailyCap = false;
+      await refundRateLimit(dayCapBucket, 1);
+    }
+  };
 
   const sb = getSupabaseAdmin();
   if (!sb) return NextResponse.json({ error: "Scoring is temporarily unavailable." }, { status: 503 });
@@ -333,6 +347,7 @@ async function handlePractice(req, body) {
     if (issued.jti) {
       const { data: dupRows } = await sb.from("attempts").select("id").eq("user_id", uid).eq("jti", issued.jti).limit(1);
       if (Array.isArray(dupRows) && dupRows.length) {
+        await refundDailyCap(); // a replay isn't a new graded problem — don't burn the daily quota
         return NextResponse.json(
           { error: "This answer has already been graded — generate a new question to keep practicing." },
           { status: 409 }
@@ -403,6 +418,10 @@ async function handlePractice(req, body) {
       : img.image
         ? null
         : preGradeDock(capText(reasoning)); // cap before the dock (bounded regex/Set work)
+    // A docked non-attempt (empty/"idk"/gibberish/injection) still persists + drives the
+    // rating down, but it isn't a real graded PROBLEM, so refund the free daily-practice slot
+    // it consumed (audit 02 P1-4). Self-punishing (rating drops), so this can't be farmed.
+    if (dock) await refundDailyCap();
     if (!dock) {
       // GLOBAL Groq budget (audit P2-3): the per-IP/per-account caps are the fairness
       // layer; this platform-wide window bounds total spend under IP rotation.
@@ -570,6 +589,7 @@ async function handlePractice(req, body) {
       if (status === "duplicate") {
         // The same served question was already scored (network retry / replay): no
         // second rating step, no duplicate attempt row.
+        await refundDailyCap(); // not a new graded problem — give the daily slot back (P1-4)
         return NextResponse.json(
           { error: "This answer has already been graded — generate a new question to keep practicing." },
           { status: 409 }
