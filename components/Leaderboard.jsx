@@ -87,11 +87,15 @@ export default function Leaderboard({ loadLeaderboard }) {
           <p className="np-statsub">{error}</p>
         ) : tracks.length > 0 ? (
           <>
-            <div className="np-legend" aria-hidden="true">
+            {/* A11y P2-11: the legend is the on-screen color→track key (the curves are
+                otherwise distinguished only by color), so it is NOT aria-hidden — its
+                labels are useful to AT and color-blind users alike. The color swatch is
+                decorative (the track label text carries the meaning). */}
+            <div className="np-legend" aria-label="Chart color key">
               {tracks.map((t) => (
                 <span key={t.key} className="np-legend-item">
-                  <span className="np-legend-swatch" style={{ background: t.color }} />
-                  {t.glyph ? <span style={{ color: t.color, fontFamily: "var(--mono)" }}>{t.glyph}</span> : null}
+                  <span className="np-legend-swatch" style={{ background: t.color }} aria-hidden="true" />
+                  {t.glyph ? <span style={{ color: t.color, fontFamily: "var(--mono)" }} aria-hidden="true">{t.glyph}</span> : null}
                   {t.label}
                 </span>
               ))}

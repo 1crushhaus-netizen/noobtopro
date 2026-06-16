@@ -32,7 +32,10 @@
   --text: #ededed;
   --text-inverse: #0a0a0a;       /* text on light fills (mirrors the primary button) */
   --muted: #9b9b9b;
-  --faint: #6e6e6e;
+  /* A11y P2-1: lifted from #6e6e6e (3.88:1 on --panel, AA-large only) to #808080
+     (≈4.99:1 on --panel #0a0a0a) so the 12px mono eyebrow/footer labels reach AA
+     for normal-size text in the dark theme. Light theme --faint is set separately. */
+  --faint: #808080;
   --focus: #ededed;              /* monochrome keyboard-focus ring */
 
   /* Type — Geist everywhere (variables provided by next/font in layout.js) */
@@ -51,6 +54,13 @@
   --math: #97804d;
   --phys: #56897e;
   --chem: #9d685e;
+  /* A11y P1-2: accessible TEXT variants of the subject accents for small,
+     meaning-bearing text (rank band tag, subject band pill, mastery status).
+     On the dark theme the bright accents already pass AA on small text, so the
+     -text variants mirror them here; the light theme overrides them darker. */
+  --math-text: #97804d;
+  --phys-text: #56897e;
+  --chem-text: #9d685e;
   --math-soft: rgba(151, 128, 77, .14);
   --phys-soft: rgba(86, 137, 126, .14);
   --chem-soft: rgba(157, 104, 94, .14);
@@ -109,12 +119,24 @@
   --text: #111111;
   --text-inverse: #fafafa;
   --muted: #666666;
-  --faint: #999999;
+  /* A11y P1-1: #999999 is only 2.6–2.9:1 on the light bg/panels — fails AA on the
+     small meaningful labels (eyebrows, hero meta, footer, step numbers). Darkened
+     to #707070 (4.95:1 on #ffffff, 4.54:1 on the #f5f5f5 panel — both pass AA) so
+     those labels are readable. The dark theme value (#6e6e6e) is unchanged. */
+  --faint: #707070;
   --focus: #111111;
 
   --tint-1: rgba(0, 0, 0, .035);
   --tint-2: rgba(0, 0, 0, .06);
   --tint-hover: rgba(0, 0, 0, .085);
+
+  /* A11y P1-2: darker subject text variants for small tinted labels in light
+     theme — the bright accents (#97804d/#56897e) are only ~3.8–4:1 on white and
+     miss AA at 11–13.5px. These are ≥4.5:1 on #ffffff; the bright accents stay
+     for charts/large headings/graphical use. */
+  --math-text: #6f5c34;
+  --phys-text: #3d6258;
+  --chem-text: #7e4a41;
 
   --math-soft: rgba(151, 128, 77, .1);
   --phys-soft: rgba(86, 137, 126, .1);
@@ -238,7 +260,13 @@ body {
 @media (max-width: 900px) { .np-topnav-idtext { display: none; } }
 @media (max-width: 820px) { .np-topnav-links { display: none; } }
 @media (max-width: 640px) { .np-topnav-id { display: none; } }
-@media (max-width: 540px) { .np-topnav-signin { display: none; } }
+/* A11y P2-7: keep the guest sign-in REACHABLE on phones — instead of hiding the
+   only header sign-in below 540px, collapse it to an icon-only button (hide just the
+   text label; the button keeps an aria-label so its accessible name persists). */
+@media (max-width: 540px) {
+  .np-topnav-signin .np-topnav-signin-label { display: none; }
+  .np-topnav-signin { padding-left: 10px; padding-right: 10px; }
+}
 
 /* Nav tabs — underline-pill segmented control (shared with the Learn segments). */
 .np-tab {
@@ -336,7 +364,10 @@ body {
 .np-metaline { font-family: var(--mono); font-size: 12px; letter-spacing: var(--eyebrow-ls); }
 .np-topic { background: var(--tint-1); border: 1px solid var(--line); border-radius: var(--radius-inset); padding: 3px 9px; font-size: 12px; }
 .np-livescore { margin-left: auto; font-family: var(--mono); font-weight: 700; border: 1px solid; border-radius: var(--radius-pill); padding: 4px 12px; font-size: 13px; }
-.np-question { font-family: var(--display); font-size: 17px; line-height: 1.55; font-weight: 500; margin-bottom: 16px; }
+/* A11y P2-8: questions are LLM output and can carry long unbroken tokens (URLs, big
+   numbers, formulae); overflow-wrap:anywhere lets them break so they can't force
+   horizontal scroll on a 320px viewport (WCAG 1.4.10 Reflow). */
+.np-question { font-family: var(--display); font-size: 17px; line-height: 1.55; font-weight: 500; margin-bottom: 16px; overflow-wrap: anywhere; }
 
 .np-input { width: 100%; background: transparent; border: none; outline: none; resize: vertical; color: var(--text); font-family: var(--ui); font-size: 16px; line-height: 1.6; padding: 18px 18px 8px; min-height: 120px; }
 .np-input:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 4px; }
@@ -394,6 +425,23 @@ body {
 
 /* --- process-first grading: legible score breakdown + typed errors --- */
 .np-sronly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+/* A11y P1-4: skip-to-content link — visually hidden until it receives keyboard
+   focus, then it slides into the top-left as a real, clickable control (WCAG 2.4.1
+   Bypass Blocks). Used on both the marketing Landing and the signed-in app shell. */
+.np-skiplink {
+  position: absolute; top: 8px; left: 8px; z-index: 1000;
+  transform: translateY(-150%);
+  background: var(--text); color: var(--text-inverse);
+  font-family: var(--ui); font-size: 14px; font-weight: 600;
+  padding: 10px 16px; border-radius: var(--radius-btn);
+  text-decoration: none;
+  transition: transform .15s ease;
+}
+.np-skiplink:focus, .np-skiplink:focus-visible {
+  transform: translateY(0);
+  outline: 2px solid var(--focus); outline-offset: 2px;
+}
 .np-feedsub { font-size: 13px; color: var(--muted); margin-top: 8px; max-width: var(--w-narrow); line-height: 1.5; }
 .np-scorebreak { margin-bottom: 18px; }
 .np-scorebreak > summary { list-style: none; display: flex; align-items: center; min-height: 44px; }
@@ -628,9 +676,10 @@ body {
 
 /* Concept-page mastery status line + the "build the foundations first" card. */
 .np-masterystatus { font-size: 13.5px; margin: -4px 0 14px; color: var(--muted); }
-.np-masterystatus--green  { color: var(--phys); }
-.np-masterystatus--assumed { color: var(--phys); opacity: 0.8; font-style: italic; }
-.np-masterystatus--yellow { color: var(--math); }
+/* A11y P1-2: small meaning-bearing status text uses the accessible -text variants. */
+.np-masterystatus--green  { color: var(--phys-text); }
+.np-masterystatus--assumed { color: var(--phys-text); opacity: 0.8; font-style: italic; }
+.np-masterystatus--yellow { color: var(--math-text); }
 .np-masterystatus--red    { color: var(--danger); }
 .np-masterywarn { border-color: var(--danger-border); margin-bottom: 16px; }
 
@@ -1034,6 +1083,11 @@ summary.np-cardicon { min-height: 44px; }
 /* Honor reduced motion: never leave content hidden if the observer is skipped. */
 @media (prefers-reduced-motion: reduce) {
   [data-reveal] { opacity: 1 !important; transform: none !important; }
+  /* A11y P2-6: the reveal hook arms BOTH [data-reveal] and the generic
+     [data-revealbar]; reset the bar generically too, so any future [data-revealbar]
+     consumer with a hidden initial state isn't stranded invisible for reduced-motion
+     users (today only .np-lp-scale uses it, but normalize the contract). */
+  [data-revealbar] { opacity: 1 !important; transform: none !important; }
   .np-lp-scale .np-lp-seg { transform: scaleX(1) !important; }
 }
 

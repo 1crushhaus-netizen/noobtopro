@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
 
 // The signed-in flows are SERVER-AUTHORITATIVE: submitPractice/submitDiagnostic must
 // route through /api/score with the user's Bearer token (so the server grades +
@@ -8,7 +8,7 @@ import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 // browser can no longer write scores). This drives the real component against a
 // signed-in Supabase mock whose session carries an access_token.
 
-const USER = { id: "u1", email: "u@example.com", user_metadata: { full_name: "U" } };
+const USER = { id: "u1", email: "u@example.com", user_metadata: { full_name: "U", age_ack_year: 2000 } };
 const SCORES = {
   // weak_concepts are CURRICULUM KEYS now (the grader reports keys) — a real,
   // guided concept so opening it lands on its prepared library page.
@@ -170,8 +170,8 @@ describe("Noobtopro — 'Learn this' opens the prepared library concept (draws f
   });
 });
 
-describe("Noobtopro — re-baseline confirmation (FIX 6)", () => {
-  it("a signed-in user WITH scores must confirm before re-taking (cancel does nothing)", async () => {
+describe("Noobtopro — re-baseline confirmation (FIX 6 / FRONTEND P1-5)", () => {
+  it("a signed-in user WITH scores must confirm in the in-app dialog before re-taking (cancel does nothing)", async () => {
     // SCORES is loaded in beforeEach → the user lands on the ranked Dashboard.
     const fetchMock = vi.fn(async (path) => {
       if (path === "/api/admin/me") return jsonRes({ isAdmin: false });
@@ -179,8 +179,6 @@ describe("Noobtopro — re-baseline confirmation (FIX 6)", () => {
       return jsonRes({});
     });
     vi.stubGlobal("fetch", fetchMock);
-    const confirmSpy = vi.fn(() => false); // user CANCELS
-    vi.stubGlobal("confirm", confirmSpy);
 
     render(<Noobtopro />);
     // Open the Dashboard tab (the ranked home base) where the re-take action lives.
@@ -188,14 +186,20 @@ describe("Noobtopro — re-baseline confirmation (FIX 6)", () => {
     const retake = await screen.findByRole("button", { name: /re-take diagnostic/i });
     fireEvent.click(retake);
 
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(confirmSpy.mock.calls[0][0]).toMatch(/replace your current scores/i);
-    // Cancel → no diagnostic generation, still on the dashboard.
+    // A styled, accessible in-app confirm dialog appears (no native window.confirm).
+    const dialog = await screen.findByRole("dialog", { name: /re-take the diagnostic/i });
+    expect(dialog).toBeTruthy();
+    expect(screen.getByText(/replace your current scores/i)).toBeTruthy();
+    // Cancel via the safe default ("Keep my scores").
+    fireEvent.click(screen.getByRole("button", { name: /keep my scores/i }));
+
+    // Cancel → no diagnostic generation, dialog gone, still on the dashboard.
     expect(fetchMock.mock.calls.some(([p]) => p === "/api/generate")).toBe(false);
+    expect(screen.queryByRole("dialog", { name: /re-take the diagnostic/i })).toBeNull();
     expect(screen.getByText("Where you stand")).toBeTruthy();
   });
 
-  it("confirming proceeds to start the diagnostic", async () => {
+  it("confirming in the dialog proceeds to start the diagnostic", async () => {
     const fetchMock = vi.fn(async (path) => {
       if (path === "/api/admin/me") return jsonRes({ isAdmin: false });
       if (path === "/api/generate") {
@@ -204,11 +208,14 @@ describe("Noobtopro — re-baseline confirmation (FIX 6)", () => {
       return jsonRes({});
     });
     vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal("confirm", vi.fn(() => true)); // user CONFIRMS
 
     render(<Noobtopro />);
     fireEvent.click(await screen.findByRole("button", { name: /^Dashboard$/i }));
     fireEvent.click(await screen.findByRole("button", { name: /re-take diagnostic/i }));
+    // Confirm inside the dialog (scope the query to the dialog — the dashboard button
+    // shares the "Re-take diagnostic" label).
+    const dialog = await screen.findByRole("dialog", { name: /re-take the diagnostic/i });
+    fireEvent.click(within(dialog).getByRole("button", { name: /re-take diagnostic/i }));
     // The diagnostic started — its first question is on screen.
     await screen.findByText("MATH-Q1");
     expect(fetchMock.mock.calls.some(([p]) => p === "/api/generate")).toBe(true);
@@ -279,5 +286,27 @@ describe("Noobtopro — signed-in adaptive diagnostic is server-persisted", () =
     expect(finalize.tokens).toEqual(SUBJECTS3.map((s) => `final-${s}`));
     // Server persisted it — the client never writes locally.
     expect(store.saveProgress).not.toHaveBeenCalled();
+  });
+});
+
+describe("Noobtopro — age gate (P0-10)", () => {
+  it("blocks a signed-in account that hasn't recorded its age, hiding the app", async () => {
+    // Same signed-in session, but NO age acknowledgement in user_metadata.
+    supa.user = { id: "u1", email: "u@example.com", user_metadata: { full_name: "U" } };
+    vi.stubGlobal("fetch", vi.fn(async () => jsonRes({ isAdmin: false })));
+    render(<Noobtopro />);
+    // The neutral age screen is shown instead of the dashboard.
+    expect(await screen.findByText("One quick thing")).toBeTruthy();
+    expect(screen.getByLabelText(/date of birth/i)).toBeTruthy();
+    // The signed-in app identity (email in the sidebar) must NOT be reachable yet.
+    expect(screen.queryByText("u@example.com")).toBeNull();
+  });
+
+  it("does NOT gate a signed-in account that has acknowledged its age", async () => {
+    supa.user = USER; // includes age_ack_year
+    vi.stubGlobal("fetch", vi.fn(async () => jsonRes({ isAdmin: false })));
+    render(<Noobtopro />);
+    expect(await screen.findByText("u@example.com")).toBeTruthy();
+    expect(screen.queryByText("One quick thing")).toBeNull();
   });
 });

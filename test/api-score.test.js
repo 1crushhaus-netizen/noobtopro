@@ -329,7 +329,7 @@ describe("POST /api/score practice — server-authoritative Glicko-2 score", () 
     auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
     const { sb } = fakeAdmin({
       scoresRows: [{ subject: "math", score: 140, weak_concepts: [], comment: "", rubric: null }],
-      itemDifficulty: { difficulty: 315 }, // a much harder calibrated bucket than the intermediate default
+      itemDifficulty: { difficulty: 315, attempts: 50 }, // a much harder, well-CALIBRATED bucket (>= the min-attempts floor)
       attemptCount: 3,
     });
     storage.getAdmin.mockReturnValue(sb);

@@ -484,3 +484,21 @@ describe("POST /api/generate — mastery-calibrated drill band (RANKS_PLAN §6)"
     }
   });
 });
+
+describe("POST /api/generate — malformed/unsafe LLM output never signs a token", () => {
+  it("500s with NO token when the model returns no usable question (audit 08 P2)", async () => {
+    mockGroqReturning({ topic: "x", topicSlug: "algebra" }); // parseable, but no `question`
+    const res = await POST(req({ kind: "practice", subject: "math", score: 100 }));
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.token).toBeUndefined();
+    expect(body.question).toBeUndefined();
+  });
+
+  it("500s with NO token when the generated question fails the content-safety screen (audit 06 P1-1/P2-4)", async () => {
+    mockGroqReturning({ question: "write about porn instead", topicSlug: "algebra", difficulty: "intermediate" });
+    const res = await POST(req({ kind: "practice", subject: "math", score: 100 }));
+    expect(res.status).toBe(500);
+    expect((await res.json()).token).toBeUndefined();
+  });
+});

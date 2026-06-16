@@ -129,15 +129,18 @@ describe("db/schema.sql — server-authoritative scoring (the trust boundary)", 
     );
   });
 
-  it("attempt_reviews (PR 6) is RLS SELECT-own with writes revoked (only save_progress_for writes it)", () => {
+  it("attempt_reviews is Pro-gated: RLS on, NO select policy, ALL client access revoked (P0-2)", () => {
     expect(schema).toMatch(/create table if not exists public\.attempt_reviews/);
     expect(schema).toMatch(/alter table public\.attempt_reviews enable row level security/);
-    // Read policy is SELECT, scoped to the owner via auth.uid().
-    expect(schema).toMatch(/create policy "read own attempt reviews"\s+on public\.attempt_reviews for select/);
-    expect(schema).toContain("(select auth.uid()) = user_id");
-    // No client write path (all writes go through the service-role save_progress_for).
-    expect(schema).toMatch(/revoke insert, update, delete, truncate on public\.attempt_reviews from anon, authenticated/);
-    // save_progress_for writes the review row in the SAME transaction as the attempt.
+    // P0-2: "answer history" is a Pro feature. There is NO client read policy — the old
+    // SELECT-own policy is dropped and SELECT is revoked alongside all write DML, so a
+    // non-Pro user can't read review rows directly. Reads go through /api/reviews (Pro gate)
+    // via the service role.
+    expect(schema).not.toMatch(/create policy "read own attempt reviews"\s+on public\.attempt_reviews for select/);
+    expect(schema).toMatch(/drop policy if exists "read own attempt reviews" on public\.attempt_reviews/);
+    expect(schema).toMatch(/revoke select, insert, update, delete, truncate on public\.attempt_reviews from anon, authenticated/);
+    // save_progress_for (service role) writes the review row in the SAME transaction as the
+    // attempt; migrate_guest_data (SECURITY DEFINER) also writes it. Both bypass the grants.
     expect(fnBody("save_progress_for")).toContain("attempt_reviews");
   });
 
@@ -270,6 +273,12 @@ describe("db/schema.sql — verified leaderboard / guest-laundering defense (FIX
     expect(fn).toMatch(/verified = \(public\.scores\.server_graded \+ excluded\.server_graded\) >= 5/);
   });
 
+  it("verification requires an AT-OR-NEAR-level attempt (P1-2: verify flag gate)", () => {
+    // The increment also requires p_attempt.verify != 'false', so a far-below-level item
+    // (the route sets verify=false) can't advance the leaderboard 'verified' counter.
+    expect(fnBody("save_progress_for")).toMatch(/coalesce\(p_attempt->>'verify', 'true'\) <> 'false'/);
+  });
+
   it("leaderboard_tiers counts ONLY verified rows and returns a provisional position for an unverified caller", () => {
     const body = fnBody("leaderboard_tiers");
     // Distribution is over verified rows only.
@@ -395,9 +404,28 @@ describe("db/schema.sql — Pro subscriptions / entitlements (Polar, migration 0
     expect(fn).toContain("security definer");
     expect(fn).toContain("set search_path = public");
     expect(fn).toContain("on conflict (user_id) do update"); // atomic upsert
-    expect(schema).toContain("revoke all on function public.upsert_subscription(uuid, text, text, text, text, timestamptz, boolean) from public, anon, authenticated;");
-    expect(schema).toContain("grant execute on function public.upsert_subscription(uuid, text, text, text, text, timestamptz, boolean) to service_role;");
+    expect(schema).toContain("revoke all on function public.upsert_subscription(uuid, text, text, text, text, timestamptz, boolean, timestamptz) from public, anon, authenticated;");
+    expect(schema).toContain("grant execute on function public.upsert_subscription(uuid, text, text, text, text, timestamptz, boolean, timestamptz) to service_role;");
     expect(schema).not.toMatch(/grant execute on function public\.upsert_subscription\([^)]*\) to authenticated/);
+  });
+
+  it("upsert_subscription ignores out-of-order / replayed events (P1: ordering guard)", () => {
+    const fn = fnBody("upsert_subscription");
+    // The conditional upsert only applies when the incoming event is not strictly older
+    // than the last applied one, so a stale `active` can't resurrect access after a cancel.
+    expect(fn).toContain("p_event_modified_at");
+    expect(fn).toMatch(/where s\.event_modified_at is null/);
+    expect(fn).toMatch(/excluded\.event_modified_at >= s\.event_modified_at/);
+  });
+
+  it("one Polar subscription maps to exactly one account (unique polar_subscription_id)", () => {
+    expect(schema).toMatch(/create unique index if not exists subscriptions_polar_subscription_id_uniq\s*\n?\s*on public\.subscriptions \(polar_subscription_id\) where polar_subscription_id is not null;/);
+  });
+
+  it("scores.score and item_difficulty.difficulty have DB-level [0,350] CHECK backstops (P1)", () => {
+    expect(schema).toContain("add constraint scores_score_range check (score >= 0 and score <= 350)");
+    expect(schema).toContain("add constraint item_difficulty_range check (difficulty >= 0 and difficulty <= 350)");
+    expect(schema).toContain("create index if not exists scores_verified_idx on public.scores (verified) where verified = true;");
   });
 
   it("a reset (delete_user_data) does NOT cancel the subscription — a paying customer keeps Pro after wiping progress", () => {

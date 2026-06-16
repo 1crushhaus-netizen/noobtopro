@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react";
 import AdminDashboard from "@/components/AdminDashboard";
 
 afterEach(cleanup);
@@ -138,16 +138,34 @@ describe("AdminDashboard", () => {
     });
   });
 
-  it("Delete confirms via window.confirm then calls the action endpoint", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+  it("Delete confirms via a styled dialog (Cancel is a no-op) then calls the action endpoint", async () => {
+    // A11y P2-10: the destructive delete now confirms through an accessible modal
+    // dialog (no window.confirm). Clicking the row's Delete opens the dialog; the
+    // action only fires after confirming in the dialog, and Cancel is a safe no-op.
     const adminApi = makeApi();
     render(<AdminDashboard adminApi={adminApi} />);
     await screen.findByText("Removable discontinuities");
 
-    const deleteButtons = screen.getAllByRole("button", { name: /^delete$/i });
-    fireEvent.click(deleteButtons[0]);
+    const rowDelete = screen.getAllByRole("button", { name: /^delete$/i })[0];
+    fireEvent.click(rowDelete);
 
-    expect(confirmSpy).toHaveBeenCalled();
+    // The confirm dialog appears (role=dialog) and names the guide.
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.textContent).toMatch(/delete this guide/i);
+    expect(dialog.textContent).toMatch(/Removable discontinuities/);
+
+    // Cancel closes the dialog WITHOUT calling the action endpoint.
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(adminApi.mock.calls.some((c) => c[0] === "/api/admin/action")).toBe(false);
+
+    // Re-open and confirm: now the delete action fires with the right payload.
+    fireEvent.click(screen.getAllByRole("button", { name: /^delete$/i })[0]);
+    await screen.findByRole("dialog");
+    // The dialog's own "Delete" button (within the dialog) confirms.
+    const confirmBtn = within(screen.getByRole("dialog")).getByRole("button", { name: /^delete/i });
+    fireEvent.click(confirmBtn);
+
     await waitFor(() => {
       expect(adminApi).toHaveBeenCalledWith("/api/admin/action", {
         target: "guide",
@@ -156,7 +174,6 @@ describe("AdminDashboard", () => {
         concept_key: "removable-discontinuities",
       });
     });
-    confirmSpy.mockRestore();
   });
 
   it("shows the empty states when every section is empty", async () => {

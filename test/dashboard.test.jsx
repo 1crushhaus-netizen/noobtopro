@@ -6,7 +6,7 @@ import { conceptsFor } from "@/lib/curriculum";
 
 afterEach(cleanup);
 
-const user = { email: "ada@example.com", user_metadata: { full_name: "Ada Lovelace" } };
+const user = { email: "ada@example.com", user_metadata: { full_name: "Ada Lovelace", age_ack_year: 2000 } };
 
 const scores = {
   math: { score: 210, weakConcepts: [], comment: "" },

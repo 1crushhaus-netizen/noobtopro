@@ -40,6 +40,17 @@ export async function POST(req) {
   const uid = auth.user.id;
   const email = typeof auth.user.email === "string" ? auth.user.email : undefined;
 
+  // Durable PER-ACCOUNT cap (audit 02 P1-3): the per-IP limiter + Sec-Fetch-Site guard are
+  // bypassable by a non-browser client, so bound Polar checkout-session creation per account
+  // too (identity is JWT-bound, so this can't start a checkout for someone else — just rate it).
+  const acctRl = await checkRateLimit(`acct:${uid}:checkout`, { max: 12 });
+  if (!acctRl.ok) {
+    return NextResponse.json(
+      { error: "Too many requests. Please slow down and try again shortly." },
+      { status: 429, headers: { "Retry-After": String(acctRl.retryAfter) } }
+    );
+  }
+
   const polar = getPolar();
   const productId = proProductId();
   if (!polar || !productId) {

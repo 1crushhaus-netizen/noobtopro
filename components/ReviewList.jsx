@@ -56,8 +56,11 @@ export default function ReviewList({ loadReviews, onPractice, onLearn }) {
         reviews.map((rv, i) => {
           const color = SUBJECTS[rv.subject]?.color || "var(--muted)";
           const fb = rv.feedback || {};
+          // P2-1: key by the STABLE attempt timestamp + subject (both server and guest
+          // review items carry `t`), so a newly-graded attempt landing at the head of the
+          // reversed list can't re-associate <details open> state to the wrong row.
           return (
-            <details key={i} className="np-card" style={{ marginBottom: 10 }}>
+            <details key={rv.t ? `${rv.subject}:${rv.t}` : i} className="np-card" style={{ marginBottom: 10 }}>
               <summary style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <SubjectGlyph subject={rv.subject} />
                 <span style={{ fontFamily: "var(--mono)", fontWeight: 700 }}>{rv.reasoningScore ?? 0}<span style={{ color: "var(--muted)" }}>/100</span></span>

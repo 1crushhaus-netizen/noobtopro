@@ -36,6 +36,17 @@ export async function POST(req) {
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const uid = auth.user.id;
 
+  // Durable PER-ACCOUNT cap (audit 02 P1-3): the per-IP limiter + Sec-Fetch-Site guard are
+  // bypassable by a non-browser client, so bound Polar customer-session creation per account
+  // too (identity is JWT-bound, so this can't be spent on someone else — just rate it).
+  const acctRl = await checkRateLimit(`acct:${uid}:portal`, { max: 12 });
+  if (!acctRl.ok) {
+    return NextResponse.json(
+      { error: "Too many requests. Please slow down and try again shortly." },
+      { status: 429, headers: { "Retry-After": String(acctRl.retryAfter) } }
+    );
+  }
+
   const polar = getPolar();
   if (!polar) {
     return NextResponse.json({ error: "Subscription management is not available right now." }, { status: 503 });

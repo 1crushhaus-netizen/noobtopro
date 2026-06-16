@@ -71,13 +71,17 @@ export function BarChart({ items }) {
   const slot = innerW / n;
   const bw = Math.min(46, slot * 0.6);
 
+  // A11y P2-3: text equivalent that names valence (gained/lost), not just color, so
+  // the chart aria-label is a non-color summary of every bar.
+  const gained = vals.filter((v) => v > 0).length;
+  const lost = vals.filter((v) => v < 0).length;
   return (
     <svg
       className="np-chart"
       viewBox={`0 0 ${W} ${H}`}
       preserveAspectRatio="xMidYMid meet"
       role="img"
-      aria-label={`Points gained or lost across ${items.length} graded attempts.`}
+      aria-label={`Points gained or lost across ${items.length} graded attempts: ${gained} gained, ${lost} lost.`}
     >
       <line x1={padL} x2={W - padR} y1={zeroY} y2={zeroY} style={{ stroke: "var(--line-strong)" }} strokeWidth="1" />
       {items.map((d, i) => {
@@ -91,8 +95,11 @@ export function BarChart({ items }) {
         return (
           <g key={i}>
             <rect x={cx - bw / 2} y={top} width={bw} height={h} rx="3" style={{ fill }} opacity="0.9" />
+            {/* A11y P2-3: a ▲/▼ glyph alongside the signed number, so gain/loss is
+                conveyed by SHAPE + sign, not color alone (parity with the rationale
+                line's ▲/▼/■ in Noobtopro.jsx). */}
             <text x={cx} y={d.value >= 0 ? top - 6 : top + h + 13} textAnchor="middle" style={{ fill, fontFamily: "var(--mono)", fontSize: 13, fontWeight: 700 }}>
-              {d.value > 0 ? "+" : ""}{d.value}
+              {d.value > 0 ? "▲+" : d.value < 0 ? "▼" : ""}{d.value}
             </text>
             <text x={cx} y={H - 8} textAnchor="middle" style={{ fill: "var(--muted)", fontFamily: "var(--mono)", fontSize: 13 }}>
               {d.glyph}

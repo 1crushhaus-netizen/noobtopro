@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { checkRateLimit, clientKey } from "@/lib/rateLimit";
-import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
+import { isCrossSiteRequest, isWrongContentType, readJsonLimited, MAX_BODY_BYTES_TEXT } from "@/lib/requestGuard";
 import { requireAdmin } from "@/lib/adminAuth";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { ORDER } from "@/lib/scoring";
@@ -36,8 +36,13 @@ export async function POST(req) {
 
   let body;
   try {
-    body = await req.json();
-  } catch {
+    // Bounded read (audit 03 P2-3): cap the body size like every other route, instead of
+    // raw req.json() with no limit.
+    body = await readJsonLimited(req, MAX_BODY_BYTES_TEXT);
+  } catch (e) {
+    if (e && e.code === "BODY_TOO_LARGE") {
+      return NextResponse.json({ error: "Request body is too large." }, { status: 413 });
+    }
     return NextResponse.json({ error: "Request body must be valid JSON." }, { status: 400 });
   }
   const { target, action } = body || {};

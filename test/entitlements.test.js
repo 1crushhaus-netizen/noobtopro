@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 // Entitlements reads through two server deps: the service-role admin client
 // (getSupabaseAdmin) and the JWT verifier (requireUser). Mock both at the module
@@ -122,6 +122,58 @@ describe("getSubscriptionRow / isProUserId — deny-by-default read", () => {
 
     mocks.getSupabaseAdmin.mockReturnValue(fakeAdmin({ data: { status: "canceled" }, error: null }));
     expect(await isProUserId("u-1")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isProUserId — product-id gating (P0-1). An active subscription must be to the
+// CONFIGURED Pro product, so an active sub to a different product can't grant Pro.
+// ---------------------------------------------------------------------------
+describe("isProUserId — Pro product-id gating (P0-1)", () => {
+  const OLD = process.env.POLAR_PRODUCT_ID_PRO;
+  afterEach(() => {
+    if (OLD === undefined) delete process.env.POLAR_PRODUCT_ID_PRO;
+    else process.env.POLAR_PRODUCT_ID_PRO = OLD;
+  });
+
+  it("grants Pro for an active subscription to the configured product", async () => {
+    process.env.POLAR_PRODUCT_ID_PRO = "prod_pro";
+    mocks.getSupabaseAdmin.mockReturnValue(
+      fakeAdmin({ data: { status: "active", product_id: "prod_pro", current_period_end: FUTURE }, error: null })
+    );
+    expect(await isProUserId("u-1")).toBe(true);
+  });
+
+  it("does NOT grant Pro for an active subscription to a DIFFERENT product", async () => {
+    process.env.POLAR_PRODUCT_ID_PRO = "prod_pro";
+    mocks.getSupabaseAdmin.mockReturnValue(
+      fakeAdmin({ data: { status: "active", product_id: "prod_other", current_period_end: FUTURE }, error: null })
+    );
+    expect(await isProUserId("u-1")).toBe(false);
+  });
+
+  it("does NOT grant Pro when the row has no product_id but a Pro product is configured", async () => {
+    process.env.POLAR_PRODUCT_ID_PRO = "prod_pro";
+    mocks.getSupabaseAdmin.mockReturnValue(
+      fakeAdmin({ data: { status: "active", current_period_end: FUTURE }, error: null })
+    );
+    expect(await isProUserId("u-1")).toBe(false);
+  });
+
+  it("supports a comma-separated allow-list (e.g. monthly + annual Pro)", async () => {
+    process.env.POLAR_PRODUCT_ID_PRO = "prod_monthly, prod_annual";
+    mocks.getSupabaseAdmin.mockReturnValue(
+      fakeAdmin({ data: { status: "active", product_id: "prod_annual", current_period_end: FUTURE }, error: null })
+    );
+    expect(await isProUserId("u-1")).toBe(true);
+  });
+
+  it("falls back to status-only when POLAR_PRODUCT_ID_PRO is unset (back-compat)", async () => {
+    delete process.env.POLAR_PRODUCT_ID_PRO;
+    mocks.getSupabaseAdmin.mockReturnValue(
+      fakeAdmin({ data: { status: "active", product_id: "whatever", current_period_end: FUTURE }, error: null })
+    );
+    expect(await isProUserId("u-1")).toBe(true);
   });
 });
 

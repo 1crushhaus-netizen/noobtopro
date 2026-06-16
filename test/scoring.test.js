@@ -279,11 +279,14 @@ describe("blend (weighted Elo-style path)", () => {
   });
 
   it("defends a literal prev = NaN / out-of-range prev on every path (never NaN)", () => {
-    expect(blend(NaN, 280)).toBe(98); // NaN prev -> treated as 0 -> 0.65*0 + 0.35*280
-    expect(blend(NaN, 280, {})).toBe(98);
-    expect(blend(NaN, 280, { difficulty: "phd", reasoningScore: 100 })).toBe(168);
+    // audit 05 P2-3: a NaN/Infinity prev is "no previous score" per the contract, so it
+    // seeds from the suggestion (returns sug) rather than being treated as 0 and dragged down.
+    expect(blend(NaN, 280)).toBe(280); // NaN prev -> no prev -> seed from suggestion
+    expect(blend(NaN, 280, {})).toBe(280);
+    expect(blend(NaN, 280, { difficulty: "phd", reasoningScore: 100 })).toBe(280); // no-prev seed short-circuits before the weighted path
+    expect(blend(Infinity, 140)).toBe(140); // Infinity prev -> no prev -> seed from suggestion
     expect(blend(NaN, null)).toBe(0); // null suggestion + NaN prev -> 0, not NaN
-    expect(blend(525, null)).toBe(350); // out-of-range prev clamped on the null-sug path
+    expect(blend(525, null)).toBe(350); // out-of-range FINITE prev clamped on the null-sug path
     expect(blend(-30, null)).toBe(0);
   });
 });
@@ -681,5 +684,32 @@ describe("diagnosticPathScore (path-weighted, no full-weight floor)", () => {
     // The aggregate is a QUALITY (0–100); FIX 7 maps it onto the subject scale through
     // the conservative DIAG_PLACEMENT_CEILING (rounded by the squash round-trip).
     expect(seed.score).toBe(Math.round((diagnosticPathScore(qs) * DIAG_PLACEMENT_CEILING) / 100));
+  });
+});
+
+// ---- attemptVerifies (anti-laundering verification gate, audit 05 P1-2) ------
+import { attemptVerifies, defaultDifficultyForBand } from "@/lib/scoring";
+
+describe("attemptVerifies — only at-or-near-level attempts count toward 'verified'", () => {
+  it("an at-level or harder attempt verifies", () => {
+    // A learner at 175 (High) doing an intermediate item (anchor 175) → counts.
+    expect(attemptVerifies("intermediate", 175)).toBe(true);
+    // Acing a HARDER item than your level always counts.
+    expect(attemptVerifies("phd", 175)).toBe(true);
+    expect(attemptVerifies("advanced", 175)).toBe(true);
+  });
+  it("a FAR-below-level attempt does NOT verify (can't farm the badge)", () => {
+    // A learner placed at ~245 (University) doing BEGINNER items (anchor 35) → does NOT count.
+    expect(attemptVerifies("beginner", 245)).toBe(false);
+    expect(attemptVerifies("foundational", 280)).toBe(false);
+  });
+  it("within one rank band below still counts (legitimate near-level practice)", () => {
+    const oneBand = 350 / 5; // 70
+    const d = defaultDifficultyForBand("intermediate"); // 175
+    expect(attemptVerifies("intermediate", d + oneBand)).toBe(true);   // exactly 1 band above difficulty
+    expect(attemptVerifies("intermediate", d + oneBand + 30)).toBe(false); // >1 band above → far-below item
+  });
+  it("a brand-new (score 0) learner's attempts always verify", () => {
+    expect(attemptVerifies("beginner", 0)).toBe(true);
   });
 });

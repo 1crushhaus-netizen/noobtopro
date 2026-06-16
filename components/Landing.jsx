@@ -92,7 +92,6 @@ const PRO_FEATURES = [
   "Photo-of-work grading",
   "Full worked solutions + “how to reach 100”",
   "Progress trends + answer history",
-  "Data export",
 ];
 
 const FAQ = [
@@ -141,9 +140,9 @@ const FAQ = [
       ["Can the scoring be gamed?",
         "It is specifically built to resist it. Impressive-sounding jargon with no real reasoning scores near zero, repeating the same topic damps how much you can gain, and scoring happens on the server over a signed record of each step, so a grade cannot be forged or a step skipped from the browser."],
       ["Can an AI really grade reasoning fairly?",
-        "It does most of the grading, and we are candid about what that means. To stay consistent it solves the problem itself first, scores against fixed examples at a fixed setting, and reconciles the score against its own rubric so the number cannot contradict the breakdown you see. It is not infallible, which is why every score comes with a transparent rubric and a worked solution you can check."],
+        "It does most of the grading, and we are candid about what that means. To stay consistent it solves the problem itself first, scores against fixed examples at a fixed setting, and reconciles the score against its own rubric so the number cannot contradict the breakdown you see. It is not infallible, which is why every score comes with a transparent rubric and typed feedback you can check; Pro additionally unlocks the full worked solution."],
       ["What if I disagree with a grade?",
-        "You can see exactly why you got it. Every graded answer shows the per-axis breakdown, what you did well, what would reach full marks, and a worked solution, so a score is always inspectable rather than a black box. Your rank is a tool for growth, not a verdict, and your next answers move it."],
+        "You can see exactly why you got it. Every graded answer shows the per-axis breakdown, what you did well, and exactly where your reasoning broke, so a score is always inspectable rather than a black box; Pro adds the full worked solution and the specific steps to reach full marks. Your rank is a tool for growth, not a verdict, and your next answers move it."],
       ["Is the rank trustworthy enough to share?",
         "It is built to be. The rank is relative and self-calibrating, hard to game, and computed server-side, so it is an honest signal of where your STEM reasoning stands. It is not an accredited exam score, and we do not pretend it is."],
     ],
@@ -154,7 +153,7 @@ const FAQ = [
       ["How do I improve my rank?",
         "Practice. Pick a subject and noobtopro serves problems calibrated to your level; sound reasoning raises your score even when the final answer is wrong. The Learn library then teaches the concept behind anything you miss, including the proof or derivation, not just a definition."],
       ["Will it just give me the answer?",
-        "No, and that is deliberate. When you are stuck it asks the right next question and teaches the underlying concept instead of handing over the solution. Worked solutions unlock only after a genuine attempt, so it builds understanding rather than letting you copy."],
+        "No, and that is deliberate. When you are stuck it asks the right next question and teaches the underlying concept instead of handing over the solution. Full worked solutions are a Pro feature and unlock only after a genuine attempt, so it builds understanding rather than letting you copy."],
       ["Is using noobtopro cheating?",
         "It is the opposite of a cheat tool. It grades and teaches your reasoning, will not reveal answers before you try, and rewards understanding over recall. It is built for learning the material, not getting around it."],
       ["Can I submit a photo of my work?",
@@ -173,6 +172,26 @@ const FAQ = [
     ],
   },
 ];
+
+// FAQPage JSON-LD for answer engines (AI Overviews, ChatGPT, Perplexity). Built from
+// the plain-text answers; characters that could break out of <script> are unicode-
+// escaped so it renders as a plain text child (no dangerouslySetInnerHTML needed).
+// PERF (P2-9): it depends ONLY on the module-constant FAQ, so it's computed ONCE at
+// module scope instead of re-running JSON.stringify + a ~3KB regex on every render
+// (every FAQ accordion toggle / scroll-driven `scrolled` flip).
+const FAQ_LD = JSON.stringify({
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: FAQ.flatMap((g) => g.items).map(([q, a, schema]) => ({
+    "@type": "Question",
+    name: q,
+    acceptedAnswer: { "@type": "Answer", text: typeof a === "string" ? a : schema || "" },
+  })),
+}).replace(/[<>&]/g, (c) => ({ "<": "\\u003c", ">": "\\u003e", "&": "\\u0026" }[c]));
+
+// PERF (P2-4): the footer year is effectively stable; compute it once at module
+// scope rather than calling the impure new Date() during every render.
+const YEAR = new Date().getFullYear();
 
 export default function Landing({
   user,
@@ -193,22 +212,11 @@ export default function Landing({
   const { ref: rootRef, armed } = useScrollReveal();
   const scrolled = useScrolled();
 
-  // FAQPage JSON-LD for answer engines (AI Overviews, ChatGPT, Perplexity). Built from
-  // the plain-text answers; characters that could break out of <script> are unicode-
-  // escaped so it renders as a plain text child (no dangerouslySetInnerHTML needed).
-  const faqLd = JSON.stringify({
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    mainEntity: FAQ.flatMap((g) => g.items).map(([q, a, schema]) => ({
-      "@type": "Question",
-      name: q,
-      acceptedAnswer: { "@type": "Answer", text: typeof a === "string" ? a : schema || "" },
-    })),
-  }).replace(/[<>&]/g, (c) => ({ "<": "\\u003c", ">": "\\u003e", "&": "\\u0026" }[c]));
-
   return (
     <div className={"np-lp" + (armed ? " is-armed" : "")} ref={rootRef}>
-      <script type="application/ld+json">{faqLd}</script>
+      <script type="application/ld+json">{FAQ_LD}</script>
+      {/* A11y P1-4: skip-to-content as the first focusable element (hidden until focused). */}
+      <a className="np-skiplink" href="#np-main-content">Skip to content</a>
       {/* ----------------------------- nav (shared TopNav) ----------------------------- */}
       <TopNav
         scrolled={scrolled}
@@ -223,6 +231,9 @@ export default function Landing({
         cta={{ label: busy ? "Setting up…" : "Get started", onClick: onProveIt, disabled: busy }}
       />
 
+      {/* A11y P1-4: the primary content lives in a <main> landmark (TopNav is the
+          <header>; the footer stays outside) so AT landmark navigation works. */}
+      <main id="np-main-content">
       {(error || showAuthNote) && (
         <div className="np-lp-container np-lp-banners">
           {error && (
@@ -385,7 +396,7 @@ export default function Landing({
           <div className="np-lp-price">
             <div className="np-card np-lp-plan" data-reveal style={{ "--ri": 0 }}>
               <div className="np-lp-plan-name">Free</div>
-              <div className="np-lp-plan-price">$0<small> / forever</small></div>
+              <div className="np-lp-plan-price">€0<small> / forever</small></div>
               <div className="np-lp-plan-tag">Everything you need to find where you stand.</div>
               <ul className="np-lp-feats">
                 {FREE_FEATURES.map((f) => (
@@ -414,6 +425,13 @@ export default function Landing({
                 <button className="np-btn np-primary np-lp-plan-cta" onClick={onUpgrade || onSignIn} disabled={busy}>
                   Upgrade to Pro
                 </button>
+              )}
+              {!isPro && (
+                <p className="np-lp-plan-legal" style={{ fontSize: 12, color: "var(--muted)", marginTop: 10, marginBottom: 0 }}>
+                  Recurring billing, cancel anytime. By upgrading you agree to our{" "}
+                  <a href="/terms" style={{ color: "inherit", textDecoration: "underline" }}>Terms</a> and{" "}
+                  <a href="/refunds" style={{ color: "inherit", textDecoration: "underline" }}>Refund Policy</a>.
+                </p>
               )}
             </div>
           </div>
@@ -478,6 +496,7 @@ export default function Landing({
           </button>
         </div>
       </section>
+      </main>
 
       {/* ----------------------------- footer ----------------------------- */}
       <footer className="np-lp-foot">
@@ -486,8 +505,13 @@ export default function Landing({
             noob<span className="np-arrow">→</span>topro
           </a>
           <span className="np-lp-foot-tag">Prove what you know. Climb from noob to pro.</span>
+          <nav className="np-lp-foot-legal" aria-label="Legal" style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+            <a href="/privacy" style={{ color: "var(--muted)", textDecoration: "none" }}>Privacy</a>
+            <a href="/terms" style={{ color: "var(--muted)", textDecoration: "none" }}>Terms</a>
+            <a href="/refunds" style={{ color: "var(--muted)", textDecoration: "none" }}>Refunds</a>
+          </nav>
           <span className="np-lp-foot-tech">Next.js · Supabase · Groq</span>
-          <span className="np-lp-foot-copy">© {new Date().getFullYear()} noobtopro</span>
+          <span className="np-lp-foot-copy">© {YEAR} noobtopro</span>
         </div>
       </footer>
     </div>

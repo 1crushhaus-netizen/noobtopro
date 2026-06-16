@@ -36,8 +36,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Unit tests
-        run: npm test
+      # Dependency scan (audit 08 P1). GATE on production deps only — a high/critical vuln
+      # in anything shipped to users fails the build. The dev toolchain (vitest/vite/esbuild)
+      # has known high-severity advisories that are NOT reachable in the prod bundle and need
+      # a semver-major vitest 4 migration; surface them advisory-only (non-blocking) until then.
+      - name: Dependency audit (production — gate on high/critical)
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Dependency audit (full — advisory)
+        run: npm audit || true
+
+      # Content validators (curated guides + diagnostic items) — previously orphaned scripts.
+      - name: Validate content data
+        run: npm run validate
+
+      # Unit tests WITH coverage thresholds (vitest.config.js: ~80% lines / 70% branches).
+      - name: Unit tests + coverage gate
+        run: npm run test:coverage
 
       - name: Production build
         run: npm run build

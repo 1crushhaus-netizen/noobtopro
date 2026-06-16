@@ -96,7 +96,9 @@ export async function POST(req) {
   }
 
   try {
-    const { error } = await sb.rpc("upsert_subscription", {
+    // Base args (the original 7-param signature). The event's source modified-time drives
+    // the out-of-order/replay guard added in migration 0020.
+    const base = {
       p_user: userId,
       p_status: typeof sub.status === "string" ? sub.status : "inactive",
       p_product_id: typeof sub.productId === "string" ? sub.productId : null,
@@ -104,10 +106,28 @@ export async function POST(req) {
       p_polar_subscription_id: typeof sub.id === "string" ? sub.id : null,
       p_current_period_end: isoOrNull(sub.currentPeriodEnd),
       p_cancel_at_period_end: sub.cancelAtPeriodEnd === true,
+    };
+    let { error } = await sb.rpc("upsert_subscription", {
+      ...base,
+      p_event_modified_at: isoOrNull(sub.modifiedAt || sub.createdAt),
     });
+    // DEPLOY-ORDER TOLERANCE: if the DB predates migration 0020, the 8-arg signature doesn't
+    // exist yet (PostgREST PGRST202). Retry the original 7-arg form so the entitlement still
+    // records — the ordering guard simply activates once 0020 is applied. (Mirrors the
+    // migrate_guest_data 3→2-arg fallback in lib/store.js.)
+    if (error && error.code === "PGRST202") {
+      ({ error } = await sb.rpc("upsert_subscription", base));
+    }
     if (error) throw error;
     return NextResponse.json({ received: true });
   } catch (e) {
+    // The user was deleted (account erasure) between the event and now: upsert hits the
+    // user_id FK (23503). There's no account to entitle, so ACK (202) instead of 500 —
+    // otherwise Polar retries the same doomed delivery for hours against a gone user.
+    if (e && e.code === "23503") {
+      console.warn("[/api/webhooks/polar] subscription event for a deleted user — acknowledging", userId);
+      return NextResponse.json({ received: true, userGone: true }, { status: 202 });
+    }
     // 500 -> Polar retries with backoff, so a transient DB hiccup doesn't drop the
     // entitlement update permanently.
     console.error("[/api/webhooks/polar] upsert_subscription failed", e);

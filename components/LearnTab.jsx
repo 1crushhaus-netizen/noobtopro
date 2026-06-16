@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { SUBJECTS, ORDER } from "@/lib/scoring";
 import { RANKS, RANK_LABELS, conceptsFor, isRankWip, WIP_RANKS_NOTE, rootsFor, crossRootsFor } from "@/lib/curriculum";
 import { conceptState, assumedMasteredKeys, MASTERY_LABELS } from "@/lib/mastery";
@@ -23,25 +23,30 @@ import Icon from "@/components/Icon";
 // openConcept — a full curriculum concept object to DEEP-LINK open (a weak-concept
 // "Learn this" chip routes here instead of generating a guide); onConceptConsumed is
 // called once it's opened so the parent can clear the signal and re-tapping re-opens.
-export default function LearnTab({ onPractice, busyConcept = null, openConcept = null, onConceptConsumed } = {}) {
+export default function LearnTab({ onPractice, busyConcept = null, openConcept = null, onConceptConsumed, mastery: masteryProp = null } = {}) {
   // selected = the full concept object { subject, key, label, strand, rank } | null
   const [selected, setSelected] = useState(null);
   // mastery = { [subject]: { [conceptKey]: counters } } — guest localStorage or the
   // signed-in learner's own concept_mastery rows. A load failure (e.g. the table
   // predates migration 0010) just renders uncolored chips; states stay derivable.
-  const [mastery, setMastery] = useState({});
+  // FRONTEND P1-2: prefer the LIFTED prop (fetched ONCE in the shell, shared with the
+  // Dashboard); only self-fetch via the store when no prop is supplied (standalone
+  // use, e.g. the unit tests). This removes the second per-session mastery round-trip.
+  const [fetchedMastery, setFetchedMastery] = useState({});
+  const mastery = masteryProp ?? fetchedMastery;
 
   useEffect(() => {
+    if (masteryProp != null) return undefined; // mastery supplied by the parent — don't double-fetch
     let alive = true;
     loadMastery()
       .then((res) => {
-        if (alive && res && res.mastery) setMastery(res.mastery);
+        if (alive && res && res.mastery) setFetchedMastery(res.mastery);
       })
       .catch(() => {}); // chips just stay uncolored
     return () => {
       alive = false;
     };
-  }, []);
+  }, [masteryProp]);
 
   // Deep-link: when the parent asks to open a concept (a weak-concept chip), jump
   // straight onto its prepared guide, then signal consumption so re-tapping the same
@@ -64,11 +69,16 @@ export default function LearnTab({ onPractice, busyConcept = null, openConcept =
 
   // Effective display state: a direct attempt always wins; an untouched (grey)
   // elementary concept that's a prerequisite of demonstrated work shows as "assumed".
-  const stateFor = (subject, key) => {
-    const s = conceptState(mastery, subject, key);
-    if (s === "grey" && assumed[subject] && assumed[subject].has(key)) return "assumed";
-    return s;
-  };
+  // PERF (P2-3): stabilized on [mastery, assumed] so child memos that depend on it
+  // (CurriculumList's searchResults) don't invalidate on every keystroke render.
+  const stateFor = useCallback(
+    (subject, key) => {
+      const s = conceptState(mastery, subject, key);
+      if (s === "grey" && assumed[subject] && assumed[subject].has(key)) return "assumed";
+      return s;
+    },
+    [mastery, assumed]
+  );
 
   if (selected) {
     return (
@@ -223,22 +233,28 @@ function CurriculumList({ stateFor, mastery, onOpen }) {
 
   // Search mode: a flat, cross-subject result list (grouped by subject) replaces the
   // tabbed listing while a query is present.
-  const searchResults = q
-    ? ORDER.map((s) => ({
-        subject: s,
-        items: RANKS.filter((r) => !isRankWip(s, r)).flatMap((r) =>
-          conceptsFor(s, r)
-            .filter((c) => c.label.toLowerCase().includes(q) && matchesFilter(s, c.key))
-            .map((c) => ({ ...c, rank: r }))
-        ),
-      })).filter((g) => g.items.length > 0)
-    : null;
+  // PERF (P2-3): this flat-maps the ENTIRE curriculum (224 concepts × 3 subjects × 5
+  // ranks) and ran on EVERY keystroke (the search input is controlled). Memoize it on
+  // [q, filter, stateFor] — stateFor is now stable across renders that don't change
+  // mastery, so typing only rebuilds when the query/filter actually change.
+  const searchResults = useMemo(() => {
+    if (!q) return null;
+    return ORDER.map((s) => ({
+      subject: s,
+      items: RANKS.filter((r) => !isRankWip(s, r)).flatMap((r) =>
+        conceptsFor(s, r)
+          .filter((c) => c.label.toLowerCase().includes(q) && (filter === "all" || stateFor(s, c.key) === filter))
+          .map((c) => ({ ...c, rank: r }))
+      ),
+    })).filter((g) => g.items.length > 0);
+  }, [q, filter, stateFor]);
 
   return (
     <div className="fade-up">
       <div className="np-pagehead" style={{ marginBottom: 18 }}>
         <span className="np-eyebrow--mono">Learn</span>
-        <h2 className="np-h2">The concept library</h2>
+        {/* A11y P1-5: one real <h1> for the Learn view (visual style kept via np-h2). */}
+        <h1 className="np-h2">The concept library</h1>
         <p className="np-lede">
           The full concept curriculum, organized by subject and rank, from Elementary up to Doctorate.
           Open any concept for its foundations, a written guide with a worked example, and practice.
@@ -409,7 +425,9 @@ function ConceptPage({ concept, state, stateFor, onOpen, onBack, onPractice, bus
         </span>
       </div>
 
-      <h2 className="np-h1" style={{ color }}>{label}</h2>
+      {/* A11y P1-5: this concept title was an <h2> styled as np-h1 — make it a real
+          <h1> so the visual level matches the semantic level (one h1 per view). */}
+      <h1 className="np-h1" style={{ color }}>{label}</h1>
 
       {/* The learner's standing on THIS concept (state also shown in text, not color alone). */}
       {state && state !== "grey" && (

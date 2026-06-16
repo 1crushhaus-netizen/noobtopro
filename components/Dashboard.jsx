@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import {
   SUBJECTS,
@@ -19,6 +19,11 @@ import Leaderboard from "@/components/Leaderboard";
 import ReviewList from "@/components/ReviewList";
 import { useScrollReveal } from "@/components/useReveal";
 import { SubjectGlyph, deltaColor } from "@/components/ui";
+
+// A11y P1-2: map each subject to its accessible TEXT color token (darker in the
+// light theme so small tinted labels reach WCAG AA). The bright SUBJECTS[k].color
+// accents stay for charts / large / graphical use.
+const SUBJECT_TEXT = { math: "var(--math-text)", physics: "var(--phys-text)", chemistry: "var(--chem-text)" };
 
 /* ---------------------------------------------------------------------------
    Dashboard — the user's home base. Merges the former Profile (identity, KPIs,
@@ -178,7 +183,10 @@ function BySubject({ scores, mastery, onPractice }) {
               <button className="np-ghost" onClick={() => onPractice && onPractice(k)} style={{ whiteSpace: "nowrap" }}>Practice</button>
             </div>
             <div className="np-dash-subgate">
-              <span className="np-dash-subband" style={{ "--subject": SUBJECTS[k].color }}>{g.rank.name}</span>
+              {/* A11y P1-2: the small rank pill is meaningful text, so it uses the
+                  accessible per-subject TEXT variant (darker in light theme), not the
+                  bright graphical accent. */}
+              <span className="np-dash-subband" style={{ "--subject": SUBJECT_TEXT[k] }}>{g.rank.name}</span>
               {g.gated ? (
                 // The score qualifies for a higher band, but §7 holds the rank until
                 // the blocking curriculum is mastered (state in text, not color alone).
@@ -207,9 +215,15 @@ function BySubject({ scores, mastery, onPractice }) {
 // left so the focus rows below it are always visible — "what to work on" is the
 // actionable part and must never require scrolling to find.
 function RadarPanel({ scores, onPractice, onLearn }) {
-  const rubricSubjects = ORDER
-    .filter((k) => scores && scores[k] && scores[k].rubric && typeof scores[k].rubric === "object")
-    .map((k) => ({ key: k, label: SUBJECTS[k].label, color: SUBJECTS[k].color, rubric: scores[k].rubric }));
+  // PERF (P2-3): the subject filter/map only changes when `scores` does — memoize it
+  // so unrelated dashboard interactions (drawer toggle, confirm modal) don't rebuild it.
+  const rubricSubjects = useMemo(
+    () =>
+      ORDER
+        .filter((k) => scores && scores[k] && scores[k].rubric && typeof scores[k].rubric === "object")
+        .map((k) => ({ key: k, label: SUBJECTS[k].label, color: SUBJECTS[k].color, rubric: scores[k].rubric })),
+    [scores]
+  );
 
   return (
     <div className="np-card np-dash-radar" data-reveal style={{ "--ri": 0 }}>
@@ -270,7 +284,10 @@ function RecentMoves({ history }) {
     .filter((a) => a.type === "attempt" && typeof a.rationale === "string" && a.rationale.trim())
     .slice(-25)
     .reverse()
-    .map((a) => ({ subject: a.subject, delta: Math.round(a.delta || 0), rationale: a.rationale }));
+    // P2-1: carry the attempt timestamp so the list can key by a STABLE field
+    // (timestamp + subject) instead of the array index — index keys mis-associate
+    // rows as new attempts land at the head of the reversed slice.
+    .map((a) => ({ t: a.t, subject: a.subject, delta: Math.round(a.delta || 0), rationale: a.rationale }));
 
   return (
     <div className="np-card np-dash-panel np-dash-moves">
@@ -281,7 +298,7 @@ function RecentMoves({ history }) {
       <div className="np-dash-cardbody" role="region" aria-label="Recent rank changes">
         {moves.length >= 1 ? (
           moves.map((m, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 8 }}>
+            <div key={m.t ? `${m.subject}:${m.t}` : i} style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 8 }}>
               <SubjectGlyph subject={m.subject} width={16} />
               <span style={{
                 fontFamily: "var(--mono)", fontWeight: 700, width: 40, textAlign: "right",
@@ -310,10 +327,15 @@ export default function Dashboard({
   loadLeaderboard,
   loadReviews,
   loadMastery,
+  // FRONTEND P1-2: mastery is now LIFTED into the shell and passed in (fetched once
+  // for both Dashboard + LearnTab). When provided, we use it directly and skip the
+  // self-fetch; the loadMastery prop remains a fallback for standalone/legacy callers.
+  mastery: masteryProp,
   onStartDiagnostic,
   onPractice,
   onLearn,
   onReset,
+  onDeleteAccount,
   onSignIn,
   onUpgrade,
   onManageSubscription,
@@ -327,10 +349,11 @@ export default function Dashboard({
   const proLocked = proEnabled && !isPro;
   // Which slide-over drawer is open: null | "charts" | "reviews".
   const [drawer, setDrawer] = useState(null);
-  // "Reset my progress" confirmation modal (replaces window.confirm): a dimmed
-  // dialog with No (safe default) / Yes (destructive). `resetting` drives the
-  // in-flight spinner so a slow signed-in delete can't be double-fired.
-  const [confirmReset, setConfirmReset] = useState(false);
+  // Destructive-action confirmation modal (replaces window.confirm): a dimmed dialog with
+  // No (safe default) / Yes. One modal serves both "Reset my progress" and "Delete account"
+  // — confirmAction is null | "reset" | "delete". `resetting` drives the in-flight spinner
+  // so a slow operation can't be double-fired.
+  const [confirmAction, setConfirmAction] = useState(null);
   const [resetting, setResetting] = useState(false);
   const resetNoRef = useRef(null); // default focus = the safe "No" button
   const resetPrevFocus = useRef(null); // focus to restore when the dialog closes
@@ -338,44 +361,47 @@ export default function Dashboard({
   useEffect(() => { resettingRef.current = resetting; }, [resetting]);
   // Tasteful staggered scroll-reveal for the bento's main panels (shared hook).
   const { ref: revealRef, armed } = useScrollReveal();
-  // Per-concept mastery map for the §7 breadth gate (same injected-loader pattern
-  // as loadLeaderboard/loadReviews). Signed-in only (the guest gate fetches
-  // nothing); a load failure just renders ungated bands — nothing is lost.
-  const [mastery, setMastery] = useState({});
+  // Per-concept mastery map for the §7 breadth gate. Prefer the LIFTED prop (fetched
+  // once in the shell — FRONTEND P1-2); only self-fetch via the injected loader when
+  // no prop is supplied (standalone/legacy use). Signed-in only (the guest gate
+  // fetches nothing); a load failure just renders ungated bands — nothing is lost.
+  const [fetchedMastery, setFetchedMastery] = useState({});
+  const mastery = masteryProp ?? fetchedMastery;
   useEffect(() => {
+    if (masteryProp != null) return; // mastery supplied by the parent — don't double-fetch
     if (!user || !loadMastery) return;
     let alive = true;
     loadMastery()
       .then((res) => {
-        if (alive && res && res.mastery) setMastery(res.mastery);
+        if (alive && res && res.mastery) setFetchedMastery(res.mastery);
       })
       .catch(() => {});
     return () => {
       alive = false;
     };
-  }, [user, loadMastery]);
+  }, [user, loadMastery, masteryProp]);
 
   // Make the page background inert while a drawer is open (proper modal focus
   // containment). The guest gate does NOT inert the page — it's scoped to the
   // dashboard body so the nav stays usable for a guest who'd rather keep exploring.
   useEffect(() => {
-    onOverlayActiveChange?.(drawer !== null || confirmReset);
-  }, [drawer, confirmReset, onOverlayActiveChange]);
+    onOverlayActiveChange?.(drawer !== null || confirmAction !== null);
+  }, [drawer, confirmAction, onOverlayActiveChange]);
   useEffect(() => () => onOverlayActiveChange?.(false), [onOverlayActiveChange]);
 
   // Reset dialog: focus the safe "No" button on open; restore focus on close; let
   // Escape cancel (unless a reset is already in flight). The dimmed backdrop +
   // inert background (via onOverlayActiveChange) contain focus like the other modals.
   useEffect(() => {
-    if (!confirmReset) return;
+    if (!confirmAction) return;
     resetNoRef.current?.focus();
-    const onKey = (e) => { if (e.key === "Escape" && !resettingRef.current) setConfirmReset(false); };
+    const onKey = (e) => { if (e.key === "Escape" && !resettingRef.current) setConfirmAction(null); };
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
       resetPrevFocus.current?.focus?.();
     };
-  }, [confirmReset]);
+  }, [confirmAction]);
 
   const meta = (user && user.user_metadata) || {};
   const name = meta.full_name || meta.name || (user && user.email) || "You";
@@ -397,7 +423,8 @@ export default function Dashboard({
         </div>
         <div className="np-surface-elevated np-dash-gatecard" role="dialog" aria-modal="false" aria-labelledby="np-gate-title">
           <div className="np-modal-spark" aria-hidden="true"><Icon name="lock" size={22} /></div>
-          <h2 id="np-gate-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>Sign in to see your Dashboard</h2>
+          {/* A11y P1-5: the gate is this view's primary content → a real <h1>. */}
+          <h1 id="np-gate-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>Sign in to see your Dashboard</h1>
           <p className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
             Your scores, reasoning profile, leaderboard rank, and answer history live here. Sign in to unlock your dashboard
             {scores ? "; your guest results carry over automatically." : "."}
@@ -426,7 +453,12 @@ export default function Dashboard({
         {email && <div className="np-profileemail">{email}</div>}
       </div>
       {scores && (
-        <span className="np-dash-rankchip" title="Your overall rank">
+        // A11y P2-4: aria-label so the chip's purpose isn't title-only.
+        <span
+          className="np-dash-rankchip"
+          title="Your overall rank"
+          aria-label={`Your overall rank: ${rankFor(phdIndex(scores)).name}`}
+        >
           {rankFor(phdIndex(scores)).name}
         </span>
       )}
@@ -439,7 +471,8 @@ export default function Dashboard({
       <div className="fade-up">
         {identity}
         <div className="np-card" style={{ textAlign: "center", padding: "36px 24px", marginTop: 16 }}>
-          <h2 className="np-h2">Not ranked yet</h2>
+          {/* A11y P1-5: primary heading of the not-ranked view → a real <h1>. */}
+          <h1 className="np-h2">Not ranked yet</h1>
           <p className="np-lede" style={{ margin: "0 auto 20px" }}>
             Prove what you know across nine problems (beginner, intermediate, and hard in each subject) to get your starting scores in math, physics, and chemistry.
           </p>
@@ -450,23 +483,34 @@ export default function Dashboard({
   }
 
   // ---- Signed-in dashboard: the bento grid ----
-  const linePoints = history.filter((h) => typeof h.totalAfter === "number").map((h) => h.totalAfter);
-  const barItems = history
-    .filter((h) => h.type === "attempt")
-    .map((a) => ({ value: Math.round(a.delta || 0), glyph: SUBJECTS[a.subject]?.glyph || "·" }));
+  // PERF (P2-3): the history-derived chart arrays change only with `history`; memoize
+  // them so a drawer/confirm-modal toggle (the things that actually re-render this
+  // component) doesn't redo the reduction every time.
+  const linePoints = useMemo(
+    () => history.filter((h) => typeof h.totalAfter === "number").map((h) => h.totalAfter),
+    [history]
+  );
+  const barItems = useMemo(
+    () =>
+      history
+        .filter((h) => h.type === "attempt")
+        .map((a) => ({ value: Math.round(a.delta || 0), glyph: SUBJECTS[a.subject]?.glyph || "·" })),
+    [history]
+  );
 
   return (
     <div className={"fade-up np-dash-frame" + (armed ? " is-armed" : "")} ref={revealRef}>
       <div className="np-pagehead np-dash-pagehead">
         <span className="np-eyebrow--mono">Where you stand</span>
-        <h2 className="np-h2">
+        {/* A11y P1-5: primary heading of the signed-in dashboard → a real <h1>. */}
+        <h1 className="np-h2">
           Your dashboard
           {isPro && (
-            <span className="np-dash-rankchip" style={{ marginLeft: 10, verticalAlign: "middle" }} title="You're a Pro subscriber">
+            <span className="np-dash-rankchip" style={{ marginLeft: 10, verticalAlign: "middle" }} title="You're a Pro subscriber" aria-label="You're a Pro subscriber">
               Pro
             </span>
           )}
-        </h2>
+        </h1>
         <p className="np-lede">Your scores, reasoning profile, rank, and recent progress, all in one place.</p>
       </div>
       <div className="np-dash">
@@ -525,10 +569,18 @@ export default function Dashboard({
           <button
             className="np-btn np-danger np-dash-actbtn"
             style={isPro || proEnabled ? undefined : { marginLeft: "auto" }}
-            onClick={() => { resetPrevFocus.current = document.activeElement; setConfirmReset(true); }}
+            onClick={() => { resetPrevFocus.current = document.activeElement; setConfirmAction("reset"); }}
           >
             Reset my progress
           </button>
+          {onDeleteAccount && (
+            <button
+              className="np-btn np-danger np-dash-actbtn"
+              onClick={() => { resetPrevFocus.current = document.activeElement; setConfirmAction("delete"); }}
+            >
+              Delete account
+            </button>
+          )}
         </div>
       </div>
 
@@ -557,11 +609,11 @@ export default function Dashboard({
         <ReviewList loadReviews={loadReviews} onPractice={onPractice} onLearn={onLearn} />
       </Drawer>
 
-      {confirmReset &&
+      {confirmAction &&
         createPortal(
           <div
             className="np-modal-backdrop"
-            onClick={() => { if (!resetting) setConfirmReset(false); }}
+            onClick={() => { if (!resetting) setConfirmAction(null); }}
           >
             <div
               className="np-surface-elevated np-modal"
@@ -571,18 +623,20 @@ export default function Dashboard({
               aria-describedby="np-resetconfirm-desc"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="np-modal-spark" aria-hidden="true"><Icon name="refresh" size={22} /></div>
+              <div className="np-modal-spark" aria-hidden="true"><Icon name={confirmAction === "delete" ? "x" : "refresh"} size={22} /></div>
               <h2 id="np-resetconfirm-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
-                Are you sure?
+                {confirmAction === "delete" ? "Delete your account?" : "Are you sure?"}
               </h2>
               <p id="np-resetconfirm-desc" className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
-                This permanently deletes all your scores and history.
+                {confirmAction === "delete"
+                  ? "This permanently deletes your account and all your data, and cancels any Pro subscription. This can't be undone."
+                  : "This permanently deletes all your scores and history."}
               </p>
               <div className="np-modal-actions">
                 <button
                   ref={resetNoRef}
                   className="np-btn np-secondary"
-                  onClick={() => setConfirmReset(false)}
+                  onClick={() => setConfirmAction(null)}
                   disabled={resetting}
                 >
                   No
@@ -591,15 +645,15 @@ export default function Dashboard({
                   className="np-btn np-danger"
                   onClick={async () => {
                     setResetting(true);
-                    const ok = await onReset?.();
-                    // Success → the app switches to the intro view and unmounts this
-                    // dashboard (nothing to set). Failure → resetProgress surfaces the
-                    // error banner; close the dialog and clear the spinner.
-                    if (ok === false) { setResetting(false); setConfirmReset(false); }
+                    const ok = confirmAction === "delete" ? await onDeleteAccount?.() : await onReset?.();
+                    // Success → the app switches to the intro view (reset) or signs out
+                    // (delete) and unmounts this dashboard. Failure → the handler surfaces
+                    // the error banner; close the dialog and clear the spinner.
+                    if (ok === false) { setResetting(false); setConfirmAction(null); }
                   }}
                   disabled={resetting}
                 >
-                  {resetting ? "Resetting…" : "Yes"}
+                  {resetting ? (confirmAction === "delete" ? "Deleting…" : "Resetting…") : "Yes"}
                 </button>
               </div>
             </div>

@@ -81,6 +81,40 @@ describe("POST /api/webhooks/polar", () => {
     }));
   });
 
+  it("forwards the event's modified time as p_event_modified_at (ordering guard input)", async () => {
+    hooks.verify.mockReturnValue({
+      type: "subscription.updated",
+      data: {
+        id: "sub_1", status: "active", productId: "prod_pro", customerId: "cus_1",
+        currentPeriodEnd: new Date("2026-12-31T00:00:00Z"),
+        modifiedAt: new Date("2026-06-10T12:00:00Z"),
+        cancelAtPeriodEnd: false, customer: { externalId: "u1" },
+      },
+    });
+    const rpc = vi.fn(async () => ({ error: null }));
+    admin.getAdmin.mockReturnValue({ rpc });
+    expect((await webhookPOST(hookReq())).status).toBe(200);
+    expect(rpc.mock.calls[0][1].p_event_modified_at).toBe("2026-06-10T12:00:00.000Z");
+  });
+
+  it("retries the 7-arg upsert when the DB predates migration 0020 (PGRST202 deploy-order tolerance)", async () => {
+    hooks.verify.mockReturnValue({
+      type: "subscription.active",
+      data: { id: "sub_1", status: "active", productId: "prod_pro", currentPeriodEnd: new Date("2026-12-31T00:00:00Z"), modifiedAt: new Date("2026-06-10T00:00:00Z"), customer: { externalId: "u1" } },
+    });
+    const rpc = vi.fn()
+      .mockResolvedValueOnce({ error: { code: "PGRST202", message: "no function" } }) // 8-arg signature missing
+      .mockResolvedValueOnce({ error: null }); // 7-arg fallback succeeds
+    admin.getAdmin.mockReturnValue({ rpc });
+    const res = await webhookPOST(hookReq());
+    expect(res.status).toBe(200);
+    expect(rpc).toHaveBeenCalledTimes(2);
+    // First call carried the new param; the fallback did NOT.
+    expect(rpc.mock.calls[0][1]).toHaveProperty("p_event_modified_at");
+    expect(rpc.mock.calls[1][1]).not.toHaveProperty("p_event_modified_at");
+    expect(rpc.mock.calls[1][1].p_user).toBe("u1");
+  });
+
   it("falls back to metadata.user_id when there is no customer external id", async () => {
     hooks.verify.mockReturnValue({
       type: "subscription.updated",

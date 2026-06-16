@@ -51,8 +51,20 @@ export function useScrollReveal() {
 // condense-and-firm-up state (`is-scrolled`).
 export function useScrolled(threshold = 8) {
   const [scrolled, setScrolled] = useState(false);
+  // PERF (P2-6): the scroll handler fires on every scroll frame and sits above the
+  // whole nav-bearing tree (Noobtopro / Landing). React bails out of re-render when
+  // the boolean is unchanged, but setState is still *called* every tick — so guard
+  // with a ref and only call setState when the boolean actually flips across the
+  // threshold (the two transitions), not on every event.
+  const current = useRef(false);
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > threshold);
+    const apply = (next) => {
+      if (next !== current.current) {
+        current.current = next;
+        setScrolled(next);
+      }
+    };
+    const onScroll = () => apply(window.scrollY > threshold);
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);

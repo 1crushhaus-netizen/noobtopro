@@ -60,6 +60,21 @@ describe("preGradeDock — deterministic docking gate", () => {
     expect(preGradeDock("2+2=4")).toBeNull();
   });
 
+  it("DOCKS a bare ultra-short token with no operator and no real word (audit P1-3)", () => {
+    // A lone number/letter is trivial spam that previously slipped past the dock via the
+    // HAS_DIGIT escape, wasting a paid grade and removing the deterministic low floor.
+    for (const r of ["1", "5", "42", "7", "x"]) {
+      const v = preGradeDock(r);
+      expect(v, `expected "${r}" to dock`).not.toBeNull();
+      expect(v.docked).toBe(true);
+    }
+    // ...but a 3-char chemical formula and any operator-bearing/longer fragment still pass.
+    expect(preGradeDock("h2o")).toBeNull();
+    expect(preGradeDock("co2")).toBeNull();
+    expect(preGradeDock("x=5")).toBeNull();
+    expect(preGradeDock("100000000")).toBeNull();
+  });
+
   it("does NOT dock a numeric/repetitive answer with a digit or operator (gibberish escape)", () => {
     // Repeated-digit results and operator-bearing numeric answers are substantive — the
     // gibberish distinct-character heuristic must not fire on them (regression for the

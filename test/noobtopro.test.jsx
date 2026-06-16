@@ -206,6 +206,12 @@ describe("Noobtopro — submitPractice run-token guard (stale grade after Restar
     fireEvent.change(screen.getByLabelText("Your reasoning"), { target: { value: "my reasoning" } });
     fireEvent.click(screen.getByRole("button", { name: /submit reasoning/i }));
 
+    // Confirm the grade fetch actually fired (in flight) BEFORE we Restart. The memoized
+    // answer composer commits its value asynchronously, so on a slow CI runner the grade
+    // call can lag the click — waitFor makes "grade is in flight" deterministic (the call
+    // is captured here; it only RESOLVES later via resolveGrade below).
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith("/api/grade", expect.anything()));
+
     // Restart (brand button) while the grade is still in flight.
     fireEvent.click(screen.getByTitle("Restart"));
     await screen.findByRole("button", { name: /prove it/i }); // back at intro

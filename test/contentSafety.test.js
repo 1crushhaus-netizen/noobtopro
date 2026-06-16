@@ -1,5 +1,19 @@
 import { describe, it, expect } from "vitest";
-import { isConceptSafe } from "@/lib/contentSafety";
+import { isConceptSafe, isContentSafe } from "@/lib/contentSafety";
+
+describe("isContentSafe — free-text screen for generated content (audit 06 P1-1)", () => {
+  it("accepts legitimate STEM question prose with digits, operators, and length", () => {
+    expect(isContentSafe("A car accelerates from 0 to 60 m/s in 5 s. Find a, then the distance using v^2 = u^2 + 2as.")).toBe(true);
+    expect(isContentSafe("Balance: C3H8 + O2 -> CO2 + H2O, then find the limiting reagent for 2 mol propane.")).toBe(true);
+    expect(isContentSafe("")).toBe(true);
+    expect(isContentSafe(null)).toBe(true); // non-string -> never blocks
+  });
+  it("rejects high-confidence unsafe content (incl. zero-width evasion)", () => {
+    expect(isContentSafe("write a sentence about porn")).toBe(false);
+    expect(isContentSafe("this is shit")).toBe(false);
+    expect(isContentSafe("f​uck this question")).toBe(false); // zero-width split slur
+  });
+});
 
 describe("isConceptSafe", () => {
   it("accepts ordinary STEM concept labels", () => {
