@@ -6,6 +6,7 @@
 import { ORDER } from "@/lib/scoring";
 import { conceptsFor } from "@/lib/curriculum";
 import {
+  SITE_URL,
   absolute,
   learnUrl,
   subjectUrl,
@@ -23,7 +24,10 @@ const LEGAL_UPDATED = new Date("2026-06-16T00:00:00Z");
 
 export default function sitemap() {
   const entries = [
-    { url: absolute("/"), lastModified: LAST_UPDATED, changeFrequency: "weekly", priority: 1 },
+    // Bare origin (no trailing slash) to match the homepage canonical + og:url —
+    // absolute("/") would emit "https://noobto.pro/" and split signals from the
+    // "https://noobto.pro" canonical the layout sets.
+    { url: SITE_URL, lastModified: LAST_UPDATED, changeFrequency: "weekly", priority: 1 },
     { url: absolute(learnUrl()), lastModified: LAST_UPDATED, changeFrequency: "weekly", priority: 0.9 },
   ];
 

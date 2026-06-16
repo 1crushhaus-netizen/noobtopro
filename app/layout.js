@@ -89,6 +89,16 @@ const THEME_INIT = `(function(){try{var p=localStorage.getItem("np-theme");var t
 // off the offers array carries the Free offer alone. lib/polar is server-only (reads
 // secrets, no NEXT_PUBLIC_*) — safe here since this is a server component.
 function buildStructuredData() {
+  // Authoritative profile URLs for the brand entity (Wikipedia/Wikidata, social,
+  // Product Hunt, Crunchbase, …). Set NEXT_PUBLIC_SAME_AS to a comma-separated list
+  // once those profiles exist — sameAs is one of the highest-value Organization
+  // signals for knowledge-graph disambiguation (esp. given the "noob to pro" gaming
+  // namespace collision). Omitted entirely when unset (never emit a fabricated link).
+  const sameAs = (process.env.NEXT_PUBLIC_SAME_AS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   const offers = [
     {
       "@type": "Offer",
@@ -119,7 +129,9 @@ function buildStructuredData() {
         name: "noobtopro",
         alternateName: "noob to pro",
         url: SITE_URL,
-        logo: `${SITE_URL}/icon.svg`,
+        // Raster (PNG) logo, not the SVG icon: Google's logo rich result generally
+        // won't render an SVG. /apple-icon is the brand mark rendered as a 180×180 PNG.
+        logo: `${SITE_URL}/apple-icon`,
         description: DESCRIPTION,
         slogan: "Prove what you know. Climb from noob to pro.",
         knowsAbout: [
@@ -129,6 +141,7 @@ function buildStructuredData() {
           "STEM reasoning",
           "Reasoning-first assessment",
         ],
+        ...(sameAs.length ? { sameAs } : {}),
       },
       {
         "@type": "WebSite",
