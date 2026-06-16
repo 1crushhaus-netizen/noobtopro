@@ -15,8 +15,9 @@ import {
   defaultDifficultyForBand,
   explainRankMove,
 } from "@/lib/scoring";
-import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData, loadReviews, loadMastery } from "@/lib/store";
+import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData, loadReviews, loadMastery, loadSubscription } from "@/lib/store";
 import { getSupabase, isSupabaseConfigured, signInWithProvider, signOutUser, PROVIDERS } from "@/lib/supabase";
+import { isActiveSubscription } from "@/lib/proStatus";
 import { resolveConceptKey, conceptByKey, conceptLabel } from "@/lib/curriculum";
 import dynamic from "next/dynamic";
 import Icon from "@/components/Icon";
@@ -60,7 +61,12 @@ async function api(path, body) {
         msg = `Too many requests. Please wait ${retry}s and try again.`;
       }
     }
-    throw new Error(msg);
+    const err = new Error(msg);
+    // Carry the HTTP status + the server's `upgrade` flag so callers can distinguish a
+    // Pro paywall (402) from a generic failure and surface an upgrade nudge.
+    err.status = res.status;
+    err.upgrade = data.upgrade === true || res.status === 402;
+    throw err;
   }
   return data;
 }
@@ -87,7 +93,12 @@ async function authApi(path, body) {
   } catch {
     data = {};
   }
-  if (!res.ok || data.error) throw new Error(data.error || `Request failed (${res.status})`);
+  if (!res.ok || data.error) {
+    const err = new Error(data.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    err.upgrade = data.upgrade === true || res.status === 402;
+    throw err;
+  }
   return data;
 }
 
@@ -342,6 +353,20 @@ export default function Noobtopro() {
   const [resetNotice, setResetNotice] = useState(false); // transient "progress was reset" toast
   const [user, setUser] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false); // server-verified via /api/admin/me; gates the Admin tab
+  // Pro entitlement (Polar.sh). `subscription` is the user's OWN SELECT-own row (or null);
+  // `isPro` is the shared client/server predicate over it. upgradeNudge holds a paywall
+  // message (set on a 402) so the upgrade modal can explain what was gated; upgradeBusy
+  // covers the checkout/portal round-trip; checkoutDone shows the post-purchase banner.
+  const [subscription, setSubscription] = useState(null);
+  const [upgradeNudge, setUpgradeNudge] = useState(null);
+  const [upgradeBusy, setUpgradeBusy] = useState(false);
+  const [checkoutDone, setCheckoutDone] = useState(false);
+  const isPro = isActiveSubscription(subscription);
+  // Is the paid Pro tier live in this deployment? (mirrors NEXT_PUBLIC_ENABLE_GITHUB etc.)
+  // When off, NO Pro UI shows and nothing is gated client-side — exactly today's behavior;
+  // the server mirrors this via lib/polar.js#proIsAvailable. The owner flips both on
+  // together when going live (see MONETIZATION_PLAN.md).
+  const proEnabled = process.env.NEXT_PUBLIC_PRO_ENABLED === "true";
   const navScrolled = useScrolled(); // drives the shared TopNav condense-on-scroll
 
   const [questions, setQuestions] = useState([]);
@@ -504,6 +529,70 @@ export default function Noobtopro() {
     }
   }
 
+  // Refresh the Pro entitlement from the data layer (the user's SELECT-own subscription
+  // row). Deny-by-default: any failure leaves `subscription` as-is/null → treated as Free.
+  // The server gate is authoritative; this only drives the UI (badge, CTAs, dashboard gate).
+  async function refreshPro() {
+    try {
+      if (typeof loadSubscription !== "function") return; // tolerate a partial store mock
+      const res = await loadSubscription();
+      setSubscription((res && res.subscription) || null);
+    } catch {
+      /* leave entitlement as-is — deny-by-default */
+    }
+  }
+
+  // Start a Polar checkout: POST (with the verified JWT) and navigate to the returned
+  // hosted checkout URL. Identity is bound server-side to the verified uid, so the client
+  // sends no identity. Used after we KNOW the caller is signed in (the pending-upgrade
+  // resume + startCheckout's signed-in branch).
+  async function beginCheckout() {
+    setUpgradeBusy(true);
+    try {
+      const data = await authApi("/api/checkout", {});
+      if (data && data.url && typeof window !== "undefined") {
+        window.location.href = data.url; // full-page redirect to Polar
+        return;
+      }
+      throw new Error("Could not start checkout. Please try again.");
+    } catch (e) {
+      setUpgradeBusy(false);
+      setError(e.message || "Could not start checkout. Please try again.");
+    }
+  }
+
+  // Upgrade entry point (landing CTA, dashboard CTA, the 402 nudge). A guest must sign in
+  // first so the purchase attaches to an account — remember the intent in sessionStorage
+  // and resume checkout automatically after sign-in (the SIGNED_IN handler).
+  function startCheckout() {
+    setUpgradeNudge(null);
+    if (!user) {
+      try {
+        if (typeof window !== "undefined") window.sessionStorage.setItem("noobtopro:pendingUpgrade", "1");
+      } catch {}
+      if (isSupabaseConfigured) openSignIn();
+      else setShowAuthNote(true);
+      return;
+    }
+    beginCheckout();
+  }
+
+  // Open the Polar customer portal (manage payment / cancel / invoices) for a subscriber.
+  async function openPortal() {
+    setUpgradeBusy(true);
+    try {
+      const data = await authApi("/api/portal", {});
+      if (data && data.url && typeof window !== "undefined") {
+        window.location.href = data.url;
+        return;
+      }
+      throw new Error("Could not open subscription management. Please try again.");
+    } catch (e) {
+      setUpgradeBusy(false);
+      setError(e.message || "Could not open subscription management. Please try again.");
+    }
+  }
+
   useEffect(() => {
     const sb = getSupabase();
     hydrate();
@@ -511,7 +600,7 @@ export default function Noobtopro() {
     sb.auth.getUser().then(({ data }) => {
       const u = (data && data.user) || null;
       setUser(u);
-      if (u) checkAdmin();
+      if (u) { checkAdmin(); refreshPro(); }
     }).catch(() => setUser(null));
     const { data: sub } = sb.auth.onAuthStateChange((event, session) => {
       setUser((session && session.user) || null);
@@ -523,6 +612,16 @@ export default function Noobtopro() {
         setStage((p) => (p === "signin" ? "dashboard" : p)); // leave the sign-in menu
         hydrate(); // migrates guest progress, then loads the account
         checkAdmin(); // reveal the Admin tab if this account is an admin
+        refreshPro(); // load the account's Pro entitlement
+        // Resume a pending "Upgrade to Pro" the guest started before signing in (the
+        // purchase needs an account). authApi reads the token from the fresh session, so
+        // it works even before `user` state lands. Cleared so it fires exactly once.
+        try {
+          if (typeof window !== "undefined" && window.sessionStorage.getItem("noobtopro:pendingUpgrade")) {
+            window.sessionStorage.removeItem("noobtopro:pendingUpgrade");
+            beginCheckout();
+          }
+        } catch {}
       } else if (event === "SIGNED_OUT") {
         // Signing out abandons any in-progress diagnostic/practice. Free its image
         // previews and clear the composer state, then drop to "intro" so the
@@ -556,6 +655,8 @@ export default function Noobtopro() {
         setScoreDelta(null);
         setLearnConcept(null);
         setIsAdmin(false); // hide the Admin tab immediately on sign-out
+        setSubscription(null); // drop the prior user's Pro entitlement
+        setUpgradeNudge(null);
         // Clear the local guest blob on sign-out so the prior user's scores/weak
         // concepts aren't exposed to the next person on a shared device.
         resetAll();
@@ -563,6 +664,29 @@ export default function Noobtopro() {
       }
     });
     return () => sub && sub.subscription && sub.subscription.unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Returning from a successful Polar checkout (?checkout=success): show the welcome
+  // banner and POLL the entitlement a few times, because the webhook that flips the
+  // subscriptions row arrives asynchronously (usually within a second or two). Strip the
+  // query param so a refresh doesn't replay this. Runs once on mount.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("checkout") !== "success") return;
+    params.delete("checkout");
+    const qs = params.toString();
+    window.history.replaceState(null, "", window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash);
+    setCheckoutDone(true);
+    let n = 0;
+    let timer = null;
+    const tick = () => {
+      refreshPro();
+      if (++n < 5) timer = setTimeout(tick, 1500);
+    };
+    tick();
+    return () => timer && clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -617,6 +741,7 @@ export default function Noobtopro() {
   function handleSignOut() {
     setUser(null); // hide identity-bearing surfaces (Profile/Admin/email) immediately
     setIsAdmin(false);
+    setSubscription(null); // drop the Pro entitlement immediately too
     setScores(null);
     setHistory([]);
     setScoreDelta(null);
@@ -1151,7 +1276,11 @@ export default function Noobtopro() {
       setPImg(null);
     } catch (e) {
       if (myRun !== practiceRun.current) return; // abandoned — don't surface a stale error on the reset UI
-      setError(e.message || "Grading failed.");
+      // A Pro paywall (the free daily practice cap, or photo-of-work grading) comes back
+      // as 402 + `upgrade`. Show the upgrade nudge with the server's explanation instead
+      // of a generic error banner.
+      if (e && (e.status === 402 || e.upgrade)) setUpgradeNudge(e.message || "Upgrade to Pro to keep going.");
+      else setError(e.message || "Grading failed.");
     } finally {
       if (myRun === practiceRun.current) setBusy(false);
     }
@@ -1186,7 +1315,7 @@ export default function Noobtopro() {
     return () => clearTimeout(t);
   }, [resetNotice]);
 
-  const bgInert = (showSaveModal && !user) || overlayActive ? true : undefined;
+  const bgInert = (showSaveModal && !user) || !!upgradeNudge || overlayActive ? true : undefined;
 
   // Transient "progress was reset" toast. Rendered in EVERY return branch — a reset
   // lands the learner on the intro/Landing branch (below), not the app shell — so it
@@ -1214,8 +1343,11 @@ export default function Noobtopro() {
         <Landing
           user={user}
           busy={busy}
+          isPro={isPro}
+          proEnabled={proEnabled}
           onProveIt={beginDiagnostic}
           onSignIn={() => (isSupabaseConfigured ? openSignIn() : setShowAuthNote(true))}
+          onUpgrade={startCheckout}
           error={error}
           onDismissError={() => setError("")}
           showAuthNote={showAuthNote}
@@ -1267,6 +1399,41 @@ export default function Noobtopro() {
 
       {resetToast}
 
+      {/* Upgrade-to-Pro nudge — shown when a Pro-gated action (the free daily practice
+          cap, or photo-of-work grading) returns 402. The CTA starts checkout (a guest is
+          routed to sign in first, then checkout resumes automatically). */}
+      {upgradeNudge && (
+        <div className="np-modal-backdrop" onClick={() => setUpgradeNudge(null)}>
+          <div
+            className="np-surface-elevated np-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="np-upgrade-title"
+            aria-describedby="np-upgrade-desc"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button className="np-iconbtn np-modal-close" aria-label="Dismiss" onClick={() => setUpgradeNudge(null)}>
+              <Icon name="x" size={16} />
+            </button>
+            <div className="np-modal-spark" aria-hidden="true"><Icon name="spark" size={22} /></div>
+            <h2 id="np-upgrade-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+              Upgrade to Pro
+            </h2>
+            <p id="np-upgrade-desc" className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
+              {upgradeNudge}
+            </p>
+            <button
+              className="np-btn np-primary np-big np-btn--block"
+              onClick={startCheckout}
+              disabled={upgradeBusy}
+            >
+              <Icon name="spark" size={16} /> {upgradeBusy ? "Starting checkout…" : "Upgrade to Pro — €9.99/mo"}
+            </button>
+            <button className="np-ghost np-modal-later" onClick={() => setUpgradeNudge(null)}>Not now</button>
+          </div>
+        </div>
+      )}
+
       <div className="np-app" inert={bgInert}>
         {/* ONE shared sticky TopNav. With app chrome it carries the view tabs +
             identity + sign-out; on the chrome-less sign-in screen it falls back
@@ -1311,6 +1478,16 @@ export default function Noobtopro() {
             <button className="np-ghost" onClick={() => setError("")}><Icon name="x" size={14} /> dismiss</button>
           </div>
         )}
+        {checkoutDone && (
+          <div className="np-banner fade-up" role="status">
+            <span>
+              {isPro
+                ? "You're Pro. Unlimited graded practice, photo-of-work grading, and full progress trends are unlocked."
+                : "Thanks for upgrading! Your Pro access is activating and will appear in a moment."}
+            </span>
+            <button className="np-ghost" onClick={() => setCheckoutDone(false)}><Icon name="x" size={14} /> dismiss</button>
+          </div>
+        )}
 
         {stage === "signin" ? (
           <SignIn
@@ -1332,6 +1509,9 @@ export default function Noobtopro() {
             user={user}
             scores={scores}
             history={history}
+            isPro={isPro}
+            proEnabled={proEnabled}
+            upgradeBusy={upgradeBusy}
             loadLeaderboard={loadLeaderboard}
             loadReviews={loadReviews}
             loadMastery={loadMastery}
@@ -1340,6 +1520,8 @@ export default function Noobtopro() {
             onLearn={openLearn}
             onReset={resetProgress}
             onSignIn={() => (isSupabaseConfigured ? openSignIn() : setShowAuthNote(true))}
+            onUpgrade={startCheckout}
+            onManageSubscription={openPortal}
             onClose={() => setView("practice")}
             onOverlayActiveChange={setOverlayActive}
           />

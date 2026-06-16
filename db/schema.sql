@@ -1283,3 +1283,84 @@ as $$
 $$;
 revoke all on function public.leaderboard_tiers(uuid) from public, anon, authenticated;
 grant execute on function public.leaderboard_tiers(uuid) to service_role;
+
+-- ===========================================================================
+-- PRO SUBSCRIPTIONS / ENTITLEMENTS (Polar.sh monetization, migration 0017)
+--
+-- One row per user = the source of truth for "is this user Pro?". Written ONLY by the
+-- Polar webhook (via the service-role upsert_subscription RPC, after it verifies the
+-- signature and resolves the user from the event); read by the server-side gate
+-- (lib/entitlements.js) and, SELECT-own, by the client UI. `status` is the RAW Polar
+-- SubscriptionStatus stored as length-bounded free text (NOT a CHECK enum) so a future
+-- Polar status can't make the webhook upsert abort and silently drop an entitlement —
+-- the "is Pro" decision lives in lib/entitlements.js#isActiveSubscription (active status
+-- AND not past current_period_end). delete_user_data deliberately leaves this table
+-- alone: wiping your progress doesn't cancel a paid subscription.
+-- ===========================================================================
+create table if not exists public.subscriptions (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  status text not null default 'inactive' check (char_length(status) between 1 and 40),
+  product_id text check (product_id is null or char_length(product_id) <= 200),
+  polar_customer_id text check (polar_customer_id is null or char_length(polar_customer_id) <= 200),
+  polar_subscription_id text check (polar_subscription_id is null or char_length(polar_subscription_id) <= 200),
+  current_period_end timestamptz,
+  cancel_at_period_end boolean not null default false,
+  updated_at timestamptz not null default now()
+);
+-- SELECT-own under RLS (the user reads their OWN Pro state for the UI); all writes
+-- revoked — only the service-role upsert_subscription RPC writes it (same pattern as
+-- concept_mastery). The columns hold no secrets, so exposing the owner's own row is fine.
+alter table public.subscriptions enable row level security;
+drop policy if exists subscriptions_select_own on public.subscriptions;
+create policy subscriptions_select_own on public.subscriptions
+  for select to authenticated using ((select auth.uid()) = user_id);
+revoke all on public.subscriptions from public, anon, authenticated;
+grant select on public.subscriptions to authenticated;
+
+-- Service-role-ONLY entitlement upsert the Polar webhook calls. SECURITY DEFINER; a
+-- signed-in user can never self-grant Pro (table is SELECT-only; not granted to
+-- authenticated). COALESCE on the optional ids keeps a stored id when a later event
+-- omits it; status / period-end / cancel flag always reflect the newest event.
+create or replace function public.upsert_subscription(
+  p_user uuid,
+  p_status text,
+  p_product_id text default null,
+  p_polar_customer_id text default null,
+  p_polar_subscription_id text default null,
+  p_current_period_end timestamptz default null,
+  p_cancel_at_period_end boolean default false
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if p_user is null then
+    raise exception 'p_user is required';
+  end if;
+
+  insert into public.subscriptions as s
+    (user_id, status, product_id, polar_customer_id, polar_subscription_id,
+     current_period_end, cancel_at_period_end, updated_at)
+  values
+    (p_user,
+     left(coalesce(nullif(p_status, ''), 'inactive'), 40),
+     left(p_product_id, 200),
+     left(p_polar_customer_id, 200),
+     left(p_polar_subscription_id, 200),
+     p_current_period_end,
+     coalesce(p_cancel_at_period_end, false),
+     now())
+  on conflict (user_id) do update set
+    status                = excluded.status,
+    product_id            = coalesce(excluded.product_id, s.product_id),
+    polar_customer_id     = coalesce(excluded.polar_customer_id, s.polar_customer_id),
+    polar_subscription_id = coalesce(excluded.polar_subscription_id, s.polar_subscription_id),
+    current_period_end    = excluded.current_period_end,
+    cancel_at_period_end  = excluded.cancel_at_period_end,
+    updated_at            = now();
+end;
+$$;
+revoke all on function public.upsert_subscription(uuid, text, text, text, text, timestamptz, boolean) from public, anon, authenticated;
+grant execute on function public.upsert_subscription(uuid, text, text, text, text, timestamptz, boolean) to service_role;

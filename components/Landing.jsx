@@ -177,8 +177,10 @@ const FAQ = [
 export default function Landing({
   user,
   busy,
+  isPro,
   onProveIt,
   onSignIn,
+  onUpgrade,
   error,
   onDismissError,
   showAuthNote,
@@ -395,18 +397,24 @@ export default function Landing({
               </button>
             </div>
             <div className="np-card np-lp-plan np-lp-plan--pro" data-reveal style={{ "--ri": 1 }}>
-              <span className="np-lp-badge">Soon</span>
+              <span className="np-lp-badge">Most popular</span>
               <div className="np-lp-plan-name">Pro</div>
-              <div className="np-lp-plan-price">Coming soon</div>
+              <div className="np-lp-plan-price">€9.99<small> / month</small></div>
               <div className="np-lp-plan-tag">Unlimited practice and the full toolkit.</div>
               <ul className="np-lp-feats">
                 {PRO_FEATURES.map((f) => (
                   <li key={f}><Check />{f}</li>
                 ))}
               </ul>
-              <button className="np-signinbtn np-lp-plan-cta" onClick={onSignIn}>
-                Join the waitlist
-              </button>
+              {isPro ? (
+                <button className="np-signinbtn np-lp-plan-cta" disabled>
+                  You're Pro ✓
+                </button>
+              ) : (
+                <button className="np-btn np-primary np-lp-plan-cta" onClick={onUpgrade || onSignIn} disabled={busy}>
+                  Upgrade to Pro
+                </button>
+              )}
             </div>
           </div>
         </div>

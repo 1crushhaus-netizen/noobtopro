@@ -221,7 +221,7 @@ describe("Dashboard — leaderboard, reset, empty state", () => {
 
 describe("Dashboard — drawers (trends + answer review)", () => {
   it("keeps trend charts in a drawer: hidden until 'See trends' opens it, Escape closes", async () => {
-    render(<Dashboard user={user} scores={scores} history={history} onPractice={() => {}} />);
+    render(<Dashboard user={user} scores={scores} history={history} isPro onPractice={() => {}} />);
     // Closed by default — the line/bar charts are not in the tree.
     expect(screen.queryByRole("img", { name: /total points over time/i })).toBe(null);
     expect(screen.queryByRole("img", { name: /across 2 graded attempts/i })).toBe(null);
@@ -238,7 +238,7 @@ describe("Dashboard — drawers (trends + answer review)", () => {
 
   it("loads answer reviews LAZILY — only after the Review drawer is opened", async () => {
     const loadReviews = vi.fn(async () => ({ reviews: [] }));
-    render(<Dashboard user={user} scores={scores} history={history} loadReviews={loadReviews} onPractice={() => {}} />);
+    render(<Dashboard user={user} scores={scores} history={history} isPro loadReviews={loadReviews} onPractice={() => {}} />);
     // Not called on mount.
     expect(loadReviews).not.toHaveBeenCalled();
 
@@ -248,7 +248,7 @@ describe("Dashboard — drawers (trends + answer review)", () => {
   });
 
   it("moves focus into the drawer on open (close button focused)", async () => {
-    render(<Dashboard user={user} scores={scores} history={history} onPractice={() => {}} />);
+    render(<Dashboard user={user} scores={scores} history={history} isPro onPractice={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: /see trends/i }));
     await screen.findByRole("dialog", { name: /trends over time/i });
     const close = screen.getByRole("button", { name: /close/i });
@@ -260,7 +260,7 @@ describe("Dashboard — drawers (trends + answer review)", () => {
       { subject: "math", question: "Evaluate the limit.", answer: "By L'Hôpital…", targetConcept: "limits", reasoningScore: 80, delta: 2, rubric: null, feedback: {} },
     ];
     const loadReviews = vi.fn(async () => ({ reviews }));
-    render(<Dashboard user={user} scores={scores} history={history} loadReviews={loadReviews} onPractice={() => {}} onLearn={() => {}} />);
+    render(<Dashboard user={user} scores={scores} history={history} isPro loadReviews={loadReviews} onPractice={() => {}} onLearn={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: /review your answers/i }));
     const dialog = await screen.findByRole("dialog", { name: /review your answers/i });
     await screen.findByText(/limits/i); // reviews loaded → action buttons present
@@ -281,13 +281,62 @@ describe("Dashboard — drawers (trends + answer review)", () => {
   });
 
   it("restores focus to the trigger after the drawer closes", async () => {
-    render(<Dashboard user={user} scores={scores} history={history} onPractice={() => {}} />);
+    render(<Dashboard user={user} scores={scores} history={history} isPro onPractice={() => {}} />);
     const trigger = screen.getByRole("button", { name: /see trends/i });
     trigger.focus();
     fireEvent.click(trigger);
     await screen.findByRole("dialog", { name: /trends over time/i });
     fireEvent.keyDown(window, { key: "Escape" });
     await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+});
+
+describe("Dashboard — Pro gating (trends + answer history)", () => {
+  it("with Pro LIVE, a non-Pro user's 'See trends' opens the upgrade flow (no drawer) and never fetches reviews", async () => {
+    const onUpgrade = vi.fn();
+    const loadReviews = vi.fn(async () => ({ reviews: [] }));
+    render(
+      <Dashboard user={user} scores={scores} history={history} proEnabled isPro={false} onUpgrade={onUpgrade} loadReviews={loadReviews} onPractice={() => {}} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /see trends/i }));
+    fireEvent.click(screen.getByRole("button", { name: /review your answers/i }));
+    // Upgrade flow fired; no drawer mounted; the Pro-only review data was never loaded.
+    expect(onUpgrade).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("dialog", { name: /trends over time/i })).toBe(null);
+    expect(loadReviews).not.toHaveBeenCalled();
+  });
+
+  it("with Pro LIVE, a non-Pro user sees an 'Upgrade to Pro' CTA wired to onUpgrade; no Pro badge", () => {
+    const onUpgrade = vi.fn();
+    render(<Dashboard user={user} scores={scores} history={history} proEnabled isPro={false} onUpgrade={onUpgrade} onPractice={() => {}} />);
+    const cta = screen.getByRole("button", { name: /upgrade to pro/i });
+    fireEvent.click(cta);
+    expect(onUpgrade).toHaveBeenCalled();
+    expect(screen.queryByText(/^Pro$/)).toBe(null); // no Pro badge for a free user
+    expect(screen.queryByRole("button", { name: /manage subscription/i })).toBe(null);
+  });
+
+  it("a Pro user gets the Pro badge + 'Manage subscription' (wired to onManageSubscription), and the drawers open", async () => {
+    const onManage = vi.fn();
+    render(<Dashboard user={user} scores={scores} history={history} proEnabled isPro onManageSubscription={onManage} onPractice={() => {}} />);
+    // Pro badge present; no upgrade CTA.
+    expect(screen.getByText(/^Pro$/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /upgrade to pro/i })).toBe(null);
+    fireEvent.click(screen.getByRole("button", { name: /manage subscription/i }));
+    expect(onManage).toHaveBeenCalled();
+    // The trends drawer actually opens for a Pro user.
+    fireEvent.click(screen.getByRole("button", { name: /see trends/i }));
+    expect(await screen.findByRole("dialog", { name: /trends over time/i })).toBeTruthy();
+  });
+
+  it("when Pro is NOT sold (proEnabled=false), nothing is gated: 'See trends' opens the drawer and there's no upgrade CTA", async () => {
+    const onUpgrade = vi.fn();
+    render(<Dashboard user={user} scores={scores} history={history} isPro={false} onUpgrade={onUpgrade} onPractice={() => {}} />);
+    expect(screen.queryByRole("button", { name: /upgrade to pro/i })).toBe(null);
+    expect(screen.queryByText(/^Pro$/)).toBe(null);
+    fireEvent.click(screen.getByRole("button", { name: /see trends/i }));
+    expect(await screen.findByRole("dialog", { name: /trends over time/i })).toBeTruthy();
+    expect(onUpgrade).not.toHaveBeenCalled();
   });
 });
 

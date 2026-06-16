@@ -368,3 +368,39 @@ describe("db/schema.sql — audit fix round 2 (0011)", () => {
     expect(schema).toContain("revoke all on function public.submit_concept_report(text, text, text) from public, anon;");
   });
 });
+
+describe("db/schema.sql — Pro subscriptions / entitlements (Polar, migration 0017)", () => {
+  it("subscriptions is RLS-on with a SELECT-own policy and all client writes revoked", () => {
+    expect(schema).toContain("create table if not exists public.subscriptions");
+    expect(schema).toContain("alter table public.subscriptions enable row level security;");
+    expect(schema).toMatch(/create policy subscriptions_select_own on public\.subscriptions\s*\n?\s*for select to authenticated using \(\(select auth\.uid\(\)\) = user_id\);/);
+    expect(schema).toContain("revoke all on public.subscriptions from public, anon, authenticated;");
+    expect(schema).toContain("grant select on public.subscriptions to authenticated;");
+  });
+
+  it("status is length-bounded free text, NOT a CHECK enum (an unknown Polar status must not abort the webhook upsert)", () => {
+    // The "is Pro" decision lives in lib/entitlements.js, not the DB — so the schema must
+    // not constrain `status` to a fixed value list that a future Polar status could fail.
+    // Scope the check to the subscriptions table body (other tables legitimately have
+    // `status ... check (status in (...))` enums of their own).
+    const start = schema.indexOf("create table if not exists public.subscriptions");
+    expect(start).toBeGreaterThanOrEqual(0);
+    const subBlock = schema.slice(start, schema.indexOf("\n);", start));
+    expect(subBlock).toContain("status text not null default 'inactive' check (char_length(status) between 1 and 40)");
+    expect(subBlock).not.toMatch(/check \(status in \(/);
+  });
+
+  it("upsert_subscription is SECURITY DEFINER, search_path-pinned, and service-role ONLY", () => {
+    const fn = fnBody("upsert_subscription");
+    expect(fn).toContain("security definer");
+    expect(fn).toContain("set search_path = public");
+    expect(fn).toContain("on conflict (user_id) do update"); // atomic upsert
+    expect(schema).toContain("revoke all on function public.upsert_subscription(uuid, text, text, text, text, timestamptz, boolean) from public, anon, authenticated;");
+    expect(schema).toContain("grant execute on function public.upsert_subscription(uuid, text, text, text, text, timestamptz, boolean) to service_role;");
+    expect(schema).not.toMatch(/grant execute on function public\.upsert_subscription\([^)]*\) to authenticated/);
+  });
+
+  it("a reset (delete_user_data) does NOT cancel the subscription — a paying customer keeps Pro after wiping progress", () => {
+    expect(fnBody("delete_user_data")).not.toContain("subscriptions");
+  });
+});

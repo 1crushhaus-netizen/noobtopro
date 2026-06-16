@@ -4,6 +4,8 @@ import { clampSubjectScore, ORDER, normalizeRubric, scoreFromRubric } from "@/li
 import { preGradeDock, injectionDock } from "@/lib/preGrade";
 import { checkRateLimit, clientKey, chargeGlobalGroq, refundGlobalGroq } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType, readJsonLimited, MAX_BODY_BYTES_IMAGE } from "@/lib/requestGuard";
+import { proStatusFromRequest } from "@/lib/entitlements";
+import { proIsAvailable } from "@/lib/polar";
 import { reportInjection, reportRateLimit, shouldDockForInjection } from "@/lib/abuseDetection";
 import { capText, normalizeImage, normalizeDifficulty, resolveWeakConcepts, normalizeFeedbackList, capSolution, normalizeErrors, normalizeSolve, reasoningSurfaceContext } from "@/lib/gradeInput";
 import { weakConceptPromptBlock } from "@/lib/curriculum";
@@ -94,6 +96,22 @@ export async function POST(req) {
 
   const img = normalizeImage(image);
   if (!img.ok) return NextResponse.json({ error: img.error }, { status: 400 });
+
+  // PHOTO-OF-WORK GRADING is a Pro feature. /api/grade is the GUEST practice path, so the
+  // caller is effectively never Pro — but resolve it properly (proStatusFromRequest: a
+  // guest with no token resolves to not-Pro WITHOUT a DB hit) so an authenticated Pro
+  // caller is never wrongly blocked. Only practice photo grades are gated; the one-time
+  // diagnostic stays open. 402 + `upgrade:true` so the client nudges to sign in & upgrade.
+  // Only gated when Pro is sellable (otherwise photo grading stays open to everyone).
+  if (kind === "practice" && img.image && proIsAvailable()) {
+    const { isPro } = await proStatusFromRequest(req);
+    if (!isPro) {
+      return NextResponse.json(
+        { error: "Photo-of-work grading is a Pro feature. Sign in and upgrade to Pro to grade a photo of your work.", upgrade: true },
+        { status: 402 }
+      );
+    }
+  }
 
   // Image (vision-model) grades are far more expensive than text grades — a single
   // request can fan out to multiple multimodal calls each carrying ~3 MB. Apply a

@@ -54,6 +54,8 @@ import { checkRateLimit, clientKey, chargeGlobalGroq, refundGlobalGroq } from "@
 import { isCrossSiteRequest, isWrongContentType, readJsonLimited, MAX_BODY_BYTES_IMAGE } from "@/lib/requestGuard";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireUser } from "@/lib/adminAuth";
+import { isProUserId } from "@/lib/entitlements";
+import { proIsAvailable } from "@/lib/polar";
 import { reportInjection, reportRateLimit, shouldDockForInjection } from "@/lib/abuseDetection";
 import { capText, normalizeImage, normalizeDifficulty, normalizeWeakConcepts, resolveWeakConcepts, normalizeFeedbackList, capSolution, normalizeErrors, normalizeSolve, normalizeReasoningSurface, reasoningSurfaceContext } from "@/lib/gradeInput";
 import { weakConceptPromptBlock } from "@/lib/curriculum";
@@ -184,6 +186,11 @@ async function handlePractice(req, body) {
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const uid = auth.user.id;
 
+  // Pro entitlement (Polar.sh): unlocks UNLIMITED graded practice + photo-of-work
+  // grading. Resolved once here; deny-by-default — with no entitlement store configured
+  // isProUserId is false, so the free caps apply to everyone (nothing over-charges).
+  const pro = await isProUserId(uid);
+
   // Durable PER-ACCOUNT cap (follows the user across IPs/devices, shared across
   // instances) on top of the pre-auth per-IP gate — a single account can't burn the
   // Groq budget by rotating IPs.
@@ -194,6 +201,27 @@ async function handlePractice(req, body) {
       { error: "Too many requests. Please slow down and try again shortly." },
       { status: 429, headers: { "Retry-After": String(acctRl.retryAfter) } }
     );
+  }
+
+  // FREE DAILY PRACTICE CAP — the real lever behind "Pro = unlimited graded practice"
+  // (the landing-page promise). A non-Pro account gets FREE_DAILY_PRACTICE_CAP graded
+  // practice problems per rolling 24h (durable, per-account); Pro bypasses entirely.
+  // 402 (Payment Required) + `upgrade:true` so the client shows an upgrade nudge rather
+  // than a generic error. (The one-time diagnostic is NOT capped — only repeated practice.)
+  // Only enforced when Pro is actually SELLABLE (proIsAvailable) — a Polar-less deployment
+  // never caps free users with no way to upgrade.
+  if (!pro && proIsAvailable()) {
+    const cap = Number(process.env.FREE_DAILY_PRACTICE_CAP) > 0 ? Number(process.env.FREE_DAILY_PRACTICE_CAP) : 5;
+    const dayRl = await checkRateLimit(`acct:${uid}:practice:day`, { max: cap, windowMs: 24 * 60 * 60 * 1000 });
+    if (!dayRl.ok) {
+      return NextResponse.json(
+        {
+          error: "You've used today's free practice problems. Upgrade to Pro for unlimited graded practice.",
+          upgrade: true,
+        },
+        { status: 402, headers: { "Retry-After": String(dayRl.retryAfter) } }
+      );
+    }
   }
 
   const sb = getSupabaseAdmin();
@@ -251,6 +279,16 @@ async function handlePractice(req, body) {
 
   const img = normalizeImage(image);
   if (!img.ok) return NextResponse.json({ error: img.error }, { status: 400 });
+  // PHOTO-OF-WORK GRADING is a Pro feature — gate it server-side (the UI only hides the
+  // affordance). 402 + `upgrade:true` so the client nudges instead of erroring. Checked
+  // before the image rate-limit slot so a non-Pro photo attempt costs nothing. Only gated
+  // when Pro is sellable (otherwise photo grading stays open to everyone, as today).
+  if (img.image && !pro && proIsAvailable()) {
+    return NextResponse.json(
+      { error: "Photo-of-work grading is a Pro feature. Upgrade to Pro to grade a photo of your work.", upgrade: true },
+      { status: 402 }
+    );
+  }
   if (img.image) {
     const imgRl = await checkRateLimit(`${clientKey(req)}:img`, { max: 10 });
     if (!imgRl.ok) {
