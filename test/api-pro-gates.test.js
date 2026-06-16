@@ -40,6 +40,34 @@ function fakeSb() {
   return { from: () => chain, rpc: vi.fn(async () => ({ data: null, error: null })) };
 }
 
+// A fake service-role client whose subscriptions read resolves to an ACTIVE row (Pro).
+// (No POLAR_PRODUCT_ID_PRO is set in these tests, so the product check is skipped and the
+// status-only predicate applies — isProUserId returns true.)
+function fakeSbPro() {
+  const chain = {
+    select: () => chain,
+    eq: () => chain,
+    order: () => chain,
+    limit: () => chain,
+    maybeSingle: async () => ({ data: { status: "active" }, error: null }),
+    then: (resolve, reject) => Promise.resolve({ data: [], error: null }).then(resolve, reject),
+  };
+  return { from: () => chain, rpc: vi.fn(async () => ({ data: null, error: null })) };
+}
+
+// Stub Groq (key + fetch) so /api/grade completes a real (non-docked) grade locally,
+// returning the given feedback fields. Caller restores GROQ_API_KEY + globals.
+function stubGradeFetch({ workedSolution = "Step 1: differentiate. Step 2: solve.", improvements = ["State the units"], strengths = ["Correct setup"] } = {}) {
+  vi.stubGlobal("fetch", vi.fn(async () => ({
+    ok: true,
+    json: async () => ({
+      choices: [{ message: { content: JSON.stringify({ subject: "math", rubric: { principle: 3, logic: 3 }, weakConcepts: [], comment: "ok", strengths, improvements, workedSolution }) } }],
+      usage: {},
+    }),
+    text: async () => "",
+  })));
+}
+
 const PNG_B64 = "iVBORw0KGgo="; // 8-byte PNG magic signature (passes normalizeImage)
 
 const scoreReq = (body) =>
@@ -129,5 +157,53 @@ describe("photo-of-work grading is Pro-only", () => {
       if (OLD_KEY === undefined) delete process.env.GROQ_API_KEY;
       else process.env.GROQ_API_KEY = OLD_KEY;
     }
+  });
+});
+
+describe("worked solutions + 'how to reach 100' are Pro-only (P0-3)", () => {
+  const OLD_KEY = process.env.GROQ_API_KEY;
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    if (OLD_KEY === undefined) delete process.env.GROQ_API_KEY;
+    else process.env.GROQ_API_KEY = OLD_KEY;
+  });
+
+  it("/api/grade withholds the worked solution + improvements from a non-Pro caller (and flags the lock)", async () => {
+    auth.requireUser.mockResolvedValue({ error: "Authentication required.", status: 401 }); // guest = not Pro
+    process.env.GROQ_API_KEY = "test-key";
+    stubGradeFetch();
+    const res = await gradePOST(gradeReq({ kind: "practice", subject: "math", question: "Find dy/dx.", reasoning: "I differentiated term by term and simplified." }));
+    expect(res.status).toBe(200);
+    const b = await res.json();
+    expect(b.workedSolution).toBe("");
+    expect(b.improvements).toEqual([]);
+    expect(b.workedSolutionLocked).toBe(true);
+    // Free feedback is retained — only the Pro fields are withheld.
+    expect(b.strengths.length).toBeGreaterThan(0);
+    expect(b.rubric).toBeTruthy();
+  });
+
+  it("/api/grade returns the full worked solution + improvements to a Pro caller", async () => {
+    storage.getAdmin.mockReturnValue(fakeSbPro());
+    auth.requireUser.mockResolvedValue({ user: { id: "prouser" } });
+    process.env.GROQ_API_KEY = "test-key";
+    stubGradeFetch({ workedSolution: "Step 1: differentiate.", improvements: ["Show the units"] });
+    const res = await gradePOST(gradeReq({ kind: "practice", subject: "math", question: "Find dy/dx.", reasoning: "I differentiated term by term and simplified." }));
+    expect(res.status).toBe(200);
+    const b = await res.json();
+    expect(b.workedSolution).toContain("Step 1");
+    expect(b.improvements.length).toBeGreaterThan(0);
+    expect(b.workedSolutionLocked).toBe(false);
+  });
+
+  it("/api/grade keeps worked solutions OPEN when Pro is not sold", async () => {
+    polarMock.proIsAvailable.mockReturnValue(false);
+    auth.requireUser.mockResolvedValue({ error: "Authentication required.", status: 401 });
+    process.env.GROQ_API_KEY = "test-key";
+    stubGradeFetch({ workedSolution: "Step 1: differentiate." });
+    const res = await gradePOST(gradeReq({ kind: "practice", subject: "math", question: "Find dy/dx.", reasoning: "I differentiated term by term and simplified." }));
+    const b = await res.json();
+    expect(b.workedSolution).toContain("Step 1");
+    expect(b.workedSolutionLocked).toBe(false);
   });
 });

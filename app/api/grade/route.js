@@ -97,20 +97,26 @@ export async function POST(req) {
   const img = normalizeImage(image);
   if (!img.ok) return NextResponse.json({ error: img.error }, { status: 400 });
 
-  // PHOTO-OF-WORK GRADING is a Pro feature. /api/grade is the GUEST practice path, so the
-  // caller is effectively never Pro — but resolve it properly (proStatusFromRequest: a
-  // guest with no token resolves to not-Pro WITHOUT a DB hit) so an authenticated Pro
-  // caller is never wrongly blocked. Only practice photo grades are gated; the one-time
-  // diagnostic stays open. 402 + `upgrade:true` so the client nudges to sign in & upgrade.
-  // Only gated when Pro is sellable (otherwise photo grading stays open to everyone).
-  if (kind === "practice" && img.image && proIsAvailable()) {
-    const { isPro } = await proStatusFromRequest(req);
-    if (!isPro) {
-      return NextResponse.json(
-        { error: "Photo-of-work grading is a Pro feature. Sign in and upgrade to Pro to grade a photo of your work.", upgrade: true },
-        { status: 402 }
-      );
-    }
+  // Pro entitlement for this caller, resolved ONCE. /api/grade is the GUEST practice path,
+  // so the caller is usually not Pro — proStatusFromRequest resolves a guest (no token) to
+  // not-Pro WITHOUT a DB hit, and an authenticated Pro caller is never wrongly gated. Used
+  // for the two Pro features on this path: photo-of-work grading, and the full worked
+  // solution + "how to reach 100" (P0-3). Only meaningful when Pro is sellable.
+  const proSellable = proIsAvailable();
+  const callerIsPro = kind === "practice" && proSellable ? (await proStatusFromRequest(req)).isPro : false;
+  // Withhold the Pro worked-solution fields from a non-Pro practice caller. Kept open when
+  // Pro isn't sellable, so a Polar-less deployment is unchanged. (Consistent with /api/score
+  // so a learner can't dodge the gate by staying a guest.)
+  const lockSolutions = kind === "practice" && proSellable && !callerIsPro;
+
+  // PHOTO-OF-WORK GRADING is a Pro feature. Only practice photo grades are gated; the
+  // one-time diagnostic stays open. 402 + `upgrade:true` so the client nudges to sign in
+  // & upgrade. Only gated when Pro is sellable (otherwise photo grading stays open).
+  if (kind === "practice" && img.image && proSellable && !callerIsPro) {
+    return NextResponse.json(
+      { error: "Photo-of-work grading is a Pro feature. Sign in and upgrade to Pro to grade a photo of your work.", upgrade: true },
+      { status: 402 }
+    );
   }
 
   // Image (vision-model) grades are far more expensive than text grades — a single
@@ -304,13 +310,14 @@ export async function POST(req) {
       reasoningScore,
       newScoreSuggestion: reasoningScore, // the guest's local Glicko target = the same axis-derived score
       rubric,
-      solve: normalizeSolve(graded.solve),
+      solve: lockSolutions ? null : normalizeSolve(graded.solve),
       errors: normalizeErrors(graded.errors),
       finalAnswerMatches: graded.finalAnswerMatches === true,
       verification,
       strengths: normalizeFeedbackList(graded.strengths),
-      improvements: normalizeFeedbackList(graded.improvements),
-      workedSolution: capSolution(graded.workedSolution),
+      improvements: lockSolutions ? [] : normalizeFeedbackList(graded.improvements), // (Pro) steps to reach 100
+      workedSolution: lockSolutions ? "" : capSolution(graded.workedSolution), // (Pro) full worked solution
+      workedSolutionLocked: lockSolutions, // tell the client to show the upgrade nudge
       correctnessNote: typeof graded.correctnessNote === "string" ? graded.correctnessNote.slice(0, 2000) : "",
       socraticHint: typeof graded.socraticHint === "string" ? graded.socraticHint.slice(0, 2000) : "",
       microLesson: typeof graded.microLesson === "string" ? graded.microLesson.slice(0, 2000) : "",

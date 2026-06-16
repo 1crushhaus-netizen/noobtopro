@@ -1850,6 +1850,22 @@ export default function Noobtopro() {
                           </details>
                         )}
 
+                        {/* Pro gate (P0-3): for a non-Pro caller the server withholds the full
+                            worked solution + "how to reach 100"; nudge to upgrade in their place. */}
+                        {!feedback.workedSolution && feedback.workedSolutionLocked && (
+                          <div className="np-card np-lesson">
+                            <div className="np-cardicon" style={{ color: SUBJECTS[pSubject].color }}>
+                              <Icon name="lock" size={16} /> Worked solution &amp; how to reach 100
+                            </div>
+                            <div className="np-lessontext" style={{ marginTop: 8 }}>
+                              The full step-by-step worked solution and the exact steps to reach a perfect score are a Pro feature.
+                            </div>
+                            <button className="np-btn np-primary" style={{ marginTop: 12 }} onClick={startCheckout} disabled={upgradeBusy}>
+                              <Icon name="spark" size={15} /> {upgradeBusy ? "Starting…" : "Upgrade to Pro"}
+                            </button>
+                          </div>
+                        )}
+
                         {feedback.correctnessNote && <div className="np-note">{feedback.correctnessNote}</div>}
 
                         <div className="np-card np-socratic">

@@ -592,16 +592,25 @@ async function handlePractice(req, body) {
     // still counts — a skip/"idk" on a concept marks it red by design (§12.1).
     if (masteryKey) bumpConceptMastery(sb, uid, [{ subject, concept_key: masteryKey, quality: reasoningScore }]);
 
+    // PRO GATE (P0-3): the full worked solution + "how to reach 100" (improvements) are a
+    // Pro feature. Withhold them from the RESPONSE for a non-Pro caller — but only when Pro
+    // is actually sellable (proIsAvailable), so a Polar-less deployment keeps them open.
+    // They are still PERSISTED in full above (attempt_reviews, itself Pro-gated), so they
+    // appear retroactively the moment the learner upgrades. `solve` is the grader's own
+    // (unshown) worked solution; gated for parity. The free caller keeps the rubric,
+    // strengths, typed errors, hints, and verification.
+    const lockSolutions = proIsAvailable() && !pro;
     return NextResponse.json({
       reasoningScore,
       rubric: attemptRubric, // per-attempt 0–4 bars for the feedback panel
-      solve, // the grader's own worked solution (compute-first; null on a dock)
+      solve: lockSolutions ? null : solve, // the grader's own worked solution (compute-first; null on a dock)
       errors, // typed error taxonomy (Socratic prompts on reasoning errors)
       finalAnswerMatches, // diagnostic only — did the learner's final answer match the grader's
       verification, // the numeric verifier's verdict on the grader's own arithmetic
       strengths, // what the answer did well
-      improvements, // specific, actionable steps to reach 100
-      workedSolution, // full solution, revealed post-grade (empty on a dock)
+      improvements: lockSolutions ? [] : improvements, // (Pro) specific, actionable steps to reach 100
+      workedSolution: lockSolutions ? "" : workedSolution, // (Pro) full solution, revealed post-grade (empty on a dock)
+      workedSolutionLocked: lockSolutions && !dock, // tell the client to show the upgrade nudge
       correctnessNote,
       socraticHint,
       microLesson,

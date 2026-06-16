@@ -92,7 +92,6 @@ const PRO_FEATURES = [
   "Photo-of-work grading",
   "Full worked solutions + “how to reach 100”",
   "Progress trends + answer history",
-  "Data export",
 ];
 
 const FAQ = [
@@ -141,9 +140,9 @@ const FAQ = [
       ["Can the scoring be gamed?",
         "It is specifically built to resist it. Impressive-sounding jargon with no real reasoning scores near zero, repeating the same topic damps how much you can gain, and scoring happens on the server over a signed record of each step, so a grade cannot be forged or a step skipped from the browser."],
       ["Can an AI really grade reasoning fairly?",
-        "It does most of the grading, and we are candid about what that means. To stay consistent it solves the problem itself first, scores against fixed examples at a fixed setting, and reconciles the score against its own rubric so the number cannot contradict the breakdown you see. It is not infallible, which is why every score comes with a transparent rubric and a worked solution you can check."],
+        "It does most of the grading, and we are candid about what that means. To stay consistent it solves the problem itself first, scores against fixed examples at a fixed setting, and reconciles the score against its own rubric so the number cannot contradict the breakdown you see. It is not infallible, which is why every score comes with a transparent rubric and typed feedback you can check; Pro additionally unlocks the full worked solution."],
       ["What if I disagree with a grade?",
-        "You can see exactly why you got it. Every graded answer shows the per-axis breakdown, what you did well, what would reach full marks, and a worked solution, so a score is always inspectable rather than a black box. Your rank is a tool for growth, not a verdict, and your next answers move it."],
+        "You can see exactly why you got it. Every graded answer shows the per-axis breakdown, what you did well, and exactly where your reasoning broke, so a score is always inspectable rather than a black box; Pro adds the full worked solution and the specific steps to reach full marks. Your rank is a tool for growth, not a verdict, and your next answers move it."],
       ["Is the rank trustworthy enough to share?",
         "It is built to be. The rank is relative and self-calibrating, hard to game, and computed server-side, so it is an honest signal of where your STEM reasoning stands. It is not an accredited exam score, and we do not pretend it is."],
     ],
@@ -154,7 +153,7 @@ const FAQ = [
       ["How do I improve my rank?",
         "Practice. Pick a subject and noobtopro serves problems calibrated to your level; sound reasoning raises your score even when the final answer is wrong. The Learn library then teaches the concept behind anything you miss, including the proof or derivation, not just a definition."],
       ["Will it just give me the answer?",
-        "No, and that is deliberate. When you are stuck it asks the right next question and teaches the underlying concept instead of handing over the solution. Worked solutions unlock only after a genuine attempt, so it builds understanding rather than letting you copy."],
+        "No, and that is deliberate. When you are stuck it asks the right next question and teaches the underlying concept instead of handing over the solution. Full worked solutions are a Pro feature and unlock only after a genuine attempt, so it builds understanding rather than letting you copy."],
       ["Is using noobtopro cheating?",
         "It is the opposite of a cheat tool. It grades and teaches your reasoning, will not reveal answers before you try, and rewards understanding over recall. It is built for learning the material, not getting around it."],
       ["Can I submit a photo of my work?",
