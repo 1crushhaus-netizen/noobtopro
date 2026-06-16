@@ -110,17 +110,33 @@ function buildStructuredData() {
     "@context": "https://schema.org",
     "@graph": [
       {
-        "@type": "Organization",
+        // EducationalOrganization (a subtype of Organization) is the right entity
+        // type for a learning platform — better knowledge-graph categorization.
+        // sameAs is intentionally omitted (no verified social/Wikidata profiles to
+        // claim yet); add real ones here when they exist.
+        "@type": ["Organization", "EducationalOrganization"],
         "@id": `${SITE_URL}/#organization`,
         name: "noobtopro",
+        alternateName: "noob to pro",
         url: SITE_URL,
         logo: `${SITE_URL}/icon.svg`,
+        description: DESCRIPTION,
+        slogan: "Prove what you know. Climb from noob to pro.",
+        knowsAbout: [
+          "Mathematics",
+          "Physics",
+          "Chemistry",
+          "STEM reasoning",
+          "Reasoning-first assessment",
+        ],
       },
       {
         "@type": "WebSite",
         "@id": `${SITE_URL}/#website`,
         name: "noobtopro",
         url: SITE_URL,
+        description: DESCRIPTION,
+        inLanguage: "en",
         publisher: { "@id": `${SITE_URL}/#organization` },
       },
       {
