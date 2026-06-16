@@ -7,7 +7,9 @@ import { Analytics } from "@vercel/analytics/next";
 // Canonical production origin. metadataBase makes the auto-generated
 // opengraph-image / twitter-image URLs absolute, which crawlers and link
 // unfurlers (Discord / Slack / iMessage / X) require to render a rich preview.
-const SITE_URL = "https://noobto.pro";
+// Overridable so preview deploys (Vercel branch URLs) emit their own origin
+// instead of pointing canonicals/OG images at production.
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://noobto.pro";
 const TITLE = "noobtopro: prove what you know";
 const DESCRIPTION =
   "Real problems in math, physics, and chemistry. Your reasoning is graded, not just the answer. Get ranked from Elementary to Doctorate, then climb.";
@@ -17,6 +19,9 @@ export const metadata = {
   title: TITLE,
   description: DESCRIPTION,
   applicationName: "noobtopro",
+  // Self-referencing canonical so every URL variant (query strings, preview
+  // hosts) consolidates ranking signals onto the home route.
+  alternates: { canonical: "/" },
   // The og:image / twitter:image are supplied automatically by
   // app/opengraph-image.js + app/twitter-image.js (Next merges them in here).
   openGraph: {
