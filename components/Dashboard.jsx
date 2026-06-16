@@ -242,12 +242,15 @@ function RadarPanel({ scores, onPractice, onLearn }) {
             {rubricSubjects.map((s) => {
               const lowKeys = lowestRubricDimensions(s.rubric, 1);
               const lowLabel = lowKeys.length ? RUBRIC_LABELS[lowKeys[0]] : null;
-              const concept = (scores[s.key]?.weakConcepts || []).find((c) => typeof c === "string" && c.trim()) || null;
-              // `concept` is a curriculum key (the grader reports keys now); show its
-              // human label. Legacy free-text falls back to a resolved label, then raw.
-              const conceptText = concept
-                ? conceptLabel(s.key, concept) || conceptLabel(s.key, resolveConceptKey(s.key, concept)) || concept
-                : null;
+              // Resolve the first weak concept that maps onto a REAL curriculum concept
+              // (curriculum key OR legacy free-text). Only then offer "Learn this",
+              // which deep-links to that concept's guide; otherwise fall back to a plain
+              // "Practice" so the row never points at a non-existent topic.
+              const conceptKey =
+                (scores[s.key]?.weakConcepts || [])
+                  .map((c) => (typeof c === "string" ? resolveConceptKey(s.key, c) : null))
+                  .find(Boolean) || null;
+              const conceptText = conceptKey ? conceptLabel(s.key, conceptKey) : null;
               return (
                 <div key={s.key} className="np-dash-focusrow">
                   <SubjectGlyph subject={s.key} width={16} />
@@ -258,8 +261,8 @@ function RadarPanel({ scores, onPractice, onLearn }) {
                       "Keep practicing to refine your profile."
                     )}
                   </span>
-                  {concept ? (
-                    <button className="np-ghost" onClick={() => onLearn && onLearn(s.key, concept)} style={{ whiteSpace: "nowrap" }}>Learn this</button>
+                  {conceptKey ? (
+                    <button className="np-ghost" onClick={() => onLearn && onLearn(s.key, conceptKey)} style={{ whiteSpace: "nowrap" }}>Learn this</button>
                   ) : (
                     <button className="np-ghost" onClick={() => onPractice && onPractice(s.key)} style={{ whiteSpace: "nowrap" }}>Practice</button>
                   )}
