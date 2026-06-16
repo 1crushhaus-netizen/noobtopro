@@ -17,6 +17,7 @@ import {
 } from "@/lib/scoring";
 import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData, loadReviews, loadMastery, loadSubscription } from "@/lib/store";
 import { getSupabase, isSupabaseConfigured, signInWithProvider, signOutUser, PROVIDERS } from "@/lib/supabase";
+import { track } from "@vercel/analytics";
 import { isActiveSubscription } from "@/lib/proStatus";
 import { resolveConceptKey, conceptByKey, conceptLabel } from "@/lib/curriculum";
 import dynamic from "next/dynamic";
@@ -548,6 +549,9 @@ export default function Noobtopro() {
   // resume + startCheckout's signed-in branch).
   async function beginCheckout() {
     setUpgradeBusy(true);
+    // Funnel analytics: the checkout POST is firing (covers both the signed-in path and
+    // the resume-after-sign-in path). track() is a no-op when analytics isn't enabled.
+    track("checkout_started");
     try {
       const data = await authApi("/api/checkout", {});
       if (data && data.url && typeof window !== "undefined") {
@@ -679,6 +683,9 @@ export default function Noobtopro() {
     const qs = params.toString();
     window.history.replaceState(null, "", window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash);
     setCheckoutDone(true);
+    // Funnel analytics: the learner returned from a successful Polar checkout (the
+    // conversion event). Entitlement activation is confirmed asynchronously by refreshPro.
+    track("checkout_success");
     let n = 0;
     let timer = null;
     const tick = () => {
@@ -795,6 +802,8 @@ export default function Noobtopro() {
     setError("");
     setDiagError("");
     setBusy(true);
+    // Funnel analytics: the learner is starting the placement diagnostic (top of funnel).
+    track("diagnostic_started", { signedIn: !!user, rebaseline: !!(user && scores) });
     try {
       const data = await api("/api/generate", { kind: "diagnostic" });
       const qs = (data && Array.isArray(data.questions) ? data.questions : []).filter(
@@ -1493,6 +1502,8 @@ export default function Noobtopro() {
           <SignIn
             providers={PROVIDERS}
             onProvider={async (id) => {
+              // Funnel analytics: sign-in initiated (activation step).
+              track("sign_in_started", { provider: id });
               try {
                 const res = await signInWithProvider(id);
                 if (res && res.error) setError(res.error.message || "Sign-in failed. Please try again.");
