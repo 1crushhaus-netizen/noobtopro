@@ -414,6 +414,13 @@ export default function Landing({
                   Upgrade to Pro
                 </button>
               )}
+              {!isPro && (
+                <p className="np-lp-plan-legal" style={{ fontSize: 12, color: "var(--muted)", marginTop: 10, marginBottom: 0 }}>
+                  Recurring billing, cancel anytime. By upgrading you agree to our{" "}
+                  <a href="/terms" style={{ color: "inherit", textDecoration: "underline" }}>Terms</a> and{" "}
+                  <a href="/refunds" style={{ color: "inherit", textDecoration: "underline" }}>Refund Policy</a>.
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -485,6 +492,11 @@ export default function Landing({
             noob<span className="np-arrow">→</span>topro
           </a>
           <span className="np-lp-foot-tag">Prove what you know. Climb from noob to pro.</span>
+          <nav className="np-lp-foot-legal" aria-label="Legal" style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+            <a href="/privacy" style={{ color: "var(--muted)", textDecoration: "none" }}>Privacy</a>
+            <a href="/terms" style={{ color: "var(--muted)", textDecoration: "none" }}>Terms</a>
+            <a href="/refunds" style={{ color: "var(--muted)", textDecoration: "none" }}>Refunds</a>
+          </nav>
           <span className="np-lp-foot-tech">Next.js · Supabase · Groq</span>
           <span className="np-lp-foot-copy">© {new Date().getFullYear()} noobtopro</span>
         </div>
