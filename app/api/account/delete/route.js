@@ -14,7 +14,8 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/adminAuth";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
-import { isCrossSiteRequest } from "@/lib/requestGuard";
+import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
+import { checkRateLimit } from "@/lib/rateLimit";
 import { getPolar } from "@/lib/polar";
 
 export const dynamic = "force-dynamic";
@@ -23,11 +24,25 @@ export async function POST(req) {
   if (isCrossSiteRequest(req)) {
     return NextResponse.json({ error: "Cross-site requests are not allowed." }, { status: 403 });
   }
+  if (isWrongContentType(req)) {
+    return NextResponse.json({ error: "Content-Type must be application/json." }, { status: 415 });
+  }
 
   // Identity comes ONLY from the verified JWT.
   const auth = await requireUser(req);
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const uid = auth.user.id;
+
+  // Durable per-account cap (audit P1-6): deletion drives a Polar revoke + a Supabase
+  // admin deleteUser; without a cap a valid token could burst the pre-deletion window
+  // and hammer Polar. Deletion is a one-shot action, so a tight cap is ample.
+  const rl = await checkRateLimit(`acct:${uid}:delete`, { max: 5, windowMs: 60_000 });
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: "Too many requests. Please slow down and try again shortly." },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
+    );
+  }
 
   const sb = getSupabaseAdmin();
   if (!sb) {

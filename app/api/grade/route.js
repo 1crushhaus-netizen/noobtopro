@@ -10,6 +10,7 @@ import { reportInjection, reportRateLimit, shouldDockForInjection } from "@/lib/
 import { capText, normalizeImage, normalizeDifficulty, resolveWeakConcepts, normalizeFeedbackList, capSolution, normalizeErrors, normalizeSolve, reasoningSurfaceContext } from "@/lib/gradeInput";
 import { weakConceptPromptBlock } from "@/lib/curriculum";
 import { withNumericVerification, makeRegrade } from "@/lib/numericVerify";
+import { redactUnsafe } from "@/lib/contentSafety";
 
 export const dynamic = "force-dynamic";
 // Bound a hung request (audit P2-10): the Groq fetch has a 30s abort, and at most
@@ -314,13 +315,16 @@ export async function POST(req) {
       errors: normalizeErrors(graded.errors),
       finalAnswerMatches: graded.finalAnswerMatches === true,
       verification,
-      strengths: normalizeFeedbackList(graded.strengths),
-      improvements: lockSolutions ? [] : normalizeFeedbackList(graded.improvements), // (Pro) steps to reach 100
-      workedSolution: lockSolutions ? "" : capSolution(graded.workedSolution), // (Pro) full worked solution
+      // Screen the model-authored, user-visible free text (audit: grade output was
+      // unscreened) — redactUnsafe replaces a field only if it trips the safety blocklist
+      // (e.g. an injected slur echoed from the learner's reasoning); a no-op on normal STEM.
+      strengths: normalizeFeedbackList(graded.strengths).map((s) => redactUnsafe(s)),
+      improvements: lockSolutions ? [] : normalizeFeedbackList(graded.improvements).map((s) => redactUnsafe(s)), // (Pro) steps to reach 100
+      workedSolution: lockSolutions ? "" : redactUnsafe(capSolution(graded.workedSolution)), // (Pro) full worked solution
       workedSolutionLocked: lockSolutions, // tell the client to show the upgrade nudge
-      correctnessNote: typeof graded.correctnessNote === "string" ? graded.correctnessNote.slice(0, 2000) : "",
-      socraticHint: typeof graded.socraticHint === "string" ? graded.socraticHint.slice(0, 2000) : "",
-      microLesson: typeof graded.microLesson === "string" ? graded.microLesson.slice(0, 2000) : "",
+      correctnessNote: redactUnsafe(typeof graded.correctnessNote === "string" ? graded.correctnessNote.slice(0, 2000) : ""),
+      socraticHint: redactUnsafe(typeof graded.socraticHint === "string" ? graded.socraticHint.slice(0, 2000) : ""),
+      microLesson: redactUnsafe(typeof graded.microLesson === "string" ? graded.microLesson.slice(0, 2000) : ""),
       weakConcepts,
     });
   } catch (e) {

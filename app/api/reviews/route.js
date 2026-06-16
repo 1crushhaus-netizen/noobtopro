@@ -14,7 +14,7 @@
 import { NextResponse } from "next/server";
 import { requireProUser } from "@/lib/entitlements";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
-import { isCrossSiteRequest } from "@/lib/requestGuard";
+import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
 import { checkRateLimit } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +39,9 @@ function reviewRowToItem(r) {
 export async function POST(req) {
   if (isCrossSiteRequest(req)) {
     return NextResponse.json({ error: "Cross-site requests are not allowed." }, { status: 403 });
+  }
+  if (isWrongContentType(req)) {
+    return NextResponse.json({ error: "Content-Type must be application/json." }, { status: 415 });
   }
 
   // Identity + Pro entitlement, server-verified. 401 = not signed in, 402 = signed in but

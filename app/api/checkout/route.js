@@ -16,13 +16,16 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/adminAuth";
 import { getPolar, proProductId, successUrl } from "@/lib/polar";
 import { checkRateLimit, clientKey } from "@/lib/rateLimit";
-import { isCrossSiteRequest } from "@/lib/requestGuard";
+import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req) {
   if (isCrossSiteRequest(req)) {
     return NextResponse.json({ error: "Cross-site requests are not allowed." }, { status: 403 });
+  }
+  if (isWrongContentType(req)) {
+    return NextResponse.json({ error: "Content-Type must be application/json." }, { status: 415 });
   }
 
   // A checkout creates a Polar API call; rate-limit it per IP so it can't be hammered.

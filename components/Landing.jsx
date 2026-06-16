@@ -54,7 +54,7 @@ const ENGINE = [
   ["shield", "Built to resist gaming",
     "Jargon-salad scores single digits. Farming one topic damps your gains. Scoring is server-authoritative over an HMAC-signed step chain, so you can’t forge a grade or skip a step."],
   ["clip", "Photo-of-work grading",
-    "Snap a photo of your handwritten solution. A vision model reads your steps and grades the reasoning, with a graceful text fallback."],
+    "Snap a photo of your handwritten solution. A vision model reads your steps and grades the reasoning, with a graceful text fallback. Free on your diagnostic, unlimited with Pro for practice."],
   ["bulb", "Learn, don’t leak",
     "Stuck? It won’t hand you the answer; it asks the right question and teaches the one concept you’re missing, with the proof or derivation behind it."],
 ];
@@ -116,7 +116,7 @@ const FAQ = [
           <p>Your reasoning is graded, not whether the final number is right. The pipeline is deterministic and server-authoritative:</p>
           <ol>
             <li><strong>Screen.</strong> Blank, “I don’t know,” off-topic, or gibberish answers are caught by a deterministic check (no model call) and scored 0.</li>
-            <li><strong>The grader solves it first.</strong> A fixed model, run at temperature 0 (identical work gives an identical score), works the problem itself: principle, step-by-step solution with units, and a calculator expression the server re-evaluates to verify the arithmetic, before it judges your work.</li>
+            <li><strong>The grader solves it first.</strong> A pinned grading model at temperature 0 (so identical text work earns a consistent score) works the problem itself: principle, step-by-step solution with units, and a calculator expression the server re-evaluates to verify the arithmetic, before it judges your work.</li>
             <li><strong>It types every flaw.</strong> Comparing your work to its own solution, it labels each error conceptual, strategic, reasoning, execution-slip, or communication, using its own computed numbers to tell a slip from a broken inference.</li>
             <li><strong>It scores nine axes 0–4, path-independently.</strong> A matching final answer can’t raise an axis; a non-matching one can’t lower a sound chain.</li>
             <li><strong>The server computes the score</strong> (the model emits none) as a transparent weighted sum: Principle ×5, Justification ×4, Logic ×4, Strategy ×3, Verification ×3, Comprehension ×2, Method ×2, Computation ×1, Communication ×1. The weights total 25, so it lands on 0–100 and every axis contributes weight × value points. Computation’s weight of 1 means a pure arithmetic slip costs 4 points or less; the conceptual axes (Principle plus Justification = 9) and Logic dominate.</li>
@@ -125,7 +125,7 @@ const FAQ = [
           <p><strong>Score to rank:</strong> each axis is a Glicko-2 rating and the question is the rated opponent (its difficulty is its rating on the same 0–350 scale). Your axis ratings update against it, then combine, by the same weights, into your 0–350 subject rank, and difficulty self-calibrates from how everyone performs on each item.</p>
         </>
       ),
-        "Your reasoning is graded, not whether the final number is right. The pipeline is deterministic and server-authoritative. Blank, off-topic, or gibberish answers are screened out by a deterministic check and scored 0. A fixed model, run at temperature 0 so identical work earns an identical score, solves the problem itself before judging yours. It types every flaw (conceptual, strategic, reasoning, execution-slip, or communication), then scores nine reasoning axes from 0 to 4, independently of whether your final answer matched. The server computes the score as a transparent weighted sum: Principle 5, Justification 4, Logic 4, Strategy 3, Verification 3, Comprehension 2, Method 2, Computation 1, Communication 1. So a pure arithmetic slip costs very little while a broken inference costs heavily, even when the answer is right. Each axis is then a Glicko-2 rating against the question difficulty, combining into your 0 to 350 subject rank."],
+        "Your reasoning is graded, not whether the final number is right. The pipeline is deterministic and server-authoritative. Blank, off-topic, or gibberish answers are screened out by a deterministic check and scored 0. A pinned grading model at temperature 0, so identical text work earns a consistent score, solves the problem itself before judging yours. It types every flaw (conceptual, strategic, reasoning, execution-slip, or communication), then scores nine reasoning axes from 0 to 4, independently of whether your final answer matched. The server computes the score as a transparent weighted sum: Principle 5, Justification 4, Logic 4, Strategy 3, Verification 3, Comprehension 2, Method 2, Computation 1, Communication 1. So a pure arithmetic slip costs very little while a broken inference costs heavily, even when the answer is right. Each axis is then a Glicko-2 rating against the question difficulty, combining into your 0 to 350 subject rank."],
       ["What do the 0–350 scores and ranks mean?",
         "Each subject sits on a 0–350 scale split into five ranks: Elementary (0–69), Middle (70–139), High (140–209), University (210–279), and Doctorate (280–350). The number reflects the hardest reasoning you can do reliably, not how many questions you got right."],
       ["Can a wrong answer score higher than a right one?",
@@ -140,7 +140,7 @@ const FAQ = [
       ["Can the scoring be gamed?",
         "It is specifically built to resist it. Impressive-sounding jargon with no real reasoning scores near zero, repeating the same topic damps how much you can gain, and scoring happens on the server over a signed record of each step, so a grade cannot be forged or a step skipped from the browser."],
       ["Can an AI really grade reasoning fairly?",
-        "It does most of the grading, and we are candid about what that means. To stay consistent it solves the problem itself first, scores against fixed examples at a fixed setting, and reconciles the score against its own rubric so the number cannot contradict the breakdown you see. It is not infallible, which is why every score comes with a transparent rubric and typed feedback you can check; Pro additionally unlocks the full worked solution."],
+        "It does most of the grading, and we are candid about what that means. To stay consistent it solves the problem itself first, grades with a pinned model at temperature 0 against fixed examples, and reconciles the score against its own rubric so the number cannot contradict the breakdown you see. It is not infallible, which is why every score comes with a transparent rubric and typed feedback you can check; Pro additionally unlocks the full worked solution."],
       ["What if I disagree with a grade?",
         "You can see exactly why you got it. Every graded answer shows the per-axis breakdown, what you did well, and exactly where your reasoning broke, so a score is always inspectable rather than a black box; Pro adds the full worked solution and the specific steps to reach full marks. Your rank is a tool for growth, not a verdict, and your next answers move it."],
       ["Is the rank trustworthy enough to share?",
@@ -157,14 +157,14 @@ const FAQ = [
       ["Is using noobtopro cheating?",
         "It is the opposite of a cheat tool. It grades and teaches your reasoning, will not reveal answers before you try, and rewards understanding over recall. It is built for learning the material, not getting around it."],
       ["Can I submit a photo of my work?",
-        "Yes. Snap a photo of your handwritten solution and a vision model reads and grades your steps, with a text fallback if the photo does not come through."],
+        "Yes — once on your free diagnostic, and unlimited with Pro for practice. Snap a photo of your handwritten solution and a vision model reads and grades your steps, with a text fallback if the photo does not come through."],
     ],
   },
   {
     cat: "Account and privacy",
     items: [
       ["How do I sign in?",
-        "With Google, in one tap. You can also do everything as a guest first and sign in later; your guest progress migrates into your account automatically the first time you sign in."],
+        "Sign in with Google. You can also do everything as a guest first and sign in later; your guest progress migrates into your account automatically the first time you sign in."],
       ["Is my data safe, and do you sell it?",
         "Your data is private, and no, we do not sell it. As a guest, your progress stays in your own browser. Once you sign in, your data is readable only by you, and the leaderboard is fully anonymous, showing the rank distribution and your position but never names or emails. You can reset your progress anytime."],
       ["What devices does it work on?",
@@ -408,7 +408,6 @@ export default function Landing({
               </button>
             </div>
             <div className="np-card np-lp-plan np-lp-plan--pro" data-reveal style={{ "--ri": 1 }}>
-              <span className="np-lp-badge">Most popular</span>
               <div className="np-lp-plan-name">Pro</div>
               <div className="np-lp-plan-price">€9.99<small> / month</small></div>
               <div className="np-lp-plan-tag">Unlimited practice and the full toolkit.</div>
@@ -448,7 +447,7 @@ export default function Landing({
           <div className="np-lp-faq">
             {FAQ.map((group, gi) => (
               <div key={group.cat} className="np-lp-faqgroup" data-reveal>
-                <div className="np-lp-faqcat">{group.cat}</div>
+                <h3 className="np-lp-faqcat">{group.cat}</h3>
                 {group.items.map(([q, a], ii) => {
                   const id = `${gi}-${ii}`;
                   const open = openFaq === id;

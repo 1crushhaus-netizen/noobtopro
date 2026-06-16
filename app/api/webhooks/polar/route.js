@@ -20,6 +20,7 @@
 import { NextResponse } from "next/server";
 import { verifyPolarWebhook, WebhookSignatureError } from "@/lib/polarWebhook";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import { readTextLimited, MAX_BODY_BYTES_TEXT } from "@/lib/requestGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -58,7 +59,17 @@ export async function POST(req) {
   }
 
   // Standard Webhooks verifies over the RAW body — read it as text, never parsed JSON.
-  const body = await req.text();
+  // Capped read (audit P1-4): a webhook event is small JSON; bound the buffered bytes so
+  // an unauthenticated caller can't exhaust function memory before signature verification.
+  let body;
+  try {
+    body = await readTextLimited(req, MAX_BODY_BYTES_TEXT);
+  } catch (e) {
+    if (e && e.code === "BODY_TOO_LARGE") {
+      return NextResponse.json({ error: "Request body is too large." }, { status: 413 });
+    }
+    return NextResponse.json({ error: "Bad request." }, { status: 400 });
+  }
   const headers = Object.fromEntries(req.headers); // Headers iterate lowercased
 
   let event;

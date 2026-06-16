@@ -522,6 +522,9 @@ declare
   v_jti text;
   v_subject text;
   v_current timestamptz;
+  -- A diagnostic re-baseline must not regress an earned score (audit re-baseline laundering).
+  v_is_baseline boolean := (p_attempt is not null and jsonb_typeof(p_attempt) = 'object'
+                            and coalesce(p_attempt->>'type', 'attempt') = 'baseline');
   -- FIX 8: a graded PRACTICE attempt (type 'attempt') counts toward verification;
   -- a baseline (the diagnostic placement) does not. 1 → increment server_graded.
   v_graded_inc int;
@@ -611,7 +614,10 @@ begin
         -- and once verified the flag stays true (>= 5 can only grow).
         server_graded = public.scores.server_graded + excluded.server_graded,
         verified = (public.scores.server_graded + excluded.server_graded) >= 5,
-        updated_at = excluded.updated_at;
+        updated_at = excluded.updated_at
+    -- Practice writes are unconditional; a BASELINE re-placement only applies when it would
+    -- RAISE the score, so re-taking the free diagnostic can't launder a regression (audit).
+    where not v_is_baseline or excluded.score > public.scores.score;
 
   -- Append the attempt (skip if no usable attempt was supplied). Validate type +
   -- subject BEFORE inserting and RAISE on an out-of-domain value, so the whole
@@ -1413,10 +1419,11 @@ begin
     cancel_at_period_end  = excluded.cancel_at_period_end,
     event_modified_at     = coalesce(excluded.event_modified_at, s.event_modified_at),
     updated_at            = now()
-  -- Apply UNLESS the incoming event is strictly older than the last applied one.
+  -- Apply UNLESS the incoming event is strictly older than the last applied one. A NULL
+  -- incoming timestamp sorts oldest (no wildcard overwrite) — it only writes a row that
+  -- itself has no recorded event time (audit: malformed/partial event could resurrect Pro).
   where s.event_modified_at is null
-     or excluded.event_modified_at is null
-     or excluded.event_modified_at >= s.event_modified_at;
+     or coalesce(excluded.event_modified_at, 'epoch'::timestamptz) >= s.event_modified_at;
 end;
 $$;
 revoke all on function public.upsert_subscription(uuid, text, text, text, text, timestamptz, boolean, timestamptz) from public, anon, authenticated;
