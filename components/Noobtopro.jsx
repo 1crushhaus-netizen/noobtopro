@@ -23,6 +23,7 @@ import { resolveConceptKey, conceptByKey, conceptLabel } from "@/lib/curriculum"
 import dynamic from "next/dynamic";
 import Icon from "@/components/Icon";
 import SignIn from "@/components/SignIn";
+import AgeGate from "@/components/AgeGate";
 import ScoreBreakdown, { ErrorList, hasReasoningError } from "@/components/ScoreBreakdown";
 
 // PERF (INP / First Load JS): the Dashboard, Learn, and Admin views are only ever
@@ -780,6 +781,29 @@ export default function Noobtopro() {
     }
   }
 
+  // P0-10 age gate. A signed-in account that hasn't recorded a one-time age acknowledgement
+  // is blocked from the app by AgeGate until it does. Self-declared (stored in the account's
+  // user_metadata); guests aren't gated (their data is local-only).
+  function hasAgeAck(u) {
+    return !!(u && u.user_metadata && (u.user_metadata.age_ack_year || u.user_metadata.birthdate));
+  }
+  // 13+ path: record the acknowledgement on the account, then refresh `user` so the gate
+  // (derived from user metadata) clears. Throws so AgeGate can surface a save failure.
+  async function confirmAge({ birthYear }) {
+    const sb = getSupabase();
+    if (!sb) throw new Error("Sign-in is not configured.");
+    const { error } = await sb.auth.updateUser({ data: { age_ack_year: birthYear } });
+    if (error) throw new Error(error.message || "Couldn't save that. Please try again.");
+    const { data } = await sb.auth.getUser();
+    setUser((data && data.user) || user);
+  }
+  // Under-13 path: sign out (no learning data was collected — they never reached the app)
+  // and surface why on the landing.
+  async function handleUnderage() {
+    try { await signOutUser(); } catch {}
+    setError("noobtopro is for ages 13 and up. Please ask a parent or guardian to set it up with you.");
+  }
+
   // Dashboard → "Delete account": permanent erasure (cancels any Pro subscription, deletes
   // the auth user and all their data). On success the store signs out, which fires the
   // SIGNED_OUT handler and returns the app to the intro view.
@@ -1351,6 +1375,19 @@ export default function Noobtopro() {
   ) : null;
 
   /* ----------------------------- render ----------------------------- */
+  // P0-10: block a freshly signed-in account that hasn't completed the one-time age check.
+  // Derived from `user` metadata so it clears as soon as confirmAge refreshes the user (or
+  // an under-13 sign-out nulls it). Guests (no user) and the sign-in screen are exempt.
+  const needsAgeGate = !!user && stage !== "signin" && !hasAgeAck(user);
+  if (needsAgeGate) {
+    return (
+      <>
+        {resetToast}
+        <AgeGate onConfirm={confirmAge} onUnderage={handleUnderage} />
+      </>
+    );
+  }
+
   // App chrome: the sidebar (nav + account + theme) renders whenever the tabs
   // used to — once there's progress or a session, outside the sign-in screen.
   // Chrome-less stages (intro / sign-in) keep a minimal centered header instead.

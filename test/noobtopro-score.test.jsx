@@ -8,7 +8,7 @@ import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 // browser can no longer write scores). This drives the real component against a
 // signed-in Supabase mock whose session carries an access_token.
 
-const USER = { id: "u1", email: "u@example.com", user_metadata: { full_name: "U" } };
+const USER = { id: "u1", email: "u@example.com", user_metadata: { full_name: "U", age_ack_year: 2000 } };
 const SCORES = {
   // weak_concepts are CURRICULUM KEYS now (the grader reports keys) — a real,
   // guided concept so opening it lands on its prepared library page.
@@ -279,5 +279,27 @@ describe("Noobtopro — signed-in adaptive diagnostic is server-persisted", () =
     expect(finalize.tokens).toEqual(SUBJECTS3.map((s) => `final-${s}`));
     // Server persisted it — the client never writes locally.
     expect(store.saveProgress).not.toHaveBeenCalled();
+  });
+});
+
+describe("Noobtopro — age gate (P0-10)", () => {
+  it("blocks a signed-in account that hasn't recorded its age, hiding the app", async () => {
+    // Same signed-in session, but NO age acknowledgement in user_metadata.
+    supa.user = { id: "u1", email: "u@example.com", user_metadata: { full_name: "U" } };
+    vi.stubGlobal("fetch", vi.fn(async () => jsonRes({ isAdmin: false })));
+    render(<Noobtopro />);
+    // The neutral age screen is shown instead of the dashboard.
+    expect(await screen.findByText("One quick thing")).toBeTruthy();
+    expect(screen.getByLabelText(/date of birth/i)).toBeTruthy();
+    // The signed-in app identity (email in the sidebar) must NOT be reachable yet.
+    expect(screen.queryByText("u@example.com")).toBeNull();
+  });
+
+  it("does NOT gate a signed-in account that has acknowledged its age", async () => {
+    supa.user = USER; // includes age_ack_year
+    vi.stubGlobal("fetch", vi.fn(async () => jsonRes({ isAdmin: false })));
+    render(<Noobtopro />);
+    expect(await screen.findByText("u@example.com")).toBeTruthy();
+    expect(screen.queryByText("One quick thing")).toBeNull();
   });
 });
