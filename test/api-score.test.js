@@ -1211,3 +1211,44 @@ describe("POST /api/score — review-round hardening", () => {
     expect((await res.json()).newScore).toBe(s2.newScore);
   });
 });
+
+describe("POST /api/score practice — account-bound token (audit F2)", () => {
+  it("rejects a token whose signed uid is a DIFFERENT account (no token pooling/sharing)", async () => {
+    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
+    const { sb } = fakeAdmin({ scoresRows: [{ subject: "math", score: 140, weak_concepts: [], comment: "", rubric: null, glicko: null }] });
+    storage.getAdmin.mockReturnValue(sb);
+    const failFetch = vi.fn(() => { throw new Error("must not grade a cross-account token"); });
+    vi.stubGlobal("fetch", failFetch);
+    const res = await POST(req(
+      { kind: "practice", token: tok({ uid: "u2" }), reasoning: REASONING },
+      { authHeader: true }
+    ));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/different account/i);
+    expect(failFetch).not.toHaveBeenCalled(); // rejected before any Groq spend
+  });
+
+  it("accepts a token whose signed uid MATCHES the scoring account", async () => {
+    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
+    const { sb } = fakeAdmin({ scoresRows: [{ subject: "math", score: 140, weak_concepts: [], comment: "", rubric: null, glicko: null }] });
+    storage.getAdmin.mockReturnValue(sb);
+    mockGroq(PRACTICE_GRADE);
+    const res = await POST(req(
+      { kind: "practice", token: tok({ uid: "u1" }), reasoning: REASONING },
+      { authHeader: true }
+    ));
+    expect(res.status).toBe(200);
+  });
+
+  it("accepts a legacy token with NO signed uid (backward compatible)", async () => {
+    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
+    const { sb } = fakeAdmin({ scoresRows: [{ subject: "math", score: 140, weak_concepts: [], comment: "", rubric: null, glicko: null }] });
+    storage.getAdmin.mockReturnValue(sb);
+    mockGroq(PRACTICE_GRADE);
+    const res = await POST(req(
+      { kind: "practice", token: tok(), reasoning: REASONING }, // tok() signs no uid
+      { authHeader: true }
+    ));
+    expect(res.status).toBe(200);
+  });
+});
