@@ -1,7 +1,9 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { SUBJECTS } from "@/lib/scoring";
+import Icon from "@/components/Icon";
 
 // Small status pill on the np-admin-* recipes. Severity high/med -> muted
 // danger/improve accents (tokens, theme-stable); everything else neutral grey.
@@ -29,6 +31,13 @@ export default function AdminDashboard({ adminApi }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busyKey, setBusyKey] = useState(null);
+  // A11y P2-10: a styled, accessible confirm modal replaces window.confirm for the
+  // destructive guide delete (mirrors Dashboard's reset modal: dimmed backdrop, the
+  // safe "Cancel" default focused on open, Escape to cancel, focus restored on close).
+  // `confirmDelete` holds the pending guide ({ key, concept, subject, concept_key }).
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const cancelRef = useRef(null); // default focus = the safe "Cancel" button
+  const prevFocusRef = useRef(null); // focus to restore when the dialog closes
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -45,6 +54,19 @@ export default function AdminDashboard({ adminApi }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  // A11y P2-10: focus the safe "Cancel" button on open; Escape cancels (unless an
+  // action is in flight for this guide); restore focus to the trigger on close.
+  useEffect(() => {
+    if (!confirmDelete) return undefined;
+    cancelRef.current?.focus();
+    const onKey = (e) => { if (e.key === "Escape" && busyKey !== confirmDelete.key) setConfirmDelete(null); };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      prevFocusRef.current?.focus?.();
+    };
+  }, [confirmDelete, busyKey]);
 
   async function act(key, payload) {
     setBusyKey(key);
@@ -119,7 +141,16 @@ export default function AdminDashboard({ adminApi }) {
               <div className="np-admin-actions">
                 <button className="np-btn np-primary" disabled={!ready || busyKey === key} onClick={() => act(key, { target: "guide", action: "approve", subject: g.subject, concept_key: g.concept_key })}>Approve → public</button>
                 <button className="np-ghost" disabled={busyKey === key} onClick={() => act(key, { target: "guide", action: "hide", subject: g.subject, concept_key: g.concept_key })}>Hide</button>
-                <button className="np-ghost np-ghost--danger" disabled={busyKey === key} onClick={() => { if (typeof window === "undefined" || window.confirm(`Delete the guide for "${g.concept}"? This cannot be undone.`)) act(key, { target: "guide", action: "delete", subject: g.subject, concept_key: g.concept_key }); }}>Delete</button>
+                <button
+                  className="np-ghost np-ghost--danger"
+                  disabled={busyKey === key}
+                  onClick={() => {
+                    prevFocusRef.current = typeof document !== "undefined" ? document.activeElement : null;
+                    setConfirmDelete({ key, concept: g.concept, subject: g.subject, concept_key: g.concept_key });
+                  }}
+                >
+                  Delete
+                </button>
               </div>
             </div>
           );
@@ -177,6 +208,57 @@ export default function AdminDashboard({ adminApi }) {
           );
         })
       )}
+
+      {/* A11y P2-10: styled delete-confirm modal (replaces window.confirm). Portaled to
+          <body>, dimmed backdrop, role=dialog/aria-modal, safe "Cancel" focused on open,
+          Escape to cancel (handled in the effect above). */}
+      {confirmDelete &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className="np-modal-backdrop"
+            onClick={() => { if (busyKey !== confirmDelete.key) setConfirmDelete(null); }}
+          >
+            <div
+              className="np-surface-elevated np-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="np-admindelete-title"
+              aria-describedby="np-admindelete-desc"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="np-modal-spark" aria-hidden="true"><Icon name="x" size={22} /></div>
+              <h2 id="np-admindelete-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+                Delete this guide?
+              </h2>
+              <p id="np-admindelete-desc" className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
+                This permanently deletes the guide for “{confirmDelete.concept}”. This can&apos;t be undone.
+              </p>
+              <div className="np-modal-actions">
+                <button
+                  ref={cancelRef}
+                  className="np-btn np-secondary"
+                  onClick={() => setConfirmDelete(null)}
+                  disabled={busyKey === confirmDelete.key}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="np-btn np-danger"
+                  onClick={async () => {
+                    const pending = confirmDelete;
+                    await act(pending.key, { target: "guide", action: "delete", subject: pending.subject, concept_key: pending.concept_key });
+                    setConfirmDelete(null);
+                  }}
+                  disabled={busyKey === confirmDelete.key}
+                >
+                  {busyKey === confirmDelete.key ? "Deleting…" : "Delete"}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

@@ -1503,6 +1503,17 @@ export default function Noobtopro() {
 
   const bgInert = (showSaveModal && !user) || !!upgradeNudge || showRebaselineConfirm || overlayActive ? true : undefined;
 
+  // PERF (P2-7): stabilize the callback props whose bodies use ONLY React's stable
+  // state setters, so a keystroke-driven Noobtopro re-render doesn't churn their
+  // identity and re-fire child effects keyed on them (e.g. Dashboard's
+  // onOverlayActiveChange effect). The handlers that call the component's other
+  // (per-render) functions — onProveIt/onSignIn/onPractice/onLearn/etc. — are left as
+  // inline arrows: memoizing them safely would require also stabilizing those
+  // functions (a larger refactor tied to the P1-1 monolith split, deferred here).
+  const onDismissError = useCallback(() => setError(""), []);
+  const onDismissAuthNote = useCallback(() => setShowAuthNote(false), []);
+  const onCloseDashboard = useCallback(() => setView("practice"), []);
+
   // Transient "progress was reset" toast. Rendered in EVERY return branch — a reset
   // lands the learner on the intro/Landing branch (below), not the app shell — so it
   // always appears. Fixed-position, so where it sits in the tree doesn't matter.
@@ -1548,9 +1559,9 @@ export default function Noobtopro() {
           onSignIn={() => (isSupabaseConfigured ? openSignIn() : setShowAuthNote(true))}
           onUpgrade={startCheckout}
           error={error}
-          onDismissError={() => setError("")}
+          onDismissError={onDismissError}
           showAuthNote={showAuthNote}
-          onDismissAuthNote={() => setShowAuthNote(false)}
+          onDismissAuthNote={onDismissAuthNote}
         />
         {resetToast}
       </>
@@ -1764,7 +1775,7 @@ export default function Noobtopro() {
             onSignIn={() => (isSupabaseConfigured ? openSignIn() : setShowAuthNote(true))}
             onUpgrade={startCheckout}
             onManageSubscription={openPortal}
-            onClose={() => setView("practice")}
+            onClose={onCloseDashboard}
             onOverlayActiveChange={setOverlayActive}
           />
         ) : view === "learn" && scores ? (
@@ -1842,16 +1853,32 @@ export default function Noobtopro() {
                 </div>
                 {/* Progress: 3 subject groups × stepsTotal pips, filled by the steps
                     ANSWERED per subject (the §8 adaptive walk, band varies per step,
-                    so pips count steps, not tiers). */}
+                    so pips count steps, not tiers).
+                    A11y P2-2: completion was conveyed by fill COLOR alone. Each subject
+                    group now carries role=img + an aria-label ("Math: 2 of 3 answered"),
+                    and a single visually-hidden summary gives the whole row's progress —
+                    so the diagnostic progress is perceivable without color. */}
                 <div className="np-diag-progress">
-                  {ORDER.map((s) => (
-                    <div key={s} className="np-diag-proggroup">
-                      {Array.from({ length: curQ.stepsTotal || 3 }, (_, di) => (
-                        <div key={di} className="np-progdot" style={{ background: di < (diagAnswered[s] || 0) ? SUBJECTS[s].color : "var(--tint-2)" }} />
-                      ))}
-                    </div>
-                  ))}
+                  {ORDER.map((s) => {
+                    const total = curQ.stepsTotal || 3;
+                    const done = diagAnswered[s] || 0;
+                    return (
+                      <div
+                        key={s}
+                        className="np-diag-proggroup"
+                        role="img"
+                        aria-label={`${SUBJECTS[s].label}: ${done} of ${total} answered`}
+                      >
+                        {Array.from({ length: total }, (_, di) => (
+                          <div key={di} className="np-progdot" style={{ background: di < done ? SUBJECTS[s].color : "var(--tint-2)" }} />
+                        ))}
+                      </div>
+                    );
+                  })}
                 </div>
+                <span className="np-sronly" role="status" aria-live="polite">
+                  {`Diagnostic progress: ${ORDER.map((s) => `${SUBJECTS[s].label} ${diagAnswered[s] || 0} of ${curQ.stepsTotal || 3} answered`).join(", ")}.`}
+                </span>
                 <div className="np-qmeta">
                   <SubjectGlyph subject={curSubject} />
                   <span className="np-metaline">
@@ -1955,7 +1982,7 @@ export default function Noobtopro() {
                                 const label = conceptLabel(k, w) || conceptLabel(k, resolveConceptKey(k, w)) || w;
                                 return (
                                 <button
-                                  key={i}
+                                  key={typeof w === "string" && w ? `${k}:${w}` : i}
                                   type="button"
                                   className="np-weaktag np-weaktag-btn"
                                   title={`Learn: ${label}`}
@@ -1991,6 +2018,21 @@ export default function Noobtopro() {
                 </div>
 
                 {busy && !pQuestion && <Loader subject={pSubject ? SUBJECTS[pSubject].label : ""} />}
+
+                {/* FRONTEND P2-5: a generation failure clears `busy` but leaves
+                    `pQuestion` null, so the body would otherwise render empty (just the
+                    top error banner). Show an in-context retry card so the learner can
+                    re-generate without navigating back and re-entering practice. */}
+                {!busy && !pQuestion && pSubject && (
+                  <div className="np-card" role="alert" style={{ textAlign: "center", padding: "32px 24px" }}>
+                    <p className="np-lessontext" style={{ marginBottom: 16 }}>
+                      We couldn&apos;t generate a {SUBJECTS[pSubject].label} question just now.
+                    </p>
+                    <button className="np-btn np-primary" onClick={() => startPractice(pSubject)}>
+                      <Icon name="refresh" size={15} /> Try again
+                    </button>
+                  </div>
+                )}
 
                 {pQuestion && (
                   <>

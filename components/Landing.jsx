@@ -173,6 +173,26 @@ const FAQ = [
   },
 ];
 
+// FAQPage JSON-LD for answer engines (AI Overviews, ChatGPT, Perplexity). Built from
+// the plain-text answers; characters that could break out of <script> are unicode-
+// escaped so it renders as a plain text child (no dangerouslySetInnerHTML needed).
+// PERF (P2-9): it depends ONLY on the module-constant FAQ, so it's computed ONCE at
+// module scope instead of re-running JSON.stringify + a ~3KB regex on every render
+// (every FAQ accordion toggle / scroll-driven `scrolled` flip).
+const FAQ_LD = JSON.stringify({
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: FAQ.flatMap((g) => g.items).map(([q, a, schema]) => ({
+    "@type": "Question",
+    name: q,
+    acceptedAnswer: { "@type": "Answer", text: typeof a === "string" ? a : schema || "" },
+  })),
+}).replace(/[<>&]/g, (c) => ({ "<": "\\u003c", ">": "\\u003e", "&": "\\u0026" }[c]));
+
+// PERF (P2-4): the footer year is effectively stable; compute it once at module
+// scope rather than calling the impure new Date() during every render.
+const YEAR = new Date().getFullYear();
+
 export default function Landing({
   user,
   busy,
@@ -192,22 +212,9 @@ export default function Landing({
   const { ref: rootRef, armed } = useScrollReveal();
   const scrolled = useScrolled();
 
-  // FAQPage JSON-LD for answer engines (AI Overviews, ChatGPT, Perplexity). Built from
-  // the plain-text answers; characters that could break out of <script> are unicode-
-  // escaped so it renders as a plain text child (no dangerouslySetInnerHTML needed).
-  const faqLd = JSON.stringify({
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    mainEntity: FAQ.flatMap((g) => g.items).map(([q, a, schema]) => ({
-      "@type": "Question",
-      name: q,
-      acceptedAnswer: { "@type": "Answer", text: typeof a === "string" ? a : schema || "" },
-    })),
-  }).replace(/[<>&]/g, (c) => ({ "<": "\\u003c", ">": "\\u003e", "&": "\\u0026" }[c]));
-
   return (
     <div className={"np-lp" + (armed ? " is-armed" : "")} ref={rootRef}>
-      <script type="application/ld+json">{faqLd}</script>
+      <script type="application/ld+json">{FAQ_LD}</script>
       {/* A11y P1-4: skip-to-content as the first focusable element (hidden until focused). */}
       <a className="np-skiplink" href="#np-main-content">Skip to content</a>
       {/* ----------------------------- nav (shared TopNav) ----------------------------- */}
@@ -389,7 +396,7 @@ export default function Landing({
           <div className="np-lp-price">
             <div className="np-card np-lp-plan" data-reveal style={{ "--ri": 0 }}>
               <div className="np-lp-plan-name">Free</div>
-              <div className="np-lp-plan-price">$0<small> / forever</small></div>
+              <div className="np-lp-plan-price">€0<small> / forever</small></div>
               <div className="np-lp-plan-tag">Everything you need to find where you stand.</div>
               <ul className="np-lp-feats">
                 {FREE_FEATURES.map((f) => (
@@ -504,7 +511,7 @@ export default function Landing({
             <a href="/refunds" style={{ color: "var(--muted)", textDecoration: "none" }}>Refunds</a>
           </nav>
           <span className="np-lp-foot-tech">Next.js · Supabase · Groq</span>
-          <span className="np-lp-foot-copy">© {new Date().getFullYear()} noobtopro</span>
+          <span className="np-lp-foot-copy">© {YEAR} noobtopro</span>
         </div>
       </footer>
     </div>

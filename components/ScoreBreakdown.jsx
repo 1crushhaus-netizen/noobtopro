@@ -31,8 +31,10 @@ export function ErrorList({ errors }) {
       {errors.map((e, i) => {
         const t = ERROR_TYPES[e.type] || ERROR_TYPES.reasoning;
         const socratic = e.type === "reasoning" && e.socraticPrompt;
+        // P2-1: type + index is a more stable key than the bare index (the type
+        // disambiguates rows that reorder when the error list is re-derived).
         return (
-          <li key={i} className="np-erritem">
+          <li key={`${e.type || "reasoning"}-${i}`} className="np-erritem">
             <span className="np-errbadge" style={{ borderColor: t.color, color: t.color }}>{t.label}</span>
             <div className="np-errbody">
               {socratic ? (

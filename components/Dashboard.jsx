@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import {
   SUBJECTS,
@@ -215,9 +215,15 @@ function BySubject({ scores, mastery, onPractice }) {
 // left so the focus rows below it are always visible — "what to work on" is the
 // actionable part and must never require scrolling to find.
 function RadarPanel({ scores, onPractice, onLearn }) {
-  const rubricSubjects = ORDER
-    .filter((k) => scores && scores[k] && scores[k].rubric && typeof scores[k].rubric === "object")
-    .map((k) => ({ key: k, label: SUBJECTS[k].label, color: SUBJECTS[k].color, rubric: scores[k].rubric }));
+  // PERF (P2-3): the subject filter/map only changes when `scores` does — memoize it
+  // so unrelated dashboard interactions (drawer toggle, confirm modal) don't rebuild it.
+  const rubricSubjects = useMemo(
+    () =>
+      ORDER
+        .filter((k) => scores && scores[k] && scores[k].rubric && typeof scores[k].rubric === "object")
+        .map((k) => ({ key: k, label: SUBJECTS[k].label, color: SUBJECTS[k].color, rubric: scores[k].rubric })),
+    [scores]
+  );
 
   return (
     <div className="np-card np-dash-radar" data-reveal style={{ "--ri": 0 }}>
@@ -278,7 +284,10 @@ function RecentMoves({ history }) {
     .filter((a) => a.type === "attempt" && typeof a.rationale === "string" && a.rationale.trim())
     .slice(-25)
     .reverse()
-    .map((a) => ({ subject: a.subject, delta: Math.round(a.delta || 0), rationale: a.rationale }));
+    // P2-1: carry the attempt timestamp so the list can key by a STABLE field
+    // (timestamp + subject) instead of the array index — index keys mis-associate
+    // rows as new attempts land at the head of the reversed slice.
+    .map((a) => ({ t: a.t, subject: a.subject, delta: Math.round(a.delta || 0), rationale: a.rationale }));
 
   return (
     <div className="np-card np-dash-panel np-dash-moves">
@@ -289,7 +298,7 @@ function RecentMoves({ history }) {
       <div className="np-dash-cardbody" role="region" aria-label="Recent rank changes">
         {moves.length >= 1 ? (
           moves.map((m, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 8 }}>
+            <div key={m.t ? `${m.subject}:${m.t}` : i} style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 8 }}>
               <SubjectGlyph subject={m.subject} width={16} />
               <span style={{
                 fontFamily: "var(--mono)", fontWeight: 700, width: 40, textAlign: "right",
@@ -444,7 +453,12 @@ export default function Dashboard({
         {email && <div className="np-profileemail">{email}</div>}
       </div>
       {scores && (
-        <span className="np-dash-rankchip" title="Your overall rank">
+        // A11y P2-4: aria-label so the chip's purpose isn't title-only.
+        <span
+          className="np-dash-rankchip"
+          title="Your overall rank"
+          aria-label={`Your overall rank: ${rankFor(phdIndex(scores)).name}`}
+        >
           {rankFor(phdIndex(scores)).name}
         </span>
       )}
@@ -469,10 +483,20 @@ export default function Dashboard({
   }
 
   // ---- Signed-in dashboard: the bento grid ----
-  const linePoints = history.filter((h) => typeof h.totalAfter === "number").map((h) => h.totalAfter);
-  const barItems = history
-    .filter((h) => h.type === "attempt")
-    .map((a) => ({ value: Math.round(a.delta || 0), glyph: SUBJECTS[a.subject]?.glyph || "·" }));
+  // PERF (P2-3): the history-derived chart arrays change only with `history`; memoize
+  // them so a drawer/confirm-modal toggle (the things that actually re-render this
+  // component) doesn't redo the reduction every time.
+  const linePoints = useMemo(
+    () => history.filter((h) => typeof h.totalAfter === "number").map((h) => h.totalAfter),
+    [history]
+  );
+  const barItems = useMemo(
+    () =>
+      history
+        .filter((h) => h.type === "attempt")
+        .map((a) => ({ value: Math.round(a.delta || 0), glyph: SUBJECTS[a.subject]?.glyph || "·" })),
+    [history]
+  );
 
   return (
     <div className={"fade-up np-dash-frame" + (armed ? " is-armed" : "")} ref={revealRef}>
@@ -482,7 +506,7 @@ export default function Dashboard({
         <h1 className="np-h2">
           Your dashboard
           {isPro && (
-            <span className="np-dash-rankchip" style={{ marginLeft: 10, verticalAlign: "middle" }} title="You're a Pro subscriber">
+            <span className="np-dash-rankchip" style={{ marginLeft: 10, verticalAlign: "middle" }} title="You're a Pro subscriber" aria-label="You're a Pro subscriber">
               Pro
             </span>
           )}

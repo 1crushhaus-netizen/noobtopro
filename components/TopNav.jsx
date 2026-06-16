@@ -83,8 +83,16 @@ export default function TopNav({
           {user && <NavIdentity user={user} scores={scores} />}
           {showTheme && <ThemeToggle />}
           {signIn && (
-            <button className="np-signinbtn np-topnav-signin" onClick={signIn.onClick}>
-              <Icon name="login" size={16} /> {signIn.label || "Sign in"}
+            // A11y P2-7: the header sign-in stays REACHABLE at phone widths (it used to
+            // `display:none` below 540px, hiding a guest's only header entry point). Below
+            // 540px it collapses to an icon-only button (the label span is hidden via CSS);
+            // an explicit aria-label keeps its accessible name in that state.
+            <button
+              className="np-signinbtn np-topnav-signin"
+              onClick={signIn.onClick}
+              aria-label={signIn.label || "Sign in"}
+            >
+              <Icon name="login" size={16} /> <span className="np-topnav-signin-label">{signIn.label || "Sign in"}</span>
             </button>
           )}
           {signOut && (
@@ -117,7 +125,9 @@ function NavIdentity({ user, scores }) {
   const avatar = meta.avatar_url || meta.picture || null;
   const showAvatar = avatar && !imgFailed;
   return (
-    <div className="np-topnav-id" title={user.email || name}>
+    // A11y P2-4: a real aria-label mirrors the title (title alone isn't reliably
+    // exposed to AT or on touch). role=group so AT announces it as the identity cluster.
+    <div className="np-topnav-id" title={user.email || name} role="group" aria-label={`Signed in as ${name}`}>
       {showAvatar ? (
         <img className="np-avatar np-topnav-avatar" src={avatar} alt="" referrerPolicy="no-referrer" onError={() => setImgFailed(true)} />
       ) : (
@@ -128,7 +138,13 @@ function NavIdentity({ user, scores }) {
         {user.email && <span className="np-topnav-email">{user.email}</span>}
       </span>
       {scores && (
-        <span className="np-dash-rankchip np-topnav-rank" title="Your overall rank">
+        // A11y P2-4: aria-label gives the chip a self-describing accessible name
+        // (the bare rank word alone, e.g. "University", doesn't say what it is).
+        <span
+          className="np-dash-rankchip np-topnav-rank"
+          title="Your overall rank"
+          aria-label={`Your overall rank: ${rankFor(phdIndex(scores)).name}`}
+        >
           {rankFor(phdIndex(scores)).name}
         </span>
       )}

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { SUBJECTS, ORDER } from "@/lib/scoring";
 import { RANKS, RANK_LABELS, conceptsFor, isRankWip, WIP_RANKS_NOTE, rootsFor, crossRootsFor } from "@/lib/curriculum";
 import { conceptState, assumedMasteredKeys, MASTERY_LABELS } from "@/lib/mastery";
@@ -69,11 +69,16 @@ export default function LearnTab({ onPractice, busyConcept = null, openConcept =
 
   // Effective display state: a direct attempt always wins; an untouched (grey)
   // elementary concept that's a prerequisite of demonstrated work shows as "assumed".
-  const stateFor = (subject, key) => {
-    const s = conceptState(mastery, subject, key);
-    if (s === "grey" && assumed[subject] && assumed[subject].has(key)) return "assumed";
-    return s;
-  };
+  // PERF (P2-3): stabilized on [mastery, assumed] so child memos that depend on it
+  // (CurriculumList's searchResults) don't invalidate on every keystroke render.
+  const stateFor = useCallback(
+    (subject, key) => {
+      const s = conceptState(mastery, subject, key);
+      if (s === "grey" && assumed[subject] && assumed[subject].has(key)) return "assumed";
+      return s;
+    },
+    [mastery, assumed]
+  );
 
   if (selected) {
     return (
@@ -228,16 +233,21 @@ function CurriculumList({ stateFor, mastery, onOpen }) {
 
   // Search mode: a flat, cross-subject result list (grouped by subject) replaces the
   // tabbed listing while a query is present.
-  const searchResults = q
-    ? ORDER.map((s) => ({
-        subject: s,
-        items: RANKS.filter((r) => !isRankWip(s, r)).flatMap((r) =>
-          conceptsFor(s, r)
-            .filter((c) => c.label.toLowerCase().includes(q) && matchesFilter(s, c.key))
-            .map((c) => ({ ...c, rank: r }))
-        ),
-      })).filter((g) => g.items.length > 0)
-    : null;
+  // PERF (P2-3): this flat-maps the ENTIRE curriculum (224 concepts × 3 subjects × 5
+  // ranks) and ran on EVERY keystroke (the search input is controlled). Memoize it on
+  // [q, filter, stateFor] — stateFor is now stable across renders that don't change
+  // mastery, so typing only rebuilds when the query/filter actually change.
+  const searchResults = useMemo(() => {
+    if (!q) return null;
+    return ORDER.map((s) => ({
+      subject: s,
+      items: RANKS.filter((r) => !isRankWip(s, r)).flatMap((r) =>
+        conceptsFor(s, r)
+          .filter((c) => c.label.toLowerCase().includes(q) && (filter === "all" || stateFor(s, c.key) === filter))
+          .map((c) => ({ ...c, rank: r }))
+      ),
+    })).filter((g) => g.items.length > 0);
+  }, [q, filter, stateFor]);
 
   return (
     <div className="fade-up">
