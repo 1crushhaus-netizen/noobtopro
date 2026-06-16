@@ -23,8 +23,10 @@ const history = [
 
 const scoresWithRubric = {
   math: {
+    // Legacy free-text weak concept (pre-key grader). The dashboard must resolve it
+    // to a real curriculum concept and deep-link there — not pass the raw phrase.
     score: 210,
-    weakConcepts: ["chain rule"],
+    weakConcepts: ["isolating variable in linear equations"],
     comment: "",
     rubric: { comprehension: 3, principle: 1, justification: 2, strategy: 2, logic: 2, execution_method: 3, computation: 4, verification: 1, communication: 3 },
   },
@@ -141,8 +143,9 @@ describe("Dashboard — reasoning radar + what-to-work-on", () => {
     const onLearn = vi.fn();
     render(<Dashboard user={user} scores={scoresWithRubric} history={history} onPractice={() => {}} onLearn={onLearn} />);
     // Only math has a weak concept among the profiled subjects → exactly one "Learn this".
+    // The legacy free-text phrase resolves to its curriculum key so Learn can deep-link.
     fireEvent.click(screen.getByText("Learn this"));
-    expect(onLearn).toHaveBeenCalledWith("math", "chain rule");
+    expect(onLearn).toHaveBeenCalledWith("math", "linear_equations_two_var");
   });
 
   it("does NOT render the radar before any subject has a rubric", () => {

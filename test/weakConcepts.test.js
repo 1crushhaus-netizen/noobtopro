@@ -28,6 +28,38 @@ describe("resolveConceptKey — map grader output onto a curriculum key", () => 
     expect(resolveConceptKey("math", "")).toBeNull();
     expect(resolveConceptKey("math", null)).toBeNull();
   });
+
+  // Real legacy free-text weakConcepts taken from the live `scores` table (rows
+  // written before the grader reported keys). Each must now resolve to a real,
+  // prepared curriculum concept so the dashboard "Work on" chip deep-links instead of
+  // dead-ending on the Learn tab, and never shows a phantom topic.
+  it("maps real legacy free-text rows onto the best curriculum concept", () => {
+    expect(resolveConceptKey("math", "isolating variable in linear equations")).toBe("linear_equations_two_var");
+    expect(resolveConceptKey("math", "interpreting rates and fixed fees")).toBe("ratios_unit_rates");
+    expect(resolveConceptKey("math", "percentage profit calculation")).toBe("percentages");
+    expect(resolveConceptKey("math", "stating and justifying proportional relationships")).toBe("proportional_relationships");
+    expect(resolveConceptKey("physics", "work calculation")).toBe("work_energy_power");
+    expect(resolveConceptKey("physics", "units of work vs force")).toBe("work_energy_power");
+    expect(resolveConceptKey("physics", "potential energy increase on frictionless incline")).toBe("kinetic_potential_energy");
+    expect(resolveConceptKey("physics", "quantitative velocity-time relationship")).toBe("speed_velocity_acceleration");
+    expect(resolveConceptKey("physics", "thermodynamic cycles")).toBe("thermodynamics_intro");
+    expect(resolveConceptKey("chemistry", "stoichiometric ratios for products")).toBe("stoichiometry");
+    expect(resolveConceptKey("chemistry", "atomic stability")).toBe("atomic_structure");
+    expect(resolveConceptKey("chemistry", "principles of conservation of mass explanation")).toBe("conservation_mass");
+  });
+
+  // Single-token concept labels ("Stoichiometry", "Percentages") were previously
+  // unmatchable by the free-text fallback (it skipped <2-token labels); guard that.
+  it("resolves single-token concept labels via stem/prefix match", () => {
+    expect(resolveConceptKey("chemistry", "stoichiometric ratios")).toBe("stoichiometry");
+    expect(resolveConceptKey("math", "computing a percentage")).toBe("percentages");
+  });
+
+  it("still drops genuinely unmappable legacy phrases (no phantom chip)", () => {
+    expect(resolveConceptKey("math", "justifying formulas")).toBeNull();
+    expect(resolveConceptKey("math", "checking domain/extraneous solutions")).toBeNull();
+    expect(resolveConceptKey("physics", "efficiency derivation")).toBeNull();
+  });
 });
 
 describe("resolveWeakConcepts — validate + dedupe + cap the grader's weakConcepts", () => {

@@ -1988,30 +1988,42 @@ export default function Noobtopro() {
                         {/* A11y P1-2: the rank band is small meaningful text → accessible text variant. */}
                         <div className="np-bandtag" style={{ color: SUBJECT_TEXT[k] }}>{band(s.score)}</div>
                         {s.comment && <div className="np-comment">{s.comment}</div>}
-                        {s.weakConcepts && s.weakConcepts.length > 0 && (
-                          <div className="np-weakwrap">
-                            <div className="np-eyebrow np-eyebrow--sm">Work on</div>
-                            <div className="np-weaktags">
-                              {s.weakConcepts.slice(0, 3).map((w, i) => {
-                                // `w` is a curriculum key (the grader now reports keys);
-                                // show its human label. Legacy free-text rows fall back
-                                // to a resolved label, then to the raw text.
-                                const label = conceptLabel(k, w) || conceptLabel(k, resolveConceptKey(k, w)) || w;
-                                return (
-                                <button
-                                  key={typeof w === "string" && w ? `${k}:${w}` : i}
-                                  type="button"
-                                  className="np-weaktag np-weaktag-btn"
-                                  title={`Learn: ${label}`}
-                                  onClick={() => openLearn(k, w)}
-                                >
-                                  {label}
-                                </button>
-                                );
-                              })}
+                        {(() => {
+                          // Resolve each stored weak concept onto a REAL curriculum
+                          // concept and render only those (deduped, max 3). A chip
+                          // therefore never shows a phantom topic, and clicking it always
+                          // deep-links to that concept's prepared guide. Legacy free-text
+                          // rows that map to no concept are dropped rather than rendered
+                          // as a dead-end label that just bounces to the Learn tab.
+                          const chips = [];
+                          const seen = new Set();
+                          for (const w of s.weakConcepts || []) {
+                            const ck = typeof w === "string" ? resolveConceptKey(k, w) : null;
+                            if (!ck || seen.has(ck)) continue;
+                            seen.add(ck);
+                            chips.push({ key: ck, label: conceptLabel(k, ck) });
+                            if (chips.length >= 3) break;
+                          }
+                          if (!chips.length) return null;
+                          return (
+                            <div className="np-weakwrap">
+                              <div className="np-eyebrow np-eyebrow--sm">Work on</div>
+                              <div className="np-weaktags">
+                                {chips.map((c) => (
+                                  <button
+                                    key={`${k}:${c.key}`}
+                                    type="button"
+                                    className="np-weaktag np-weaktag-btn"
+                                    title={`Learn: ${c.label}`}
+                                    onClick={() => openLearn(k, c.key)}
+                                  >
+                                    {c.label}
+                                  </button>
+                                ))}
+                              </div>
                             </div>
-                          </div>
-                        )}
+                          );
+                        })()}
                         <button className="np-btn np-secondary np-btn--block np-btn--subject" style={{ marginTop: 14, "--subject": SUBJECTS[k].color }} onClick={() => startPractice(k)}>
                           Practice {SUBJECTS[k].label} <Icon name="arrow" size={15} />
                         </button>
