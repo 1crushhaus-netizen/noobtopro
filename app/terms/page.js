@@ -1,7 +1,7 @@
 import LegalLayout, { Section } from "@/components/LegalLayout";
 
 export const metadata = {
-  title: "Terms of Service — noobtopro",
+  title: "Terms of Service", // root template appends " — noobtopro" (SEO P2-2)
   description: "The terms that govern your use of noobtopro.",
 };
 

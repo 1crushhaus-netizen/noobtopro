@@ -16,7 +16,9 @@ const DESCRIPTION =
 
 export const metadata = {
   metadataBase: new URL(SITE_URL),
-  title: TITLE,
+  // SEO P2-2: a title TEMPLATE so per-page titles compose (e.g. "Privacy Policy — noobtopro")
+  // while the home route uses the full default. Child routes set a plain title (no suffix).
+  title: { default: TITLE, template: "%s — noobtopro" },
   description: DESCRIPTION,
   applicationName: "noobtopro",
   // SEO P2-4: supplementary keywords (low value for Google, free for other engines).

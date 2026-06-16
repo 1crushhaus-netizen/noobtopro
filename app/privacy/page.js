@@ -1,7 +1,7 @@
 import LegalLayout, { Section } from "@/components/LegalLayout";
 
 export const metadata = {
-  title: "Privacy Policy — noobtopro",
+  title: "Privacy Policy", // root template appends " — noobtopro" (SEO P2-2)
   description: "How noobtopro collects, uses, and protects your data.",
 };
 

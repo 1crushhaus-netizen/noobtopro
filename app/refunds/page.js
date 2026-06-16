@@ -1,7 +1,7 @@
 import LegalLayout, { Section } from "@/components/LegalLayout";
 
 export const metadata = {
-  title: "Refund & Cancellation Policy — noobtopro",
+  title: "Refund & Cancellation Policy", // root template appends " — noobtopro" (SEO P2-2)
   description: "How noobtopro Pro billing, cancellations, and refunds work.",
 };
 

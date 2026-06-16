@@ -2,7 +2,7 @@ import Link from "next/link";
 
 // On-brand 404. Server component; inherits globals.css theme tokens so it tracks
 // the active light/dark theme set by the pre-paint THEME_INIT in layout.js.
-export const metadata = { title: "Page not found — noobtopro" };
+export const metadata = { title: "Page not found" }; // root template appends " — noobtopro"
 
 export default function NotFound() {
   return (
