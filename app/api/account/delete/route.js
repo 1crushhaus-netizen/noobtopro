@@ -15,7 +15,8 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/adminAuth";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
-import { checkRateLimit } from "@/lib/rateLimit";
+import { checkRateLimit, clientKey } from "@/lib/rateLimit";
+import { reportRateLimit } from "@/lib/abuseDetection";
 import { getPolar } from "@/lib/polar";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +27,18 @@ export async function POST(req) {
   }
   if (isWrongContentType(req)) {
     return NextResponse.json({ error: "Content-Type must be application/json." }, { status: 415 });
+  }
+
+  // Per-IP gate BEFORE auth (audit P1-7): requireUser does a Supabase auth.getUser
+  // network round-trip, so without a per-IP ceiling an unauthenticated flood could burn
+  // the Supabase Auth quota at zero attacker cost. Gate first, like /api/leaderboard.
+  const ipRl = await checkRateLimit(clientKey(req));
+  if (!ipRl.ok) {
+    reportRateLimit({ req, route: "/api/account/delete" });
+    return NextResponse.json(
+      { error: "Too many requests. Please slow down and try again shortly." },
+      { status: 429, headers: { "Retry-After": String(ipRl.retryAfter) } }
+    );
   }
 
   // Identity comes ONLY from the verified JWT.
@@ -67,6 +80,16 @@ export async function POST(req) {
     }
   } catch (e) {
     console.error("[/api/account/delete] Polar revoke failed (continuing with deletion)", e);
+  }
+
+  // Erasure completeness (audit P1-5): security_events.user_id has NO FK to auth.users
+  // (it's a security log, usually for unauthenticated routes), so deleteUser's CASCADE does
+  // NOT reach it. Scrub the caller's rows here so deletion matches the privacy promise
+  // ("delete all associated data"). Best-effort — never block the erasure on a log cleanup.
+  try {
+    await sb.from("security_events").delete().eq("user_id", uid);
+  } catch (e) {
+    console.error("[/api/account/delete] security_events scrub failed (continuing)", e);
   }
 
   // Hard-delete the auth user; FK ON DELETE CASCADE erases all of their rows.

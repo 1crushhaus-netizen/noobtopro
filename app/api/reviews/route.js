@@ -15,7 +15,8 @@ import { NextResponse } from "next/server";
 import { requireProUser } from "@/lib/entitlements";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
-import { checkRateLimit } from "@/lib/rateLimit";
+import { checkRateLimit, clientKey } from "@/lib/rateLimit";
+import { reportRateLimit } from "@/lib/abuseDetection";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +43,19 @@ export async function POST(req) {
   }
   if (isWrongContentType(req)) {
     return NextResponse.json({ error: "Content-Type must be application/json." }, { status: 415 });
+  }
+
+  // Per-IP gate BEFORE auth (audit P1-7): requireProUser does a Supabase auth.getUser
+  // network round-trip (+ an entitlement read), so without a per-IP ceiling an
+  // unauthenticated flood could burn the Supabase Auth quota at zero attacker cost. Gate
+  // first, exactly like /api/leaderboard, then do the (per-account) auth + entitlement work.
+  const ipRl = await checkRateLimit(clientKey(req));
+  if (!ipRl.ok) {
+    reportRateLimit({ req, route: "/api/reviews" });
+    return NextResponse.json(
+      { error: "Too many requests. Please slow down and try again shortly." },
+      { status: 429, headers: { "Retry-After": String(ipRl.retryAfter) } }
+    );
   }
 
   // Identity + Pro entitlement, server-verified. 401 = not signed in, 402 = signed in but

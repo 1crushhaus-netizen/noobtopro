@@ -1084,6 +1084,16 @@ summary.np-cardicon { min-height: 44px; }
 .np-lp-faq-a li::marker { color: var(--faint); }
 .np-lp-faq-a strong { color: var(--text); font-weight: 600; }
 
+/* Legal/trust pages (/privacy, /terms, /refunds). Tailwind preflight strips list
+   markers/margins, so restore them here — otherwise the policy <ul>/<ol> render as
+   flush, bullet-less run-on lines (a11y: visual list semantics). */
+.np-legal ul { list-style: disc; margin: 0 0 12px; padding-left: 22px; }
+.np-legal ol { list-style: decimal; margin: 0 0 12px; padding-left: 22px; }
+.np-legal li { margin-bottom: 8px; padding-left: 3px; }
+.np-legal li:last-child { margin-bottom: 0; }
+.np-legal li::marker { color: var(--faint); }
+.np-legal p { margin: 0 0 12px; }
+
 /* Honor reduced motion: never leave content hidden if the observer is skipped. */
 @media (prefers-reduced-motion: reduce) {
   [data-reveal] { opacity: 1 !important; transform: none !important; }

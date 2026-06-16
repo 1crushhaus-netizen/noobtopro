@@ -54,9 +54,13 @@ begin
     cancel_at_period_end  = excluded.cancel_at_period_end,
     event_modified_at     = coalesce(excluded.event_modified_at, s.event_modified_at),
     updated_at            = now()
+  -- Ordering guard. A NULL incoming timestamp must NOT act as a wildcard that overwrites
+  -- an already-stamped row (that would let a malformed/partial event resurrect a canceled
+  -- Pro); treat NULL as the OLDEST possible time via coalesce(...,'epoch'). This matches
+  -- the hardened form in 0023 / schema.sql — kept here too so re-applying this migration
+  -- (create or replace) can never silently regress the guard to the old NULL-wildcard.
   where s.event_modified_at is null
-     or excluded.event_modified_at is null
-     or excluded.event_modified_at >= s.event_modified_at;
+     or coalesce(excluded.event_modified_at, 'epoch'::timestamptz) >= s.event_modified_at;
 end;
 $$;
 
