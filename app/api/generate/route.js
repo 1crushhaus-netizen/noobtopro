@@ -12,6 +12,7 @@ import { signQuestion } from "@/lib/questionToken";
 import { checkRateLimit, clientKey, chargeGlobalGroq } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType, readJsonLimited, MAX_BODY_BYTES_TEXT } from "@/lib/requestGuard";
 import { reportInjection, reportRateLimit } from "@/lib/abuseDetection";
+import { isContentSafe } from "@/lib/contentSafety";
 import { pickDiagnosticItem, DIAG_START_BAND, DIAG_STEPS_PER_SUBJECT } from "@/lib/diagnosticBank";
 import { signDiagState, canSignQuestions } from "@/lib/questionToken";
 
@@ -228,6 +229,12 @@ export async function POST(req) {
     // A generation without a usable question is an upstream failure, not a 200.
     if (!data || typeof data !== "object" || typeof data.question !== "string" || !data.question.trim()) {
       throw new Error("generator returned no question");
+    }
+    // CONTENT SAFETY (audit 06 P1-1): screen the generated question + concept label before
+    // it reaches a (possibly minor) user. Treat a failure as an upstream miss → the client
+    // retries and gets a fresh, safe generation, rather than rendering unsafe content.
+    if (!isContentSafe(data.question) || !isContentSafe(data.targetConcept)) {
+      throw new Error("generated content failed the safety screen");
     }
     // Build an EXPLICIT response (audit P2-2 class: never spread raw model JSON to the
     // client — a stray `error` key or object-typed field would break the UI). topicSlug

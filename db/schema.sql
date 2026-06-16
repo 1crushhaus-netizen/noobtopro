@@ -571,9 +571,13 @@ begin
   -- FIX 8: only a SERVER-GRADED practice attempt advances verification. A baseline
   -- (re)placement and a pure score upsert do NOT count (a baseline never makes an
   -- account verified by itself — verification is earned through real practice).
+  -- audit 05 P1-2 (migration 0021): the attempt must also be AT-OR-NEAR level — the route
+  -- sets p_attempt.verify=false for a far-below-level item, so 5 trivial easy aces can't
+  -- "verify" a high placement. Absent flag → counts (backward compatible).
   v_graded_inc := case
     when p_attempt is not null and jsonb_typeof(p_attempt) = 'object'
          and coalesce(p_attempt->>'type', 'attempt') = 'attempt'
+         and coalesce(p_attempt->>'verify', 'true') <> 'false'
     then 1 else 0 end;
 
   insert into public.scores (user_id, subject, score, weak_concepts, comment, rubric, glicko, server_graded, verified, updated_at)

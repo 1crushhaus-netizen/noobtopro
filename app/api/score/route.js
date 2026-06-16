@@ -44,6 +44,7 @@ import {
   repeatFactorFromRecent,
   itemDifficultyDelta,
   REPEAT_WINDOW_K,
+  attemptVerifies,
 } from "@/lib/scoring";
 import { normalizeTopic } from "@/lib/taxonomy";
 import { BAND_LADDER } from "@/lib/curriculum";
@@ -546,6 +547,10 @@ async function handlePractice(req, body) {
           topic: topicSlug,
           band: bandKey,
           jti: issued.jti, // replay/duplicate-delivery dedupe (audit P2-5)
+          // Verification gate (audit 05 P1-2): only an AT-OR-NEAR-level attempt advances the
+          // leaderboard "verified" counter, so 5 trivial far-below aces can't verify a high
+          // placement. A docked non-attempt never verifies either.
+          verify: !dock && attemptVerifies(bandKey, newScore),
         },
         // Answer-review detail (persisted atomically with the attempt) so the learner can
         // review this answer later. `answer` is the learner's own reasoning (`work`).

@@ -273,6 +273,12 @@ describe("db/schema.sql — verified leaderboard / guest-laundering defense (FIX
     expect(fn).toMatch(/verified = \(public\.scores\.server_graded \+ excluded\.server_graded\) >= 5/);
   });
 
+  it("verification requires an AT-OR-NEAR-level attempt (P1-2: verify flag gate)", () => {
+    // The increment also requires p_attempt.verify != 'false', so a far-below-level item
+    // (the route sets verify=false) can't advance the leaderboard 'verified' counter.
+    expect(fnBody("save_progress_for")).toMatch(/coalesce\(p_attempt->>'verify', 'true'\) <> 'false'/);
+  });
+
   it("leaderboard_tiers counts ONLY verified rows and returns a provisional position for an unverified caller", () => {
     const body = fnBody("leaderboard_tiers");
     // Distribution is over verified rows only.

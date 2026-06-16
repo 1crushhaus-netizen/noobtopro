@@ -683,3 +683,30 @@ describe("diagnosticPathScore (path-weighted, no full-weight floor)", () => {
     expect(seed.score).toBe(Math.round((diagnosticPathScore(qs) * DIAG_PLACEMENT_CEILING) / 100));
   });
 });
+
+// ---- attemptVerifies (anti-laundering verification gate, audit 05 P1-2) ------
+import { attemptVerifies, defaultDifficultyForBand } from "@/lib/scoring";
+
+describe("attemptVerifies — only at-or-near-level attempts count toward 'verified'", () => {
+  it("an at-level or harder attempt verifies", () => {
+    // A learner at 175 (High) doing an intermediate item (anchor 175) → counts.
+    expect(attemptVerifies("intermediate", 175)).toBe(true);
+    // Acing a HARDER item than your level always counts.
+    expect(attemptVerifies("phd", 175)).toBe(true);
+    expect(attemptVerifies("advanced", 175)).toBe(true);
+  });
+  it("a FAR-below-level attempt does NOT verify (can't farm the badge)", () => {
+    // A learner placed at ~245 (University) doing BEGINNER items (anchor 35) → does NOT count.
+    expect(attemptVerifies("beginner", 245)).toBe(false);
+    expect(attemptVerifies("foundational", 280)).toBe(false);
+  });
+  it("within one rank band below still counts (legitimate near-level practice)", () => {
+    const oneBand = 350 / 5; // 70
+    const d = defaultDifficultyForBand("intermediate"); // 175
+    expect(attemptVerifies("intermediate", d + oneBand)).toBe(true);   // exactly 1 band above difficulty
+    expect(attemptVerifies("intermediate", d + oneBand + 30)).toBe(false); // >1 band above → far-below item
+  });
+  it("a brand-new (score 0) learner's attempts always verify", () => {
+    expect(attemptVerifies("beginner", 0)).toBe(true);
+  });
+});

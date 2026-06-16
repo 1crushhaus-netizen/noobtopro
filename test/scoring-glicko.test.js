@@ -63,6 +63,18 @@ describe("the core property: difficulty-proportional (ace easy ≠ maxed)", () =
     for (let i = 0; i < 40; i++) g = attempt(g, 4, 35).glicko;
     expect(subjectScoreFromGlicko(g)).toBeLessThan(280);
   });
+  it("FARMING far-below-level items has a hard bound and collapsing marginal gain (P1-1)", () => {
+    // A learner who only ever aces BEGINNER items (d=35) cannot grind to University+. The
+    // below-level damper drives the per-attempt gain toward 0 once the score climbs >1 band
+    // above the practiced difficulty, so the score CONVERGES instead of running away.
+    let g = emptyGlickoState();
+    for (let i = 0; i < 500; i++) g = attempt(g, 4, 35).glicko;
+    const finalScore = subjectScoreFromGlicko(g);
+    expect(finalScore).toBeLessThan(245); // bounded — never a runaway climb to the top bands
+    // Marginal gain has collapsed: one more beginner ace barely moves the score.
+    const after = subjectScoreFromGlicko(attempt(g, 4, 35).glicko);
+    expect(after - finalScore).toBeLessThan(0.5);
+  });
   it("the property holds at the AXIS level too (radar value mid after acing easy)", () => {
     const r = attempt(emptyGlickoState(), 4, 35);
     expect(r.rubric.principle).toBeGreaterThan(RUBRIC_MAX * 0.5);
