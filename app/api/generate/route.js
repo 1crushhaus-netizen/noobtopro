@@ -97,6 +97,27 @@ export async function POST(req) {
       );
     }
     const safeScore = clampSubjectScore(score) ?? 0;
+    // Resolve the authenticated caller ONCE (if a Bearer token is present) and apply a
+    // durable PER-ACCOUNT cap on practice generation — so a signed-in caller can't multiply
+    // paid Groq generations by rotating IPs past the per-IP limiter (audit 01 P1-2 / 03 P1-C).
+    // Guests (no token) stay bounded by the per-IP + global budgets below. The resolved user
+    // is reused for the drill-state read so this adds no extra JWT verification.
+    let authedUser = null;
+    const hasAuthHeader = !!req.headers.get("authorization");
+    if (hasAuthHeader) {
+      const auth = await requireUser(req);
+      authedUser = auth.user || null;
+      if (authedUser) {
+        const acctRl = await checkRateLimit(`acct:${authedUser.id}:generate`, { max: 60 });
+        if (!acctRl.ok) {
+          reportRateLimit({ req, route: "/api/generate" });
+          return NextResponse.json(
+            { error: "Too many requests. Please slow down and try again shortly." },
+            { status: 429, headers: { "Retry-After": String(acctRl.retryAfter) } }
+          );
+        }
+      }
+    }
     // CONCEPT DRILL (increment 3, RANKS_PLAN §12.3): when the request names a
     // curriculum `conceptKey`, generate a question TARGETING that concept, framed at
     // its rank's level. The key is allow-listed SERVER-SIDE via conceptByKey (so a
@@ -117,15 +138,14 @@ export async function POST(req) {
     // bounded: +1 band, inside the ≤1-above-stored-level clamp /api/score applies.
     let drillState = "grey";
     if (drill) {
-      if (req.headers.get("authorization")) {
-        const auth = await requireUser(req);
-        const sb = auth.user ? getSupabaseAdmin() : null;
+      if (authedUser) {
+        const sb = getSupabaseAdmin();
         if (sb) {
           try {
             const { data } = await sb
               .from("concept_mastery")
               .select("attempts, green_hits, last_quality, best_quality")
-              .eq("user_id", auth.user.id)
+              .eq("user_id", authedUser.id)
               .eq("subject", subject)
               .eq("concept_key", drill.key)
               .maybeSingle();
@@ -141,7 +161,10 @@ export async function POST(req) {
             console.error("[/api/generate] concept_mastery read", e); // neutral band on a read failure
           }
         }
-      } else if (["green", "yellow", "red"].includes(masteryState)) {
+      } else if (!hasAuthHeader && ["green", "yellow", "red"].includes(masteryState)) {
+        // The body hint is honored ONLY for true guests (no auth header). A PRESENTED but
+        // invalid token must NOT honor it (it would let a signed-out-but-spoofing client
+        // pick its band) — authedUser is null AND hasAuthHeader is true → neither branch.
         drillState = masteryState;
       }
     }

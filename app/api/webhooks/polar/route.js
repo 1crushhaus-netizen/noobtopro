@@ -104,6 +104,9 @@ export async function POST(req) {
       p_polar_subscription_id: typeof sub.id === "string" ? sub.id : null,
       p_current_period_end: isoOrNull(sub.currentPeriodEnd),
       p_cancel_at_period_end: sub.cancelAtPeriodEnd === true,
+      // The event's source modified-time, so upsert_subscription can ignore an out-of-order
+      // or replayed delivery (a stale `active` after a later cancel can't resurrect access).
+      p_event_modified_at: isoOrNull(sub.modifiedAt || sub.createdAt),
     });
     if (error) throw error;
     return NextResponse.json({ received: true });

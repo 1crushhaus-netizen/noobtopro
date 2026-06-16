@@ -81,6 +81,22 @@ describe("POST /api/webhooks/polar", () => {
     }));
   });
 
+  it("forwards the event's modified time as p_event_modified_at (ordering guard input)", async () => {
+    hooks.verify.mockReturnValue({
+      type: "subscription.updated",
+      data: {
+        id: "sub_1", status: "active", productId: "prod_pro", customerId: "cus_1",
+        currentPeriodEnd: new Date("2026-12-31T00:00:00Z"),
+        modifiedAt: new Date("2026-06-10T12:00:00Z"),
+        cancelAtPeriodEnd: false, customer: { externalId: "u1" },
+      },
+    });
+    const rpc = vi.fn(async () => ({ error: null }));
+    admin.getAdmin.mockReturnValue({ rpc });
+    expect((await webhookPOST(hookReq())).status).toBe(200);
+    expect(rpc.mock.calls[0][1].p_event_modified_at).toBe("2026-06-10T12:00:00.000Z");
+  });
+
   it("falls back to metadata.user_id when there is no customer external id", async () => {
     hooks.verify.mockReturnValue({
       type: "subscription.updated",

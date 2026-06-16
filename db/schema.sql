@@ -48,6 +48,12 @@ alter table public.scores add column if not exists glicko jsonb;
 -- leaderboard until they earn 5 server-graded attempts).
 alter table public.scores add column if not exists server_graded int not null default 0;
 alter table public.scores add column if not exists verified boolean not null default false;
+-- DB-level integrity backstop (migration 0019): score is the ranking column; the [0,350]
+-- bound was previously enforced ONLY in the RPC clamps. Idempotent (drop-then-add).
+alter table public.scores drop constraint if exists scores_score_range;
+alter table public.scores add constraint scores_score_range check (score >= 0 and score <= 350);
+-- Index the leaderboard's hottest filter (leaderboard_tiers reads verified=true) — was a full scan.
+create index if not exists scores_verified_idx on public.scores (verified) where verified = true;
 
 create table if not exists public.attempts (
   id bigint generated always as identity primary key,
@@ -745,6 +751,9 @@ create table if not exists public.concept_guides (
   foreign key (subject, topic) references public.concept_topics(subject, slug)
 );
 alter table public.concept_guides enable row level security;
+-- Covering index for the (subject, topic) FK (migration 0019; live Supabase advisor) —
+-- speeds anonymous browse + FK maintenance.
+create index if not exists concept_guides_subject_topic_idx on public.concept_guides (subject, topic);
 -- Public read of ONLY vetted, ready guides; writes remain service-role-only.
 drop policy if exists "public read ready guides" on public.concept_guides;
 create policy "public read ready guides"
@@ -1144,6 +1153,10 @@ create table if not exists public.item_difficulty (
 );
 alter table public.item_difficulty enable row level security;  -- no policy => service-role only
 revoke insert, update, delete, truncate on public.item_difficulty from anon, authenticated;
+-- DB-level backstop (migration 0019): difficulty drives population ranking; bump_item_difficulty
+-- already clamps to [0,350] (and rejects NaN, which sorts above 350) — this guards a direct write.
+alter table public.item_difficulty drop constraint if exists item_difficulty_range;
+alter table public.item_difficulty add constraint item_difficulty_range check (difficulty >= 0 and difficulty <= 350);
 
 -- Atomic difficulty nudge (seed-lazy upsert). The Elo math lives in JS (one source of
 -- truth); this just applies the computed delta as an atomic, clamped increment.
@@ -1306,8 +1319,18 @@ create table if not exists public.subscriptions (
   polar_subscription_id text check (polar_subscription_id is null or char_length(polar_subscription_id) <= 200),
   current_period_end timestamptz,
   cancel_at_period_end boolean not null default false,
+  -- The SOURCE event's modified timestamp (Polar subscription.modified_at). Used to ignore
+  -- out-of-order / replayed webhook deliveries so a stale `active` can't resurrect access
+  -- after a later cancel/revoke (migration 0020).
+  event_modified_at timestamptz,
   updated_at timestamptz not null default now()
 );
+-- Idempotent add for DBs created before 0020.
+alter table public.subscriptions add column if not exists event_modified_at timestamptz;
+-- One Polar subscription maps to exactly ONE account (migration 0019; backstops the
+-- webhook cross-account guard) — partial UNIQUE over the non-null ids.
+create unique index if not exists subscriptions_polar_subscription_id_uniq
+  on public.subscriptions (polar_subscription_id) where polar_subscription_id is not null;
 -- SELECT-own under RLS (the user reads their OWN Pro state for the UI); all writes
 -- revoked — only the service-role upsert_subscription RPC writes it (same pattern as
 -- concept_mastery). The columns hold no secrets, so exposing the owner's own row is fine.
@@ -1322,6 +1345,11 @@ grant select on public.subscriptions to authenticated;
 -- signed-in user can never self-grant Pro (table is SELECT-only; not granted to
 -- authenticated). COALESCE on the optional ids keeps a stored id when a later event
 -- omits it; status / period-end / cancel flag always reflect the newest event.
+-- migration 0020 adds p_event_modified_at + an ORDERING GUARD: an event whose source
+-- modified-time is OLDER than the row's last applied event is ignored (a stale/replayed
+-- `active` can't resurrect access after a later cancel/revoke). Events with no modified
+-- time fall back to apply (no regression).
+drop function if exists public.upsert_subscription(uuid, text, text, text, text, timestamptz, boolean);
 create or replace function public.upsert_subscription(
   p_user uuid,
   p_status text,
@@ -1329,7 +1357,8 @@ create or replace function public.upsert_subscription(
   p_polar_customer_id text default null,
   p_polar_subscription_id text default null,
   p_current_period_end timestamptz default null,
-  p_cancel_at_period_end boolean default false
+  p_cancel_at_period_end boolean default false,
+  p_event_modified_at timestamptz default null
 )
 returns void
 language plpgsql
@@ -1343,7 +1372,7 @@ begin
 
   insert into public.subscriptions as s
     (user_id, status, product_id, polar_customer_id, polar_subscription_id,
-     current_period_end, cancel_at_period_end, updated_at)
+     current_period_end, cancel_at_period_end, event_modified_at, updated_at)
   values
     (p_user,
      left(coalesce(nullif(p_status, ''), 'inactive'), 40),
@@ -1352,6 +1381,7 @@ begin
      left(p_polar_subscription_id, 200),
      p_current_period_end,
      coalesce(p_cancel_at_period_end, false),
+     p_event_modified_at,
      now())
   on conflict (user_id) do update set
     status                = excluded.status,
@@ -1360,8 +1390,13 @@ begin
     polar_subscription_id = coalesce(excluded.polar_subscription_id, s.polar_subscription_id),
     current_period_end    = excluded.current_period_end,
     cancel_at_period_end  = excluded.cancel_at_period_end,
-    updated_at            = now();
+    event_modified_at     = coalesce(excluded.event_modified_at, s.event_modified_at),
+    updated_at            = now()
+  -- Apply UNLESS the incoming event is strictly older than the last applied one.
+  where s.event_modified_at is null
+     or excluded.event_modified_at is null
+     or excluded.event_modified_at >= s.event_modified_at;
 end;
 $$;
-revoke all on function public.upsert_subscription(uuid, text, text, text, text, timestamptz, boolean) from public, anon, authenticated;
-grant execute on function public.upsert_subscription(uuid, text, text, text, text, timestamptz, boolean) to service_role;
+revoke all on function public.upsert_subscription(uuid, text, text, text, text, timestamptz, boolean, timestamptz) from public, anon, authenticated;
+grant execute on function public.upsert_subscription(uuid, text, text, text, text, timestamptz, boolean, timestamptz) to service_role;
