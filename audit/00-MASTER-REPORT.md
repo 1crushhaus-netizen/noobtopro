@@ -92,6 +92,31 @@ items are intentionally deferred with rationale.
 **Additional deploy/operator actions (P1):** apply migrations **0019, 0020, 0021**; set
 `NEXT_PUBLIC_SITE_URL` for preview deploys; enable Supabase leaked-password protection.
 
+## 1d. P2 remediation status (this PR)
+
+The concrete P2s are fixed; the remainder are either accepted-with-rationale (architectural /
+inherent / by-design) or deferred to a focused follow-up. Full suite green (859); build passes.
+
+**Fixed ✅ (by domain):**
+- **01 Security:** webhook replay/ordering (via P1), `POLAR_SUCCESS_URL` validation, security_events PII retention prune (0022).
+- **03 API:** admin/action body-size cap, env-budget honors explicit 0, fail-closed/refund tests; image decoded-size already capped.
+- **04 DB:** concept_guides + subscriptions indexes (0019), security_events/concept_reports retention (0022), 0010 doc.
+- **05 Scoring:** stale anchor comments, `blend()` NaN/Infinity contract, item_difficulty min-attempts floor, farm-bound test.
+- **06 LLM:** generation content gate (via P1); confirmed no full-prompt console logging.
+- **07 Frontend:** stable keys, memoized hot recomputations, Icon lookup-map+memo, module-scope FAQ JSON-LD, useScrolled guard, practice-failure retry, getFullYear hoist (Landing), useCallback on stable props.
+- **08 Testing/CI:** orphaned validators wired into `npm run validate` + CI; generate malformed-output + rate-limit fail-closed/refund tests; coverage gate (P1).
+- **09 Marketing:** title template, currency consistency (€0/€9.99), keywords + Organization/WebSite/SoftwareApplication/Offer JSON-LD.
+- **10 DevOps:** Dependabot (npm + actions), vercel.json region/memory, patch-refresh of prod deps.
+- **11 Docs:** README slimmed + audit runbook extracted, wrong test counts removed, stale migration refs, CODE_OF_CONDUCT, deploy docs reference Pro/Polar.
+- **12 A11y:** dark `--faint` AA, color-only cues (progress dots, gain/loss glyphs), title-only→aria-label, reduced-motion `[data-revealbar]`, guest sign-in <540px, question overflow-wrap, AdminDashboard confirm modal, leaderboard legend.
+- **14 Live env:** FK index (0019), region pin (vercel.json).
+
+**Accepted with rationale (no code change needed / inherent):** CSP `unsafe-inline` (output is React-escaped, no XSS; nonce-CSP is a documented next step); entitlement/auth caching (correctness over micro-perf); prompt-injection passthrough + injection-regex + extractJSON (rubric clamp is the real defense, fail-closed in practice); numericVerify CPU (sandbox + 240-char cap); migration idempotency / schema-drift (schema.sql is canonical + invariant tests); rate_limits/leaderboard recompute (best-effort / index-backed); `_valid_glicko`/diag-step TTL (bounded by the verified gate + below-level damper); curriculum notes (band-vs-rank, Doctorate content roadmap, seed dedup).
+
+**Deferred to a focused follow-up:** Landing → server component + JSON-LD-in-metadata (uses client hooks); social proof + email capture (no fabrication / needs backend); `inert` older-browser fallback (browser-support decision); leaderboard materialized-view caching.
+
+**Operator notes (config, not code):** enable Supabase leaked-password protection; prefer `ADMIN_USER_IDS`; confirm HSTS-preload apex readiness.
+
 ## 2. Consolidated counts
 
 Raw per-domain counts (before cross-domain de-duplication):
