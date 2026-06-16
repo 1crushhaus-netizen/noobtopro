@@ -1,0 +1,35 @@
+# Dependabot keeps dependencies fresh and surfaces CVEs after launch.
+# Covers BOTH the npm tree and the GitHub Actions used by CI — the latter also
+# addresses pinning Actions to mutable major tags (e.g. actions/checkout@v4):
+# Dependabot bumps them as new versions ship.
+version: 2
+updates:
+  # Application + dev/test dependencies (package.json / package-lock.json).
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps-dev"
+    groups:
+      # Batch low-risk minor/patch bumps into one PR to cut review noise;
+      # majors still come as individual PRs so they can be gated deliberately.
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions used by the CI workflow (.github/workflows/ci.yml).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "ci"

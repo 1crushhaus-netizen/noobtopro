@@ -6,6 +6,26 @@
 
 > **Status: COMPLETE — deployed and live.** This was the original deployment plan; all phases below were executed and the app is live in production (see README §2 for the live URLs). It is retained as a **historical record of how the deployment was done** — the future/"tell me to proceed" tense throughout reflects its origin as a pre-deploy plan. For current state, the README is the source of truth.
 
+> **⚠️ This plan predates monetization.** The phases below (Vercel → Groq →
+> Supabase → Google OAuth) stand up the **free** app. The paid **Pro** tier
+> (Polar.sh, €9.99/mo) was added later and has its **own** config-only runbook —
+> do **not** infer Pro setup from this document. For Pro, see
+> **[`PRO_GO_LIVE.md`](./PRO_GO_LIVE.md)** (the step-by-step sandbox → production
+> go-live) and **[`MONETIZATION_PLAN.md`](./MONETIZATION_PLAN.md)** (the
+> decisions + what shipped). In short, Pro needs: a Supabase migration
+> (`db/migrations/0017_pro_subscriptions.sql`), the `POLAR_*` env in Vercel
+> (`POLAR_ACCESS_TOKEN`, `POLAR_SERVER`, `POLAR_PRODUCT_ID_PRO`,
+> `POLAR_WEBHOOK_SECRET`, `POLAR_SUCCESS_URL`, `NEXT_PUBLIC_PRO_ENABLED`), and a
+> signature-verified Polar webhook at `https://<canonical-domain>/api/webhooks/polar`.
+>
+> **Canonical domain:** the live production origin is **`https://noobto.pro`**
+> (matches `SITE_URL` in `app/layout.js`; the `*.vercel.app` URLs used as
+> examples throughout this historical plan still resolve, but `noobto.pro` is
+> the origin OAuth/OG/Polar are configured against). When you configure the
+> **Supabase Redirect URLs allow-list** (Phase 4D below) and the Polar
+> success/webhook URLs, use `https://noobto.pro/**` as the canonical entry (plus
+> the `https://noobtopro-*.vercel.app/**` preview wildcard).
+
 ---
 
 ## 1. How to use this plan
