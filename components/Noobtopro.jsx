@@ -20,6 +20,8 @@ import { getSupabase, isSupabaseConfigured, signInWithProvider, signOutUser, PRO
 import { track } from "@vercel/analytics";
 import { isActiveSubscription } from "@/lib/proStatus";
 import { resolveConceptKey, conceptByKey, conceptLabel } from "@/lib/curriculum";
+import { effectiveScores, effectiveSubjectScore, pickPracticeConcept } from "@/lib/promotion";
+import { applyMasteryUpdates } from "@/lib/mastery";
 import dynamic from "next/dynamic";
 import Icon from "@/components/Icon";
 import SignIn from "@/components/SignIn";
@@ -419,6 +421,10 @@ export default function Noobtopro() {
   // uncached loadMastery round-trip (two per session). A load failure leaves this {}
   // so both surfaces just render uncolored/ungated chips (nothing is lost).
   const [mastery, setMastery] = useState({});
+  // True once the mastery map has loaded at least once — gates the mastery-blended
+  // display score so a fresh mount shows raw depth rather than flashing a coverage-zeroed
+  // rank before the map arrives. Stays true after the first load (re-fetches just update).
+  const [masteryLoaded, setMasteryLoaded] = useState(false);
 
   const [pSubject, setPSubject] = useState(null);
   const [pQuestion, setPQuestion] = useState(null);
@@ -607,6 +613,10 @@ export default function Noobtopro() {
       if (res && res.mastery) setMastery(res.mastery);
     } catch {
       /* leave mastery as-is — uncolored chips */
+    } finally {
+      // Mark the blend safe to apply even on a failed/empty load: the gate's only job
+      // is to suppress the pre-load flash, not to hide a legitimately-empty map.
+      setMasteryLoaded(true);
     }
   }
 
@@ -1163,12 +1173,26 @@ export default function Noobtopro() {
       // practicing it just generates an easy question instead of crashing.
       const s = scores?.[subject] || { score: 0, weakConcepts: [] };
       const recentKey = `practice:${subject}`;
+      // CLOSE THE TAGGING GAP (owner decision 2026-06-17): route generic practice through
+      // a real curriculum concept so the attempt accrues MASTERY (untagged practice never
+      // colored a concept, so coverage — and the mastery-blended score — could never rise
+      // from practicing). The picker targets a not-yet-mastered concept at the learner's
+      // level; the server validates the conceptKey, frames the question on it, tags it, and
+      // signs it into the token so the graded attempt updates that concept's mastery. A
+      // forged/unknown key would just degrade to ordinary level-based practice.
+      const target = pickPracticeConcept(mastery, subject, s.score);
       const data = await api("/api/generate", {
         kind: "practice",
         subject,
         score: s.score,
         weakConcepts: s.weakConcepts || [],
         recentQuestions: getRecentQuestions(recentKey),
+        ...(target
+          ? {
+              conceptKey: target.key,
+              ...(target.masteryState && target.masteryState !== "grey" ? { masteryState: target.masteryState } : {}),
+            }
+          : {}),
       });
       // A newer practice (another startPractice, or "Practice this problem" from
       // Learn) started while this generation was in flight — drop this stale
@@ -1322,9 +1346,21 @@ export default function Noobtopro() {
         // Defensive: a malformed response must not put an undefined subjectScore into
         // state (which would crash the dashboard/livescore reads) — surface an error.
         if (!data || !data.subjectScore) throw new Error("Grading failed. Please try again.");
+        // The headline subject number is the MASTERY-BLENDED score (depth × coverage), so
+        // the delta shown beside it must be the BLENDED delta — the raw depth delta
+        // (data.delta) can differ (e.g. a strong attempt that doesn't newly master a
+        // concept lifts depth but not the blended rank). Apply this attempt's mastery
+        // updates optimistically so the new coverage is reflected at once; refreshMastery
+        // below reconciles with the server's authoritative counters.
+        const masteryUpdates = Array.isArray(data.masteryUpdates) ? data.masteryUpdates : [];
+        const nextMastery = masteryUpdates.length ? applyMasteryUpdates(mastery, masteryUpdates) : mastery;
+        const blendedDelta =
+          effectiveSubjectScore(data.subjectScore.score, nextMastery, pSubject) -
+          effectiveSubjectScore(prev.score, mastery, pSubject);
+        if (masteryUpdates.length) setMastery(nextMastery);
         setScores((s) => ({ ...s, [pSubject]: data.subjectScore }));
         if (data.attempt) setHistory((h) => [...h, data.attempt]);
-        setScoreDelta(data.delta);
+        setScoreDelta(blendedDelta);
         setFeedback(data); // coaching fields (reasoningScore/rubric/hints) are top-level
       } else {
         // Guest: grade only, then run the SAME unified Glicko-2 axis update LOCALLY and
@@ -1376,6 +1412,17 @@ export default function Noobtopro() {
           glicko: newGlicko,
         };
         const updatedScores = { ...scores, [pSubject]: updatedSubject };
+        // Generic practice is now concept-tagged (the picker in startPractice), so every
+        // attempt accrues mastery — building the coverage that drives the blended score.
+        const guestMasteryUpdates = pQuestion.conceptKey
+          ? [{ subject: pSubject, conceptKey: pQuestion.conceptKey, quality: reasoningScore }]
+          : [];
+        // Blended delta for the headline (depth × coverage), applying this attempt's
+        // mastery optimistically so a newly-mastered concept's lift shows immediately.
+        const nextMastery = guestMasteryUpdates.length ? applyMasteryUpdates(mastery, guestMasteryUpdates) : mastery;
+        const blendedDelta =
+          effectiveSubjectScore(updatedScore, nextMastery, pSubject) -
+          effectiveSubjectScore(prev.score, mastery, pSubject);
         // Atomic local write of the changed subject + its attempt. Send ONLY the
         // changed subject (mirrors the server upsert) so the other two aren't rewritten.
         const st = await saveProgress({ [pSubject]: updatedSubject }, {
@@ -1412,15 +1459,13 @@ export default function Noobtopro() {
             },
           },
         },
-        // Mastery counters for a concept-tagged attempt (a drill from a concept page);
-        // generic practice has no conceptKey → no update. The store allow-lists the key.
-        pQuestion.conceptKey
-          ? [{ subject: pSubject, conceptKey: pQuestion.conceptKey, quality: reasoningScore }]
-          : undefined);
+        // Mastery counters for the concept-tagged attempt (the store allow-lists the key).
+        guestMasteryUpdates.length ? guestMasteryUpdates : undefined);
         if (myRun !== practiceRun.current) return; // abandoned during the save round-trip
+        if (guestMasteryUpdates.length) setMastery(nextMastery); // reflect new coverage at once
         if (st && st.history) setHistory(st.history); // null = couldn't refresh; keep current
         setScores(updatedScores);
-        setScoreDelta(delta);
+        setScoreDelta(blendedDelta);
         setFeedback({ ...r, rationale });
       }
       // The composer/img unmounts once feedback is truthy (the graded view renders),
@@ -1701,7 +1746,10 @@ export default function Noobtopro() {
             ...(user && isAdmin ? [{ id: "admin", label: "Admin", icon: "shield", active: view === "admin", onClick: () => setView("admin") }] : []),
           ] : undefined}
           user={chrome ? user : undefined}
-          scores={chrome ? scores : undefined}
+          // The nav's overall-rank chip reflects MASTERY too: pass the mastery-blended
+          // scores (depth × coverage) once the map has loaded, raw depth before then (so
+          // the chip doesn't flash a coverage-zeroed rank on a fresh mount).
+          scores={chrome ? (masteryLoaded && scores ? effectiveScores(scores, mastery) : scores) : undefined}
           signIn={
             // Sign-in button: in app chrome for a guest; on chrome-less non-intro
             // stages for a returning guest. (The intro/sign-in screens surface their
@@ -1767,6 +1815,7 @@ export default function Noobtopro() {
             loadLeaderboard={loadLeaderboard}
             loadReviews={loadReviews}
             mastery={mastery}
+            masteryReady={masteryLoaded}
             onStartDiagnostic={() => { setView("practice"); beginDiagnostic(); }}
             onPractice={(s) => { setView("practice"); startPractice(s); }}
             onLearn={openLearn}
@@ -1978,15 +2027,26 @@ export default function Noobtopro() {
                 <div className="np-grid3">
                   {ORDER.map((k) => {
                     const s = scores[k] || { score: 0, weakConcepts: [], comment: "" };
+                    // Headline = the mastery-blended score (depth × coverage); raw depth
+                    // until the mastery map has loaded (avoids a pre-load rank flash).
+                    const shown = masteryLoaded ? effectiveSubjectScore(s.score, mastery, k) : (s.score || 0);
                     return (
                       <div key={k} className="np-card np-lift np-scorecard">
                         <div className="np-scorehead">
                           <SubjectGlyph subject={k} size={20} />
                           <span className="np-scorelabel">{SUBJECTS[k].label}</span>
                         </div>
-                        <Ring value={s.score} color={SUBJECTS[k].color} label={SUBJECTS[k].label} />
+                        <Ring value={shown} color={SUBJECTS[k].color} label={SUBJECTS[k].label} />
                         {/* A11y P1-2: the rank band is small meaningful text → accessible text variant. */}
-                        <div className="np-bandtag" style={{ color: SUBJECT_TEXT[k] }}>{band(s.score)}</div>
+                        <div className="np-bandtag" style={{ color: SUBJECT_TEXT[k] }}>{band(shown)}</div>
+                        {/* When mastery coverage holds the rank below the reasoning depth
+                            (e.g. straight after the diagnostic, before anything is mastered),
+                            surface the depth so the score isn't an unexplained 0. */}
+                        {masteryLoaded && shown < (s.score || 0) && (
+                          <div className="np-comment" style={{ color: "var(--muted)" }}>
+                            Reasoning depth {s.score} — master {SUBJECTS[k].label} concepts in Learn to raise your rank.
+                          </div>
+                        )}
                         {s.comment && <div className="np-comment">{s.comment}</div>}
                         {(() => {
                           // Resolve each stored weak concept onto a REAL curriculum
@@ -2075,20 +2135,28 @@ export default function Noobtopro() {
                       {/* FRONTEND P1-3: guard the BASE — `scores` can be null on the
                           partial-baseline path (a subject practiced before it was ranked),
                           so `scores[pSubject]` would throw before the `?.` ran. */}
+                      {/* The live score is the MASTERY-BLENDED rank (depth × coverage); raw
+                          depth until the mastery map has loaded. */}
+                      {(() => {
+                        const depthNow = scores?.[pSubject]?.score ?? 0;
+                        const liveScore = masteryLoaded ? effectiveSubjectScore(depthNow, mastery, pSubject) : depthNow;
+                        return (
                       <span
                         className="np-livescore"
                         style={{ borderColor: SUBJECTS[pSubject].color }}
                         role="status"
                         aria-live="polite"
-                        aria-label={`Current score ${scores?.[pSubject]?.score ?? 0} of 350${scoreDelta ? `, ${scoreDelta > 0 ? "up" : "down"} ${Math.abs(scoreDelta)}` : ""}`}
+                        aria-label={`Current score ${liveScore} of 350${scoreDelta ? `, ${scoreDelta > 0 ? "up" : "down"} ${Math.abs(scoreDelta)}` : ""}`}
                       >
-                        {scores?.[pSubject]?.score ?? 0}<span style={{ color: "var(--muted)" }}>/350</span>
+                        {liveScore}<span style={{ color: "var(--muted)" }}>/350</span>
                         {scoreDelta !== null && scoreDelta !== 0 && (
                           <span style={{ color: deltaColor(scoreDelta), marginLeft: 6 }}>
                             {scoreDelta > 0 ? "+" : ""}{scoreDelta}
                           </span>
                         )}
                       </span>
+                        );
+                      })()}
                     </div>
                     <div className="np-card np-question">{pQuestion.question}</div>
 

@@ -14,6 +14,21 @@ const scores = {
   chemistry: { score: 0, weakConcepts: [], comment: "" },
 };
 
+const ALL_RANKS = ["elementary", "middle", "high", "university", "doctorate"];
+const GREEN = { attempts: 2, greenHits: 2, lastQuality: 85, bestQuality: 90 };
+// Every concept of every subject green → coverage 1, so the mastery-blended score
+// (depth × coverage) equals the raw depth (the fixture for "full mastery = full rank").
+function fullCoverageAll() {
+  const m = {};
+  for (const subject of ["math", "physics", "chemistry"]) {
+    const subj = {};
+    for (const rank of ALL_RANKS) for (const c of conceptsFor(subject, rank)) subj[c.key] = { ...GREEN };
+    m[subject] = subj;
+  }
+  return m;
+}
+const totalConcepts = (subject) => ALL_RANKS.reduce((a, r) => a + conceptsFor(subject, r).length, 0);
+
 // A baseline + two graded attempts → 3 line points, 2 bars, 2 rationales.
 const history = [
   { type: "baseline", t: "t0", totalAfter: 40, phdAfter: 13 },
@@ -58,7 +73,9 @@ describe("Dashboard — signed-in identity + KPIs + by-subject", () => {
   });
 
   it("renders ONE deduped KPI cluster (total, PhD index, problems graded)", () => {
-    render(<Dashboard user={user} scores={scores} history={history} onPractice={() => {}} />);
+    // The KPIs are MASTERY-BLENDED (depth × coverage). With the curriculum fully
+    // mastered the blend is the identity, so the totals equal the raw depth.
+    render(<Dashboard user={user} scores={scores} mastery={fullCoverageAll()} history={history} onPractice={() => {}} />);
     // total = 210+105+0 = 315; phdIndex = round(315/3) = 105; attempts = 2.
     expect(statCard("Total points").querySelector(".np-statnum").textContent).toContain("315");
     expect(statCard("Doctorate index").querySelector(".np-statnum").textContent).toContain("105");
@@ -76,35 +93,40 @@ describe("Dashboard — signed-in identity + KPIs + by-subject", () => {
     expect(screen.getByText("Chemistry")).toBeTruthy();
   });
 
-  it("shows per-subject rank band chips (the overall rank chip moved to the sidebar identity)", () => {
-    render(<Dashboard user={user} scores={scores} history={history} onPractice={() => {}} />);
-    // physics 105 → "Middle" on its by-subject band chip.
+  it("shows per-subject rank band chips reflecting the mastery-blended score", () => {
+    // physics depth 105, fully mastered → blended 105 → "Middle" on its by-subject chip.
+    render(<Dashboard user={user} scores={scores} mastery={fullCoverageAll()} history={history} onPractice={() => {}} />);
     expect(screen.getAllByText(/Middle/i).length).toBeGreaterThan(0);
   });
 });
 
-describe("Dashboard — §7 curriculum breadth gate (by-subject, display-layer)", () => {
+describe("Dashboard — mastery-blended score (by-subject, display-layer)", () => {
   // Every math elementary concept green (≥2 hits at ≥70 — lib/mastery.js).
   function elementaryMathGreens() {
     const subj = {};
     for (const c of conceptsFor("math", "elementary")) {
-      subj[c.key] = { attempts: 2, greenHits: 2, lastQuality: 85, bestQuality: 90 };
+      subj[c.key] = { ...GREEN };
     }
     return { math: subj };
   }
 
-  it("with no mastery data, a scored subject is GATED: first-band chip + lock explanation; the score is untouched", () => {
+  it("with no mastery, a high-depth subject is BLENDED down to its coverage (0), surfacing the reasoning depth", () => {
     render(<Dashboard user={user} scores={scores} history={history} onPractice={() => {}} />);
-    // math score 210 → depth says University, but nothing is mastered → chip gated down.
+    // math depth 210, but 0 concepts mastered → blended score 0 → Elementary, not University.
     expect(screen.getAllByText("Elementary").length).toBeGreaterThan(0);
-    expect(screen.getByText(/Score at University: master the 21 remaining Elementary concepts in Learn to advance/)).toBeTruthy();
-    // The score itself is NOT capped (§11.3 Option B — label gating only).
-    expect(screen.getAllByText("210").length).toBeGreaterThan(0);
+    // The depth is surfaced (the learner's reasoning is recognized; it converts via mastery),
+    // and the row tells them what's left to master to raise the number.
+    expect(
+      screen.getByText(/Reasoning depth 210.*0\/\d+ mastered.*master \d+ more concepts in Learn to raise your score/)
+    ).toBeTruthy();
+    // The raw depth 210 is NOT shown as the headline anymore — coverage zeroes it.
+    expect(screen.queryAllByText("210").length).toBe(0);
   });
 
-  it("loads mastery via the injected loader and UNGATES bands whose lower curricula are covered", async () => {
+  it("loads mastery via the injected loader and the blended score reflects the new coverage", async () => {
+    const eCount = conceptsFor("math", "elementary").length;
+    const total = totalConcepts("math");
     const loadMastery = vi.fn(async () => ({ mastery: elementaryMathGreens() }));
-    // math depth = Middle; physics/chemistry at 0 so no OTHER subject is gated.
     const s = {
       math: { score: 105, weakConcepts: [], comment: "" },
       physics: { score: 0, weakConcepts: [], comment: "" },
@@ -112,15 +134,17 @@ describe("Dashboard — §7 curriculum breadth gate (by-subject, display-layer)"
     };
     render(<Dashboard user={user} scores={s} history={history} onPractice={() => {}} loadMastery={loadMastery} />);
     await waitFor(() => expect(loadMastery).toHaveBeenCalledTimes(1));
-    // Elementary fully covered → Foundational holds ungated; the next gate is Middle's set.
-    await waitFor(() => expect(screen.getByText(/Middle curriculum: 0\/23 mastered/)).toBeTruthy());
-    expect(screen.queryByText(/Score at Middle/)).toBeNull(); // no lock line for math
+    // The math row now reports its mastered elementary concepts toward total coverage.
+    await waitFor(() =>
+      expect(screen.getByText(new RegExp(`Reasoning depth 105.*${eCount}\\/${total} mastered`))).toBeTruthy()
+    );
   });
 
-  it("an ungated bottom-band subject shows its own rank's coverage progress (the nudge, not a lock)", () => {
+  it("an un-mastered subject surfaces its reasoning depth and how much is left to master", () => {
     render(<Dashboard user={user} scores={scores} history={history} onPractice={() => {}} />);
-    // chemistry score 0 → Elementary, ungated → progress toward Middle.
-    expect(screen.getByText(/Elementary curriculum: 0\/9 mastered/)).toBeTruthy();
+    const total = totalConcepts("chemistry");
+    // chemistry depth 0, nothing mastered → "Reasoning depth 0 · 0/<total> mastered".
+    expect(screen.getByText(new RegExp(`Reasoning depth 0.*0\\/${total} mastered`))).toBeTruthy();
   });
 
   it("the guest gate never calls loadMastery (no data fetches for guests)", () => {
