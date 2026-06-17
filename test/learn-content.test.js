@@ -5,7 +5,7 @@
 import { describe, it, expect } from "vitest";
 import { ORDER } from "@/lib/scoring";
 import { conceptsFor } from "@/lib/curriculum";
-import { PUBLIC_RANKS } from "@/lib/learn/seo";
+import { PUBLIC_RANKS, howToFromExample } from "@/lib/learn/seo";
 import {
   subjectRanks,
   subjectConceptCount,
@@ -80,6 +80,54 @@ describe("learn/content — getConceptData", () => {
     expect(await getConceptData("math", "doctorate", "quadratics")).toBe(null);
     expect(await getConceptData("math", "high", "not_a_concept")).toBe(null);
     expect(await getConceptData("math", "high", "__proto__")).toBe(null);
+  });
+});
+
+describe("learn/content — HowTo from real worked examples (AEO)", () => {
+  it("builds a valid HowTo for a real guide, mirroring its steps + a closing Answer", async () => {
+    const data = await getConceptData("math", "high", "quadratics");
+    const howTo = howToFromExample({
+      id: "https://noobto.pro/learn/math/high/quadratics#howto",
+      isPartOfId: "https://noobto.pro/learn/math/high/quadratics#resource",
+      label: data.concept.label,
+      example: data.guide.example,
+    });
+    expect(howTo["@type"]).toBe("HowTo");
+    expect(howTo.name).toBe("Quadratic functions & equations: worked example");
+    expect(howTo.description).toBe(data.guide.example.problem);
+    // one HowToStep per solution step, plus the closing Answer step.
+    expect(howTo.step).toHaveLength(data.guide.example.steps.length + 1);
+    expect(howTo.step.at(-1)).toMatchObject({ name: "Answer", text: data.guide.example.answer });
+    // every step has a non-empty name + full text, 1-based contiguous positions.
+    howTo.step.forEach((s, i) => {
+      expect(s["@type"]).toBe("HowToStep");
+      expect(s.position).toBe(i + 1);
+      expect(s.name.length).toBeGreaterThan(0);
+      expect(s.text.length).toBeGreaterThan(0);
+    });
+  });
+
+  it("yields a well-formed HowTo for EVERY concept guide in the library", async () => {
+    let checked = 0;
+    for (const subject of ORDER) {
+      for (const rank of PUBLIC_RANKS) {
+        for (const c of conceptsFor(subject, rank)) {
+          const data = await getConceptData(subject, rank, c.key);
+          // The guide may be absent for a not-yet-written concept; skip those.
+          if (!data || !data.guide) continue;
+          const howTo = howToFromExample({ label: c.label, example: data.guide.example });
+          expect(howTo).toBeTruthy();
+          expect(howTo["@type"]).toBe("HowTo");
+          // 3–8 validated steps + 1 answer step.
+          expect(howTo.step.length).toBeGreaterThanOrEqual(4);
+          expect(howTo.step.length).toBeLessThanOrEqual(9);
+          expect(howTo.step.every((s) => typeof s.text === "string" && s.text.trim())).toBe(true);
+          checked += 1;
+        }
+      }
+    }
+    // The whole library is guide-backed, so we should have checked all 224.
+    expect(checked).toBe(224);
   });
 });
 

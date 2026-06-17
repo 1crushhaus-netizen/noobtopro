@@ -18,6 +18,7 @@ import {
   clampDescription,
   slugToKey,
   socialMeta,
+  howToFromExample,
 } from "@/lib/learn/seo";
 import { getConceptData } from "@/lib/learn/content";
 
@@ -76,13 +77,22 @@ export default async function ConceptPage({ params }) {
     { name: label, path: canonical },
   ];
 
+  // The worked example as a schema.org HowTo (step-by-step solution) — the AEO
+  // type answer engines parse for "how to solve …" intent. Only present when the
+  // concept actually has a guide with an example (guide-less concepts skip it).
+  const resourceId = `${absolute(canonical)}#resource`;
+  const howToId = `${absolute(canonical)}#howto`;
+  const howTo = guide
+    ? howToFromExample({ id: howToId, isPartOfId: resourceId, label, example: guide.example })
+    : null;
+
   const jsonLd = [
     {
       // LearningResource is vocabulary-only (no Google rich result) but is the
       // most precise semantic type for an answer engine / LLM to understand a
       // concept-explanation page — exactly the AEO surface we care about.
       "@type": "LearningResource",
-      "@id": `${absolute(canonical)}#resource`,
+      "@id": resourceId,
       url: absolute(canonical),
       name: label,
       headline: label,
@@ -93,6 +103,9 @@ export default async function ConceptPage({ params }) {
       educationalLevel: RANK_SEO[rank].realWorld,
       teaches: label,
       about: { "@type": "Thing", name: label },
+      // Link the worked-example HowTo into the resource so the two nodes read as
+      // one connected explanation (the HowTo node itself is added below).
+      ...(howTo ? { hasPart: { "@id": howToId } } : {}),
       isPartOf: [
         { "@id": `${absolute(rankUrl(subject, rank))}#course` },
         { "@id": WEBSITE_ID },
@@ -100,6 +113,7 @@ export default async function ConceptPage({ params }) {
       author: { "@id": ORG_ID },
       publisher: { "@id": ORG_ID },
     },
+    ...(howTo ? [howTo] : []),
     breadcrumbList(crumbs),
   ];
 
