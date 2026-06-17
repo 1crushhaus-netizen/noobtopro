@@ -16,6 +16,7 @@ import {
   absolute,
   breadcrumbList,
   clampDescription,
+  conceptTitle,
   slugToKey,
   socialMeta,
   howToFromExample,
@@ -39,11 +40,13 @@ export async function generateMetadata({ params }) {
   const { subject, rank, concept } = await params;
   const data = await getConceptData(subject, rank, slugToKey(concept));
   if (!data) return {};
-  const title = `${data.concept.label} · ${subjectLabel(subject)} (${rankSeoLabel(rank)})`;
+  // `absolute` so the root template doesn't append " — noobtopro" (keeps the SERP
+  // title short — see conceptTitle). The branded form is kept for the share card.
+  const title = conceptTitle(subject, data.concept.label);
   const description = conceptDescription(data);
   const canonical = conceptUrl(subject, rank, concept);
   return {
-    title,
+    title: { absolute: title },
     description,
     alternates: { canonical },
     ...socialMeta({

@@ -22,6 +22,8 @@ import {
   isPublicRank,
   isPublicCell,
   rankSeoLabel,
+  subjectLabel,
+  conceptTitle,
   SUBJECT_SEO,
   RANK_SEO,
   stepName,
@@ -164,6 +166,38 @@ describe("learn/seo — JSON-LD hardening", () => {
       .replace(/\\u003e/g, ">")
       .replace(/\\u0026/g, "&");
     expect(JSON.parse(restored)).toEqual({ name: "x < y & z >" });
+  });
+});
+
+describe("learn/seo — conceptTitle (SERP <title> length)", () => {
+  it("is '<label> · <Subject>' with no rank or brand suffix", () => {
+    expect(conceptTitle("math", "Quadratic functions & equations")).toBe(
+      "Quadratic functions & equations · Mathematics"
+    );
+  });
+
+  it("keeps essentially every concept title within Google's truncation limit", () => {
+    let over = 0;
+    let worst = "";
+    for (const s of ORDER) {
+      for (const r of PUBLIC_RANKS) {
+        for (const c of conceptsFor(s, r)) {
+          const t = conceptTitle(s, c.label);
+          // title must be the compact form (subject kept, no brand suffix appended here)
+          expect(t.endsWith(subjectLabel(s))).toBe(true);
+          expect(t).not.toMatch(/noobtopro/);
+          if (t.length > 60) {
+            over += 1;
+            if (t.length > worst.length) worst = t;
+          }
+        }
+      }
+    }
+    // The old "<label> · <Subject> (<Rank>) — noobtopro" form put 157/224 over 60.
+    // The compact form leaves only a handful of inherently long labels (≤ 3), and
+    // none runs past ~65 chars.
+    expect(over).toBeLessThanOrEqual(3);
+    expect(worst.length).toBeLessThanOrEqual(66);
   });
 });
 

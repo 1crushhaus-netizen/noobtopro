@@ -2,7 +2,12 @@ import LegalLayout, { Section } from "@/components/LegalLayout";
 
 export const metadata = {
   title: "Privacy Policy", // root template appends " — noobtopro" (SEO P2-2)
-  description: "How noobtopro collects, uses, and protects your data.",
+  description:
+    "How noobtopro collects, uses, shares, and protects your data — covering accounts, learning content, progress, billing, analytics, and your privacy rights.",
+  // Self-referencing canonical: without this the page inherits the root layout's
+  // `canonical: "/"`, which made the sitemap-listed /privacy declare the homepage as
+  // its canonical ("non-canonical page in sitemap" audit warning).
+  alternates: { canonical: "/privacy" },
 };
 
 export default function PrivacyPage() {

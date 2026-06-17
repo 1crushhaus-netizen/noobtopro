@@ -2,7 +2,11 @@ import LegalLayout, { Section } from "@/components/LegalLayout";
 
 export const metadata = {
   title: "Terms of Service", // root template appends " — noobtopro" (SEO P2-2)
-  description: "The terms that govern your use of noobtopro.",
+  description:
+    "The terms governing your use of noobtopro: eligibility, accounts, acceptable use, Pro subscriptions, disclaimers, and the limits of an AI-graded skill rank.",
+  // Self-referencing canonical (see app/privacy/page.js) — avoids inheriting the
+  // root layout's `canonical: "/"`.
+  alternates: { canonical: "/terms" },
 };
 
 export default function TermsPage() {

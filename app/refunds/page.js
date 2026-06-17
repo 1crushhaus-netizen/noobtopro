@@ -2,7 +2,11 @@ import LegalLayout, { Section } from "@/components/LegalLayout";
 
 export const metadata = {
   title: "Refund & Cancellation Policy", // root template appends " — noobtopro" (SEO P2-2)
-  description: "How noobtopro Pro billing, cancellations, and refunds work.",
+  description:
+    "How noobtopro Pro billing, renewals, cancellations, and refunds work — including your EU/UK withdrawal rights and how to cancel anytime from your dashboard.",
+  // Self-referencing canonical (see app/privacy/page.js) — avoids inheriting the
+  // root layout's `canonical: "/"`.
+  alternates: { canonical: "/refunds" },
 };
 
 export default function RefundsPage() {

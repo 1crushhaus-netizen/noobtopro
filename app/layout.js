@@ -4,7 +4,6 @@ import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Analytics } from "@vercel/analytics/next";
-import { proIsAvailable } from "@/lib/polar";
 
 // Canonical production origin. metadataBase makes the auto-generated
 // opengraph-image / twitter-image URLs absolute, which crawlers and link
@@ -76,18 +75,20 @@ export const viewport = {
 // the nonce to execute; an injected inline script without it is blocked).
 const THEME_INIT = `(function(){try{var p=localStorage.getItem("np-theme");var t=p==="light"?"light":p==="system"&&window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.setAttribute("data-theme",t);}catch(e){document.documentElement.setAttribute("data-theme","dark");}})();`;
 
-// SEO P2-4: Organization + SoftwareApplication/Offer structured data for rich
-// results (brand knowledge-panel signals + product/offer snippets for a priced
-// SaaS). Server-rendered and unicode-escaped exactly like the Landing FAQ JSON-LD
+// SEO P2-4: Organization + WebSite structured data for brand knowledge-panel
+// signals. Server-rendered and unicode-escaped exactly like the Landing FAQ JSON-LD
 // so it ships in the SSR HTML and can never break out of the <script> as a plain
-// text child (no dangerouslySetInnerHTML). Claims stay truthful + price-consistent
-// with the Landing pricing card (€9.99/mo).
+// text child (no dangerouslySetInnerHTML).
 //
-// Built per-request (server-only) so the priced Pro Offer is emitted ONLY when Pro
-// is actually sellable (proIsAvailable() — POLAR_* configured). Advertising a priced
-// Offer for a tier nobody can buy is a Google Rich Results mismatch, so when Pro is
-// off the offers array carries the Free offer alone. lib/polar is server-only (reads
-// secrets, no NEXT_PUBLIC_*) — safe here since this is a server component.
+// NOTE: a `SoftwareApplication` node (with an Offer carrying the €9.99 price) was
+// removed here on purpose. Google's Rich Results validation treats SoftwareApplication
+// as requiring `aggregateRating` or `review` — and we have no real ratings to publish
+// (fabricating them violates Google's guidelines). Without a rating it can NEVER earn
+// the app rich result, yet it raised a "Google rich results validation error" on
+// EVERY page (the node lives in the root layout). Dropping it clears that audit error
+// with zero lost rich-result eligibility. The price is still conveyed by the visible
+// pricing card + the Landing copy. Re-add a SoftwareApplication/AggregateRating block
+// here only once there are genuine, displayed ratings to back it.
 function buildStructuredData() {
   // Authoritative profile URLs for the brand entity (Wikipedia/Wikidata, social,
   // Product Hunt, Crunchbase, …). Set NEXT_PUBLIC_SAME_AS to a comma-separated list
@@ -99,23 +100,6 @@ function buildStructuredData() {
     .map((s) => s.trim())
     .filter(Boolean);
 
-  const offers = [
-    {
-      "@type": "Offer",
-      name: "Free",
-      price: "0",
-      priceCurrency: "EUR",
-    },
-  ];
-  if (proIsAvailable()) {
-    offers.push({
-      "@type": "Offer",
-      name: "Pro",
-      price: "9.99",
-      priceCurrency: "EUR",
-      category: "subscription",
-    });
-  }
   return JSON.stringify({
     "@context": "https://schema.org",
     "@graph": [
@@ -151,16 +135,6 @@ function buildStructuredData() {
         description: DESCRIPTION,
         inLanguage: "en",
         publisher: { "@id": `${SITE_URL}/#organization` },
-      },
-      {
-        "@type": "SoftwareApplication",
-        name: "noobtopro",
-        description: DESCRIPTION,
-        url: SITE_URL,
-        applicationCategory: "EducationalApplication",
-        operatingSystem: "Web",
-        publisher: { "@id": `${SITE_URL}/#organization` },
-        offers,
       },
     ],
   }).replace(/[<>&]/g, (c) => ({ "<": "\\u003c", ">": "\\u003e", "&": "\\u0026" }[c]));
