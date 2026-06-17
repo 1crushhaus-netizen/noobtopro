@@ -11,7 +11,7 @@ import {
   RUBRIC_LABELS,
   lowestRubricDimensions,
 } from "@/lib/scoring";
-import { gatedRankFor } from "@/lib/promotion";
+import { effectiveScores, subjectRankView } from "@/lib/promotion";
 import { conceptLabel, resolveConceptKey } from "@/lib/curriculum";
 import Icon from "@/components/Icon";
 import { LineChart, BarChart, RadarChart, MiniBar } from "@/components/charts";
@@ -159,26 +159,31 @@ function KpiStats({ scores, attempts }) {
   );
 }
 
-// Per-subject score + a mini-bar + practice shortcut, with the §7 BREADTH-GATED
-// band underneath: the chip shows the COVERAGE-gated rank (lib/promotion.js —
-// display-layer only, the score itself is never capped here; §11.3 is open) and
-// the line tracks the binding curriculum cell ("master these to advance").
-function BySubject({ scores, mastery, onPractice }) {
+// Per-subject rank + a mini-bar + practice shortcut. The headline number is the
+// MASTERY-BLENDED score (lib/promotion.js — depth × the fraction of the curriculum
+// mastered, owner decision 2026-06-17): mastering concepts is what raises it. The line
+// underneath surfaces the underlying reasoning DEPTH (so a strong reasoner sees their
+// work is recognized — it converts to rank through mastery) and how much is left to
+// master. `masteryReady` guards the brief window before the map has loaded: until then
+// we show the raw depth rather than flashing a coverage-zeroed rank.
+function BySubject({ scores, mastery, masteryReady = true, onPractice }) {
   // Always exactly three rows (each with one gate line) → never overflows, so it
   // stays a plain (non-scroll) card (no cardbody/scrollbar-gutter).
   return (
     <div className="np-card np-dash-panel">
       <div className="np-charttitle" style={{ marginBottom: 12 }}>By subject</div>
       {ORDER.map((k) => {
-        const g = gatedRankFor(scores[k]?.score || 0, mastery, k);
+        const view = subjectRankView(scores[k]?.score || 0, mastery, k);
+        const num = masteryReady ? view.effective : view.depth;
+        const rankName = masteryReady ? view.rank.name : rankFor(view.depth).name;
         return (
           <div key={k} className="np-dash-subwrap">
             <div className="np-dash-subrow">
               <SubjectGlyph subject={k} width={16} />
               <span className="np-dash-sublabel">{SUBJECTS[k].label}</span>
-              <MiniBar value={scores[k]?.score || 0} color={SUBJECTS[k].color} />
+              <MiniBar value={num} color={SUBJECTS[k].color} />
               <span style={{ fontFamily: "var(--mono)", fontWeight: 700, width: 58, textAlign: "right" }}>
-                {scores[k]?.score || 0}<span style={{ color: "var(--muted)" }}>/350</span>
+                {num}<span style={{ color: "var(--muted)" }}>/350</span>
               </span>
               <button className="np-ghost" onClick={() => onPractice && onPractice(k)} style={{ whiteSpace: "nowrap" }}>Practice</button>
             </div>
@@ -186,22 +191,22 @@ function BySubject({ scores, mastery, onPractice }) {
               {/* A11y P1-2: the small rank pill is meaningful text, so it uses the
                   accessible per-subject TEXT variant (darker in light theme), not the
                   bright graphical accent. */}
-              <span className="np-dash-subband" style={{ "--subject": SUBJECT_TEXT[k] }}>{g.rank.name}</span>
-              {g.gated ? (
-                // The score qualifies for a higher band, but §7 holds the rank until
-                // the blocking curriculum is mastered (state in text, not color alone).
-                <span className="np-dash-subgatetext">
-                  <Icon name="lock" size={11} /> Score at {g.ungated.name}: master the{" "}
-                  {g.next.total - g.next.mastered} remaining {g.next.rankLabel} concept
-                  {g.next.total - g.next.mastered === 1 ? "" : "s"} in Learn to advance
-                </span>
-              ) : g.next ? (
-                <span className="np-dash-subgatetext">
-                  {g.next.complete
-                    ? `${g.next.rankLabel} curriculum complete, keep climbing`
-                    : `${g.next.rankLabel} curriculum: ${g.next.mastered}/${g.next.total} mastered`}
-                </span>
-              ) : null}
+              <span className="np-dash-subband" style={{ "--subject": SUBJECT_TEXT[k] }}>{rankName}</span>
+              {masteryReady && view.total > 0 && (
+                view.fullyMastered ? (
+                  <span className="np-dash-subgatetext">
+                    All {view.total} {SUBJECTS[k].label} concepts mastered — your full reasoning depth counts
+                  </span>
+                ) : (
+                  // The score qualifies for more, but it only counts as you MASTER the
+                  // curriculum (state in text, not color alone). Depth shown so the
+                  // learner sees their reasoning is recognized, awaiting mastery.
+                  <span className="np-dash-subgatetext">
+                    <Icon name="lock" size={11} /> Reasoning depth {view.depth} · {view.green}/{view.total} mastered — master{" "}
+                    {view.remaining} more concept{view.remaining === 1 ? "" : "s"} in Learn to raise your score
+                  </span>
+                )
+              )}
             </div>
           </div>
         );
@@ -295,10 +300,14 @@ function RecentMoves({ history }) {
   return (
     <div className="np-card np-dash-panel np-dash-moves">
       <div className="np-dash-cardhead">
-        <div className="np-charttitle" style={{ marginBottom: 4 }}>Why your rank moved</div>
-        <div className="np-chartsub" style={{ marginBottom: 0 }}>Your latest graded attempts, and why each gained or cost points.</div>
+        {/* These deltas are the REASONING-DEPTH movement per attempt (the quality engine).
+            The headline rank is depth × mastery coverage, so it moves as you master
+            concepts — kept distinct here so a depth gain that hasn't yet mastered a
+            concept still reads honestly. */}
+        <div className="np-charttitle" style={{ marginBottom: 4 }}>Why your reasoning moved</div>
+        <div className="np-chartsub" style={{ marginBottom: 0 }}>Your latest graded attempts, and the reasoning depth each gained or cost. Master concepts in Learn to turn depth into rank.</div>
       </div>
-      <div className="np-dash-cardbody" role="region" aria-label="Recent rank changes">
+      <div className="np-dash-cardbody" role="region" aria-label="Recent reasoning changes">
         {moves.length >= 1 ? (
           moves.map((m, i) => (
             <div key={m.t ? `${m.subject}:${m.t}` : i} style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 8 }}>
@@ -334,6 +343,10 @@ export default function Dashboard({
   // for both Dashboard + LearnTab). When provided, we use it directly and skip the
   // self-fetch; the loadMastery prop remains a fallback for standalone/legacy callers.
   mastery: masteryProp,
+  // True once the mastery map has actually loaded — gates the mastery-blended score so
+  // a fresh mount doesn't briefly flash a coverage-zeroed rank before mastery arrives.
+  // Defaults true for standalone/test callers that pass a ready map directly.
+  masteryReady = true,
   onStartDiagnostic,
   onPractice,
   onLearn,
@@ -370,6 +383,14 @@ export default function Dashboard({
   // fetches nothing); a load failure just renders ungated bands — nothing is lost.
   const [fetchedMastery, setFetchedMastery] = useState({});
   const mastery = masteryProp ?? fetchedMastery;
+  // The mastery-blended scores (depth × coverage) drive every headline rank/number on
+  // the dashboard (KPIs, identity chip, by-subject). The radar/profile stays on the raw
+  // scores (it's about reasoning quality, not coverage). Until mastery has loaded, fall
+  // back to the raw depth so the rank doesn't flash to zero on a fresh mount.
+  const effScores = useMemo(
+    () => (masteryReady ? effectiveScores(scores, mastery) : scores),
+    [scores, mastery, masteryReady]
+  );
   useEffect(() => {
     if (masteryProp != null) return; // mastery supplied by the parent — don't double-fetch
     if (!user || !loadMastery) return;
@@ -477,9 +498,9 @@ export default function Dashboard({
         <span
           className="np-dash-rankchip"
           title="Your overall rank"
-          aria-label={`Your overall rank: ${rankFor(phdIndex(scores)).name}`}
+          aria-label={`Your overall rank: ${rankFor(phdIndex(effScores)).name}`}
         >
-          {rankFor(phdIndex(scores)).name}
+          {rankFor(phdIndex(effScores)).name}
         </span>
       )}
       {/* Sign out lives once, in the global header (np-top) — no duplicate here. */}
@@ -522,10 +543,10 @@ export default function Dashboard({
       <div className="np-dash">
         {/* Identity (avatar + name + rank) lives in the app top nav — the bento's
             top row is purely the KPI cluster. */}
-        <KpiStats scores={scores} attempts={attempts} />
+        <KpiStats scores={effScores} attempts={attempts} />
         <RadarPanel scores={scores} onPractice={onPractice} onLearn={onLearn} />
         <div className="np-dash-mid" data-reveal style={{ "--ri": 1 }}>
-          <BySubject scores={scores} mastery={mastery} onPractice={onPractice} />
+          <BySubject scores={scores} mastery={mastery} masteryReady={masteryReady} onPractice={onPractice} />
           <Leaderboard loadLeaderboard={loadLeaderboard} />
         </div>
         <div className="np-dash-lead" data-reveal style={{ "--ri": 2 }}>
