@@ -22,8 +22,12 @@ import {
   isPublicRank,
   isPublicCell,
   rankSeoLabel,
+  subjectLabel,
+  conceptTitle,
   SUBJECT_SEO,
   RANK_SEO,
+  stepName,
+  howToFromExample,
 } from "@/lib/learn/seo";
 
 // Every curriculum key across every subject/rank — the universe the slug
@@ -162,6 +166,120 @@ describe("learn/seo — JSON-LD hardening", () => {
       .replace(/\\u003e/g, ">")
       .replace(/\\u0026/g, "&");
     expect(JSON.parse(restored)).toEqual({ name: "x < y & z >" });
+  });
+});
+
+describe("learn/seo — conceptTitle (SERP <title> length)", () => {
+  it("is '<label> · <Subject>' with no rank or brand suffix", () => {
+    expect(conceptTitle("math", "Quadratic functions & equations")).toBe(
+      "Quadratic functions & equations · Mathematics"
+    );
+  });
+
+  it("keeps essentially every concept title within Google's truncation limit", () => {
+    let over = 0;
+    let worst = "";
+    for (const s of ORDER) {
+      for (const r of PUBLIC_RANKS) {
+        for (const c of conceptsFor(s, r)) {
+          const t = conceptTitle(s, c.label);
+          // title must be the compact form (subject kept, no brand suffix appended here)
+          expect(t.endsWith(subjectLabel(s))).toBe(true);
+          expect(t).not.toMatch(/noobtopro/);
+          if (t.length > 60) {
+            over += 1;
+            if (t.length > worst.length) worst = t;
+          }
+        }
+      }
+    }
+    // The old "<label> · <Subject> (<Rank>) — noobtopro" form put 157/224 over 60.
+    // The compact form leaves only a handful of inherently long labels (≤ 3), and
+    // none runs past ~65 chars.
+    expect(over).toBeLessThanOrEqual(3);
+    expect(worst.length).toBeLessThanOrEqual(66);
+  });
+});
+
+describe("learn/seo — stepName", () => {
+  it("uses the first sentence of a step as the name", () => {
+    expect(stepName("Get both quantities into compatible units first. One cubic meter is 1000 liters.")).toBe(
+      "Get both quantities into compatible units first"
+    );
+  });
+
+  it("also breaks on a leading colon clause", () => {
+    expect(stepName("Time equals amount divided by rate: 54,000 L ÷ 8640 L/h = 6.25 h.")).toBe(
+      "Time equals amount divided by rate"
+    );
+  });
+
+  it("clamps a long single-sentence step at a word boundary with an ellipsis", () => {
+    const long = "word ".repeat(40).trim();
+    const out = stepName(long, 40);
+    expect(out.length).toBeLessThanOrEqual(41);
+    expect(out.endsWith("…")).toBe(true);
+    expect(out).not.toMatch(/\s…$/);
+  });
+
+  it("handles empty/nullish input", () => {
+    expect(stepName("")).toBe("");
+    expect(stepName(null)).toBe("");
+    expect(stepName(undefined)).toBe("");
+  });
+});
+
+describe("learn/seo — howToFromExample", () => {
+  const example = {
+    problem: "A pump moves water at 2.4 L/s into a 54 m³ tank. How long to fill it, in hours?",
+    steps: [
+      "Convert the tank volume to liters: 54 × 1000 = 54,000 L.",
+      "Convert the rate to liters per hour: 2.4 × 3600 = 8640 L/h.",
+      "Divide amount by rate: 54,000 ÷ 8640 = 6.25 h.",
+    ],
+    answer: "The pump fills the tank in 6.25 hours.",
+  };
+
+  it("builds a HowTo whose steps mirror the example plus a closing Answer step", () => {
+    const ht = howToFromExample({
+      id: "https://noobto.pro/learn/math/high/x#howto",
+      isPartOfId: "https://noobto.pro/learn/math/high/x#resource",
+      label: "Quantities & units",
+      example,
+    });
+    expect(ht["@type"]).toBe("HowTo");
+    expect(ht["@id"]).toBe("https://noobto.pro/learn/math/high/x#howto");
+    expect(ht.isPartOf).toEqual({ "@id": "https://noobto.pro/learn/math/high/x#resource" });
+    expect(ht.name).toBe("Quantities & units: worked example");
+    expect(ht.description).toBe(example.problem);
+    // 3 solution steps + 1 answer step, 1-based positions, full text preserved.
+    expect(ht.step).toHaveLength(4);
+    expect(ht.step.map((s) => s.position)).toEqual([1, 2, 3, 4]);
+    expect(ht.step.every((s) => s["@type"] === "HowToStep")).toBe(true);
+    expect(ht.step[0].text).toBe(example.steps[0]);
+    expect(ht.step[3]).toMatchObject({ name: "Answer", text: example.answer });
+  });
+
+  it("omits the answer step when there is no answer", () => {
+    const ht = howToFromExample({ label: "X", example: { problem: "p", steps: ["do a thing here."] } });
+    expect(ht.step).toHaveLength(1);
+    expect(ht.step[0].name).toBe("do a thing here");
+  });
+
+  it("returns null when there is no usable example (guide-less concept)", () => {
+    expect(howToFromExample({ label: "X", example: null })).toBeNull();
+    expect(howToFromExample({ label: "X", example: { problem: "p", steps: [] } })).toBeNull();
+    expect(howToFromExample({ label: "X", example: {} })).toBeNull();
+  });
+
+  it("serializes to escaped, valid JSON-LD (no script-breakout characters)", () => {
+    const ht = howToFromExample({
+      label: "Acids & bases",
+      example: { problem: "Compute pH when [H⁺] < 1e-3 & T is fixed.", steps: ["take log."], answer: "pH = 3." },
+    });
+    const s = serializeJsonLd(ht);
+    expect(s).not.toMatch(/[<>]/);
+    expect(s).toContain("\\u0026"); // the & in "Acids & bases" / the problem is escaped
   });
 });
 

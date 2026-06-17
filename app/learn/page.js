@@ -26,7 +26,7 @@ import {
 
 const TITLE = "Learn math, physics & chemistry by reasoning";
 const DESCRIPTION =
-  "A free, reasoning-first concept library: 224 guides across math, physics, and chemistry, each with a plain-English explanation, a fully worked example, and self-check questions.";
+  "Free, reasoning-first guides to 224 concepts in math, physics, and chemistry — each with a clear explanation, a worked example, and self-check questions.";
 
 export const metadata = {
   title: TITLE,

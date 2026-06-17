@@ -16,8 +16,10 @@ import {
   absolute,
   breadcrumbList,
   clampDescription,
+  conceptTitle,
   slugToKey,
   socialMeta,
+  howToFromExample,
 } from "@/lib/learn/seo";
 import { getConceptData } from "@/lib/learn/content";
 
@@ -38,11 +40,13 @@ export async function generateMetadata({ params }) {
   const { subject, rank, concept } = await params;
   const data = await getConceptData(subject, rank, slugToKey(concept));
   if (!data) return {};
-  const title = `${data.concept.label} · ${subjectLabel(subject)} (${rankSeoLabel(rank)})`;
+  // `absolute` so the root template doesn't append " — noobtopro" (keeps the SERP
+  // title short — see conceptTitle). The branded form is kept for the share card.
+  const title = conceptTitle(subject, data.concept.label);
   const description = conceptDescription(data);
   const canonical = conceptUrl(subject, rank, concept);
   return {
-    title,
+    title: { absolute: title },
     description,
     alternates: { canonical },
     ...socialMeta({
@@ -76,13 +80,22 @@ export default async function ConceptPage({ params }) {
     { name: label, path: canonical },
   ];
 
+  // The worked example as a schema.org HowTo (step-by-step solution) — the AEO
+  // type answer engines parse for "how to solve …" intent. Only present when the
+  // concept actually has a guide with an example (guide-less concepts skip it).
+  const resourceId = `${absolute(canonical)}#resource`;
+  const howToId = `${absolute(canonical)}#howto`;
+  const howTo = guide
+    ? howToFromExample({ id: howToId, isPartOfId: resourceId, label, example: guide.example })
+    : null;
+
   const jsonLd = [
     {
       // LearningResource is vocabulary-only (no Google rich result) but is the
       // most precise semantic type for an answer engine / LLM to understand a
       // concept-explanation page — exactly the AEO surface we care about.
       "@type": "LearningResource",
-      "@id": `${absolute(canonical)}#resource`,
+      "@id": resourceId,
       url: absolute(canonical),
       name: label,
       headline: label,
@@ -93,6 +106,9 @@ export default async function ConceptPage({ params }) {
       educationalLevel: RANK_SEO[rank].realWorld,
       teaches: label,
       about: { "@type": "Thing", name: label },
+      // Link the worked-example HowTo into the resource so the two nodes read as
+      // one connected explanation (the HowTo node itself is added below).
+      ...(howTo ? { hasPart: { "@id": howToId } } : {}),
       isPartOf: [
         { "@id": `${absolute(rankUrl(subject, rank))}#course` },
         { "@id": WEBSITE_ID },
@@ -100,6 +116,7 @@ export default async function ConceptPage({ params }) {
       author: { "@id": ORG_ID },
       publisher: { "@id": ORG_ID },
     },
+    ...(howTo ? [howTo] : []),
     breadcrumbList(crumbs),
   ];
 
