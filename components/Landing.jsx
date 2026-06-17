@@ -504,6 +504,12 @@ export default function Landing({
             noob<span className="np-arrow">→</span>topro
           </a>
           <span className="np-lp-foot-tag">Prove what you know. Climb from noob to pro.</span>
+          <nav className="np-lp-foot-legal" aria-label="Learn library" style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+            <a href="/learn" style={{ color: "var(--muted)", textDecoration: "none" }}>Learn library</a>
+            <a href="/learn/math" style={{ color: "var(--muted)", textDecoration: "none" }}>Math</a>
+            <a href="/learn/physics" style={{ color: "var(--muted)", textDecoration: "none" }}>Physics</a>
+            <a href="/learn/chemistry" style={{ color: "var(--muted)", textDecoration: "none" }}>Chemistry</a>
+          </nav>
           <nav className="np-lp-foot-legal" aria-label="Legal" style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
             <a href="/privacy" style={{ color: "var(--muted)", textDecoration: "none" }}>Privacy</a>
             <a href="/terms" style={{ color: "var(--muted)", textDecoration: "none" }}>Terms</a>

@@ -89,6 +89,16 @@ const THEME_INIT = `(function(){try{var p=localStorage.getItem("np-theme");var t
 // off the offers array carries the Free offer alone. lib/polar is server-only (reads
 // secrets, no NEXT_PUBLIC_*) — safe here since this is a server component.
 function buildStructuredData() {
+  // Authoritative profile URLs for the brand entity (Wikipedia/Wikidata, social,
+  // Product Hunt, Crunchbase, …). Set NEXT_PUBLIC_SAME_AS to a comma-separated list
+  // once those profiles exist — sameAs is one of the highest-value Organization
+  // signals for knowledge-graph disambiguation (esp. given the "noob to pro" gaming
+  // namespace collision). Omitted entirely when unset (never emit a fabricated link).
+  const sameAs = (process.env.NEXT_PUBLIC_SAME_AS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   const offers = [
     {
       "@type": "Offer",
@@ -110,17 +120,36 @@ function buildStructuredData() {
     "@context": "https://schema.org",
     "@graph": [
       {
-        "@type": "Organization",
+        // EducationalOrganization (a subtype of Organization) is the right entity
+        // type for a learning platform — better knowledge-graph categorization.
+        // sameAs is intentionally omitted (no verified social/Wikidata profiles to
+        // claim yet); add real ones here when they exist.
+        "@type": ["Organization", "EducationalOrganization"],
         "@id": `${SITE_URL}/#organization`,
         name: "noobtopro",
+        alternateName: "noob to pro",
         url: SITE_URL,
-        logo: `${SITE_URL}/icon.svg`,
+        // Raster (PNG) logo, not the SVG icon: Google's logo rich result generally
+        // won't render an SVG. /apple-icon is the brand mark rendered as a 180×180 PNG.
+        logo: `${SITE_URL}/apple-icon`,
+        description: DESCRIPTION,
+        slogan: "Prove what you know. Climb from noob to pro.",
+        knowsAbout: [
+          "Mathematics",
+          "Physics",
+          "Chemistry",
+          "STEM reasoning",
+          "Reasoning-first assessment",
+        ],
+        ...(sameAs.length ? { sameAs } : {}),
       },
       {
         "@type": "WebSite",
         "@id": `${SITE_URL}/#website`,
         name: "noobtopro",
         url: SITE_URL,
+        description: DESCRIPTION,
+        inLanguage: "en",
         publisher: { "@id": `${SITE_URL}/#organization` },
       },
       {
@@ -156,6 +185,15 @@ export default async function RootLayout({ children }) {
             text child — already unicode-escaped above, so no dangerouslySetInnerHTML).
             ld+json is non-executable data, but carry the nonce too for consistency. */}
         <script nonce={nonce} type="application/ld+json">{structuredData}</script>
+        {/* Ahrefs Web Analytics — cookieless organic-traffic/SEO tracking. Loaded from
+            analytics.ahrefs.com (allow-listed in lib/csp.js script-src + connect-src) and
+            carries the per-request CSP nonce. The data-key is a public site identifier. */}
+        <script
+          src="https://analytics.ahrefs.com/analytics.js"
+          data-key="T96nmRUfiiNKYhmeieDgOg"
+          nonce={nonce}
+          async
+        />
       </head>
       <body>
         {children}

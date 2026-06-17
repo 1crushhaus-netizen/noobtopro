@@ -12,6 +12,16 @@ describe("security response headers", () => {
     expect(all).toBeTruthy();
   });
 
+  it("sets the framing + origin-isolation headers (COOP same-origin)", async () => {
+    const rules = await nextConfig.headers();
+    const headers = rules.find((r) => r.source === "/:path*").headers;
+    const get = (k) => headers.find((h) => h.key === k);
+    expect(get("X-Frame-Options")?.value).toBe("DENY");
+    // COOP same-origin is safe only because the app uses full-page OAuth/checkout
+    // redirects (no window.open). If a popup flow is ever added, revisit this value.
+    expect(get("Cross-Origin-Opener-Policy")?.value).toBe("same-origin");
+  });
+
   it("no longer emits a static CSP from next.config (moved to the nonce-based middleware)", async () => {
     const rules = await nextConfig.headers();
     const headers = rules.find((r) => r.source === "/:path*").headers;
@@ -35,6 +45,14 @@ describe("security response headers", () => {
     const scriptSrc = csp.split(";").find((d) => d.trim().startsWith("script-src"));
     expect(scriptSrc).toMatch(/'nonce-test-nonce-abc123'/);
     expect(scriptSrc).not.toMatch(/'unsafe-inline'/);
+  });
+
+  it("allow-lists Ahrefs Web Analytics in BOTH script-src and connect-src", () => {
+    const csp = buildContentSecurityPolicy("n");
+    const scriptSrc = csp.split(";").find((d) => d.trim().startsWith("script-src"));
+    const connectSrc = csp.split(";").find((d) => d.trim().startsWith("connect-src"));
+    expect(scriptSrc).toMatch(/https:\/\/analytics\.ahrefs\.com/);
+    expect(connectSrc).toMatch(/https:\/\/analytics\.ahrefs\.com/);
   });
 
   it("falls back to 'unsafe-inline' script-src only when no nonce is supplied", () => {
