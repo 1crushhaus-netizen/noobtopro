@@ -15,7 +15,7 @@ import {
   defaultDifficultyForBand,
   explainRankMove,
 } from "@/lib/scoring";
-import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData, deleteAccount as requestAccountDeletion, submitAgeVerification, loadReviews, loadMastery, loadSubscription } from "@/lib/store";
+import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData, deleteAccount as requestAccountDeletion, submitAgeVerification, hasGuestAgeAck, recordGuestAgeAck, clearGuestAgeAck, loadReviews, loadMastery, loadSubscription } from "@/lib/store";
 import { getSupabase, isSupabaseConfigured, signInWithProvider, signOutUser, PROVIDERS } from "@/lib/supabase";
 import { track } from "@vercel/analytics";
 import { isActiveSubscription } from "@/lib/proStatus";
@@ -480,6 +480,16 @@ export default function Noobtopro() {
   const rebaselineCancelRef = useRef(null); // default focus = the safe "Keep my scores"
   const rebaselinePrevFocus = useRef(null); // focus to restore on close
 
+  // GUEST 18+ gate. Signed-in age verification is server-authoritative (app_metadata); a guest
+  // has no account, so their one-time 18+ confirmation is a CLIENT-side ack (localStorage,
+  // read on mount). `guestAgePrompt` proactively shows the gate when a guest tries to ENTER the
+  // service (e.g. "Prove it"), so we never fire a generation request before they confirm;
+  // `afterAgeRef` resumes that deferred action once they do.
+  const [guestAgeAck, setGuestAgeAck] = useState(false);
+  const [guestAgePrompt, setGuestAgePrompt] = useState(false);
+  const afterAgeRef = useRef(null);
+  useEffect(() => { setGuestAgeAck(hasGuestAgeAck()); }, []);
+
   // Monotonic token so a slow in-flight startPractice generation can't land its
   // question after the user has moved to a different practice question/subject —
   // e.g. via the Learn tab's "Practice this problem" (startPracticeWithQuestion) —
@@ -875,21 +885,42 @@ export default function Noobtopro() {
   function hasAgeAck(u) {
     return !!(u && u.app_metadata && u.app_metadata.age_verified === true);
   }
-  // 18+ path: POST the DOB to the server, which verifies the age and records the verdict in
-  // app_metadata; then refresh `user` so the gate (derived from app_metadata) clears. Throws
-  // so AgeGate can surface a save/verification failure (incl. an under-18 rejection).
+  // 18+ path. Signed-in: POST the DOB to the server, which verifies the age and records the
+  // verdict in app_metadata; then refresh `user` so the gate (derived from app_metadata)
+  // clears (throws so AgeGate can surface a save/verification failure). Guest: record the
+  // client-side ack and resume any action that was deferred behind the gate.
   async function confirmAge({ dob }) {
-    await submitAgeVerification(dob);
-    const sb = getSupabase();
-    if (sb) {
-      const { data } = await sb.auth.getUser();
-      setUser((data && data.user) || user);
+    if (user) {
+      await submitAgeVerification(dob);
+      const sb = getSupabase();
+      if (sb) {
+        const { data } = await sb.auth.getUser();
+        setUser((data && data.user) || user);
+      }
+      return;
     }
+    recordGuestAgeAck();
+    setGuestAgeAck(true);
+    setGuestAgePrompt(false);
+    const next = afterAgeRef.current;
+    afterAgeRef.current = null;
+    if (typeof next === "function") next();
   }
-  // Under-18 path: sign out (no learning data was collected — they never reached the app)
-  // and surface why on the landing.
+  // Under-18 path. Signed-in: sign out (no learning data was collected — they never reached
+  // the app). Guest: clear the local ack + any guest progress and return to the public intro.
+  // Either way, surface why on the landing.
   async function handleUnderage() {
-    try { await signOutUser(); } catch {}
+    setGuestAgePrompt(false);
+    afterAgeRef.current = null;
+    if (user) {
+      try { await signOutUser(); } catch {}
+    } else {
+      clearGuestAgeAck();
+      setGuestAgeAck(false);
+      try { await resetAll(); } catch {}
+      setScores(null);
+      setStage("intro");
+    }
     setError("noobtopro is an adults-only service for ages 18 and over.");
   }
 
@@ -929,6 +960,14 @@ export default function Noobtopro() {
     if (user && scores) {
       if (typeof document !== "undefined") rebaselinePrevFocus.current = document.activeElement;
       setShowRebaselineConfirm(true);
+      return;
+    }
+    // Guest 18+ gate: a guest entering the adults-only service must confirm they're 18+ once
+    // (client-side). Defer the diagnostic behind the gate so we never call /api/generate for
+    // an unconfirmed guest; confirmAge resumes it.
+    if (!user && !guestAgeAck) {
+      afterAgeRef.current = startDiagnostic;
+      setGuestAgePrompt(true);
       return;
     }
     return startDiagnostic();
@@ -1571,15 +1610,22 @@ export default function Noobtopro() {
   ) : null;
 
   /* ----------------------------- render ----------------------------- */
-  // P0-10: block a freshly signed-in account that hasn't completed the one-time age check.
-  // Derived from `user` metadata so it clears as soon as confirmAge refreshes the user (or
-  // an under-13 sign-out nulls it). Guests (no user) and the sign-in screen are exempt.
-  const needsAgeGate = !!user && stage !== "signin" && !hasAgeAck(user);
+  // 18+ adults-only gate (P0-10). Signed-in: block any account that hasn't completed the
+  // server-authoritative age check (app_metadata) — clears as soon as confirmAge refreshes the
+  // user. Guest: block once they ENTER the service without the client-side 18+ ack — either
+  // because they explicitly tried to start (guestAgePrompt) or because they returned to a
+  // non-intro view (e.g. a saved-progress dashboard). A guest on the public landing is exempt,
+  // so the marketing page stays open/crawlable. The sign-in screen is always exempt.
+  const guestOnPublicLanding =
+    !user && stage === "intro" && view !== "dashboard" && view !== "learn" && view !== "admin";
+  const ageVerified = user ? hasAgeAck(user) : guestAgeAck;
+  const needsAgeGate =
+    stage !== "signin" && !ageVerified && (!!user || guestAgePrompt || !guestOnPublicLanding);
   if (needsAgeGate) {
     return (
       <>
         {resetToast}
-        <AgeGate onConfirm={confirmAge} onUnderage={handleUnderage} />
+        <AgeGate onConfirm={confirmAge} onUnderage={handleUnderage} guest={!user} />
       </>
     );
   }

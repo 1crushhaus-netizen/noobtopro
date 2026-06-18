@@ -24,6 +24,9 @@ const store = vi.hoisted(() => ({
   migrateGuestToAccount: vi.fn(async () => ({ migrated: false })),
   deleteAllUserData: vi.fn(async () => ({ ok: true })),
   loadMastery: vi.fn(async () => ({ mastery: {} })),
+  hasGuestAgeAck: vi.fn(() => true),
+  recordGuestAgeAck: vi.fn(),
+  clearGuestAgeAck: vi.fn(),
   loadReviews: vi.fn(async () => ({ reviews: [] })),
   loadSubscription: vi.fn(async () => ({ subscription: null })),
 }));

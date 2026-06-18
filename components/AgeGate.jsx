@@ -3,11 +3,14 @@
 import React, { useState } from "react";
 import Icon from "@/components/Icon";
 
-// A neutral, one-time age screen shown right after sign-up (account creation), before the
-// signed-in app is usable. noobtopro is an adults-only service: a user must self-declare a
-// date of birth of MIN_AGE or older to continue. Anyone below MIN_AGE is blocked and signed
-// out; at/above it, the acknowledgement is recorded on the account so it's never asked again.
-// Guests (local-only data) are not gated — this fires only once a real account exists.
+// A neutral, one-time age screen. noobtopro is an adults-only service: a user must
+// self-declare a date of birth of MIN_AGE or older to continue. Anyone below MIN_AGE is
+// blocked; at/above it the acknowledgement is recorded so it's never asked again.
+//   * Signed-in users: shown right after sign-up; the verdict is recorded SERVER-side
+//     (app_metadata.age_verified) and the underage action signs them out.
+//   * Guests: shown the first time they enter the service; the ack is recorded CLIENT-side
+//     (localStorage) and the underage action just returns them home. Pass `guest` so the
+//     copy reads correctly (no "Sign out" for someone who never signed in).
 const MIN_AGE = 18;
 
 function ageFromISO(iso) {
@@ -29,7 +32,7 @@ const wrap = {
   padding: "24px",
 };
 
-export default function AgeGate({ onConfirm, onUnderage }) {
+export default function AgeGate({ onConfirm, onUnderage, guest = false }) {
   const [dob, setDob] = useState("");
   const [err, setErr] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -71,7 +74,7 @@ export default function AgeGate({ onConfirm, onUnderage }) {
             once you&rsquo;re {MIN_AGE}.
           </p>
           <button className="np-btn np-secondary np-btn--block" onClick={() => onUnderage?.()}>
-            <Icon name="login" size={16} /> Sign out
+            <Icon name={guest ? "back" : "login"} size={16} /> {guest ? "Back to home" : "Sign out"}
           </button>
         </div>
       </div>
