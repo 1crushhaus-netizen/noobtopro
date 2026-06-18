@@ -1,4 +1,5 @@
 import LegalLayout, { Section } from "@/components/LegalLayout";
+import { LEGAL } from "@/lib/legal";
 
 export const metadata = {
   title: "Terms of Service", // root template appends " — noobtopro" (SEO P2-2)
@@ -14,7 +15,7 @@ export default function TermsPage() {
     <LegalLayout title="Terms of Service">
       <p>
         These Terms of Service (&quot;Terms&quot;) govern your use of the noobtopro website and
-        application (the &quot;Service&quot;), operated by <strong>[Company Legal Name]</strong>. By
+        application (the &quot;Service&quot;), operated by <strong>{LEGAL.operatorName}</strong> as a {LEGAL.businessForm} (&quot;{LEGAL.siteName}&quot;). By
         using the Service you agree to these Terms. If you do not agree, do not use the Service.
       </p>
 
@@ -78,7 +79,7 @@ export default function TermsPage() {
       <Section heading="7. Intellectual property">
         <p>
           The Service, including its content, curriculum, design, and software, is owned by
-          <strong> [Company Legal Name]</strong> or its licensors and is protected by law. You may not
+          <strong> {LEGAL.businessName}</strong> or its licensors and is protected by law. You may not
           copy, modify, or distribute it except as permitted.
         </p>
       </Section>
@@ -94,7 +95,7 @@ export default function TermsPage() {
 
       <Section heading="9. Limitation of liability">
         <p>
-          To the maximum extent permitted by law, <strong>[Company Legal Name]</strong> will not be
+          To the maximum extent permitted by law, <strong>{LEGAL.businessName}</strong> will not be
           liable for any indirect, incidental, special, consequential, or punitive damages, or for
           any loss of data, arising from your use of the Service. Nothing in these Terms limits
           liability that cannot be limited under applicable law.
@@ -111,9 +112,9 @@ export default function TermsPage() {
 
       <Section heading="11. Governing law">
         <p>
-          These Terms are governed by the laws of <strong>[Jurisdiction]</strong>, without regard to
-          conflict-of-laws rules. Mandatory consumer protections in your country of residence still
-          apply.
+          These Terms are governed by {LEGAL.governingLaw}, without regard to
+          conflict-of-laws rules, with venue in {LEGAL.venueCity}. Mandatory consumer protections in your
+          country of residence still apply and are unaffected by this choice of law.
         </p>
       </Section>
 
@@ -126,8 +127,8 @@ export default function TermsPage() {
 
       <Section heading="13. Contact">
         <p>
-          <strong>[Company Legal Name]</strong>, <strong>[Registered Address]</strong> —
-          <strong> [support@your-domain]</strong>.
+          <strong>{LEGAL.businessName}</strong>, operated by {LEGAL.operatorName} ({LEGAL.businessForm}),
+          {LEGAL.city}, {LEGAL.country} — <strong>{LEGAL.contactEmail}</strong>.
         </p>
       </Section>
     </LegalLayout>

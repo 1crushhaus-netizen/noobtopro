@@ -9,8 +9,8 @@ const entries = sitemap();
 const urls = entries.map((e) => e.url);
 
 describe("sitemap", () => {
-  it("covers home + /learn + 3 subjects + 12 cells + 224 concepts + 3 legal (244)", () => {
-    expect(entries.length).toBe(244);
+  it("covers home + /learn + 3 subjects + 12 cells + 224 concepts + 13 legal (254)", () => {
+    expect(entries.length).toBe(254);
     const learn = urls.filter((u) => u.includes("/learn/"));
     const concepts = learn.filter((u) => u.split("/").length === 7); // /learn/subject/rank/concept
     expect(concepts.length).toBe(224);

@@ -57,7 +57,21 @@ export default function sitemap() {
     }
   }
 
-  for (const path of ["/privacy", "/terms", "/refunds"]) {
+  for (const path of [
+    "/privacy",
+    "/terms",
+    "/refunds",
+    "/cookies",
+    "/aup",
+    "/accessibility",
+    "/legal",
+    "/legal/notice",
+    "/legal/billing-terms",
+    "/legal/ai-transparency",
+    "/legal/sub-processors",
+    "/legal/data-retention",
+    "/legal/us-privacy",
+  ]) {
     entries.push({ url: absolute(path), lastModified: LEGAL_UPDATED, changeFrequency: "yearly", priority: 0.3 });
   }
 
