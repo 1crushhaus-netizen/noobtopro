@@ -394,3 +394,72 @@ describe("Dashboard — guest gate", () => {
     expect(loadReviews).not.toHaveBeenCalled();
   });
 });
+
+describe("Dashboard — EU withdrawal control (CRD Art. 11a)", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+
+  it("offers 'Withdraw from contract here' to an in-window Pro user; confirming calls onWithdraw and shows the durable confirmation", async () => {
+    const onWithdraw = vi.fn(async () => ({
+      ok: true,
+      withdrawnAt: "2026-06-18T10:00:00Z",
+      refund: { status: "issued", amountMinor: 933, currency: "eur" },
+    }));
+    const withdrawalUntil = new Date(Date.now() + 5 * DAY).toISOString();
+    render(
+      <Dashboard
+        user={user}
+        scores={scores}
+        history={history}
+        isPro
+        proEnabled
+        onWithdraw={onWithdraw}
+        withdrawalUntil={withdrawalUntil}
+        onManageSubscription={() => {}}
+        onPractice={() => {}}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /withdraw from contract here/i }));
+    // The confirm dialog explains withdraw ≠ cancel; confirming runs the withdrawal.
+    await screen.findByRole("dialog", { name: /withdraw from your subscription/i });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /confirm withdrawal/i }));
+    });
+    await waitFor(() => expect(onWithdraw).toHaveBeenCalledTimes(1));
+    // On-screen durable confirmation with the pro-rata refund amount.
+    expect(await screen.findByText(/withdrawal confirmed/i)).toBeTruthy();
+    expect(screen.getByText(/9\.33 EUR/i)).toBeTruthy();
+  });
+
+  it("hides the withdrawal control once the 14-day window has closed", () => {
+    const withdrawalUntil = new Date(Date.now() - 1000).toISOString();
+    render(
+      <Dashboard
+        user={user}
+        scores={scores}
+        history={history}
+        isPro
+        proEnabled
+        onWithdraw={vi.fn()}
+        withdrawalUntil={withdrawalUntil}
+        onManageSubscription={() => {}}
+        onPractice={() => {}}
+      />
+    );
+    expect(screen.queryByRole("button", { name: /withdraw from contract here/i })).toBe(null);
+  });
+
+  it("does not offer withdrawal to a non-Pro user even if a stale window is passed", () => {
+    render(
+      <Dashboard
+        user={user}
+        scores={scores}
+        history={history}
+        proEnabled
+        onWithdraw={vi.fn()}
+        withdrawalUntil={new Date(Date.now() + 5 * DAY).toISOString()}
+        onPractice={() => {}}
+      />
+    );
+    expect(screen.queryByRole("button", { name: /withdraw from contract here/i })).toBe(null);
+  });
+});
