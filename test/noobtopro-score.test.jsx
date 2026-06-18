@@ -141,7 +141,7 @@ describe("Noobtopro — 'Learn this' opens the prepared library concept (draws f
     vi.stubGlobal("fetch", fetchMock);
 
     render(<Noobtopro />);
-    fireEvent.click(await screen.findByRole("button", { name: /^Dashboard$/i }));
+    fireEvent.click((await screen.findAllByRole("button", { name: /^Dashboard$/i }))[0]);
     // The radar panel surfaces the weak concept with a "Learn this" action.
     fireEvent.click(await screen.findByRole("button", { name: /learn this/i }));
 
@@ -161,7 +161,7 @@ describe("Noobtopro — 'Learn this' opens the prepared library concept (draws f
     vi.stubGlobal("fetch", fetchMock);
 
     render(<Noobtopro />);
-    fireEvent.click(await screen.findByRole("button", { name: /^Dashboard$/i }));
+    fireEvent.click((await screen.findAllByRole("button", { name: /^Dashboard$/i }))[0]);
     fireEvent.click(await screen.findByRole("button", { name: /learn this/i }));
     await screen.findByRole("heading", { name: "Multiplication & division" });
     fireEvent.click(screen.getByRole("button", { name: /back to concepts/i }));
@@ -182,7 +182,7 @@ describe("Noobtopro — re-baseline confirmation (FIX 6 / FRONTEND P1-5)", () =>
 
     render(<Noobtopro />);
     // Open the Dashboard tab (the ranked home base) where the re-take action lives.
-    fireEvent.click(await screen.findByRole("button", { name: /^Dashboard$/i }));
+    fireEvent.click((await screen.findAllByRole("button", { name: /^Dashboard$/i }))[0]);
     const retake = await screen.findByRole("button", { name: /re-take diagnostic/i });
     fireEvent.click(retake);
 
@@ -210,7 +210,7 @@ describe("Noobtopro — re-baseline confirmation (FIX 6 / FRONTEND P1-5)", () =>
     vi.stubGlobal("fetch", fetchMock);
 
     render(<Noobtopro />);
-    fireEvent.click(await screen.findByRole("button", { name: /^Dashboard$/i }));
+    fireEvent.click((await screen.findAllByRole("button", { name: /^Dashboard$/i }))[0]);
     fireEvent.click(await screen.findByRole("button", { name: /re-take diagnostic/i }));
     // Confirm inside the dialog (scope the query to the dialog — the dashboard button
     // shares the "Re-take diagnostic" label).

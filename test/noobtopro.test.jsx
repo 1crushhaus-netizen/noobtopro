@@ -389,7 +389,10 @@ describe("Noobtopro — AI concept-practice drill flow (increment 3)", () => {
 
     render(<Noobtopro />);
     // Go to the Learn tab.
-    fireEvent.click(await screen.findByRole("button", { name: /^Learn$/ }));
+    // Both the TopNav tab strip and the mobile BottomNav render a "Learn" button
+    // (CSS hides one per viewport; jsdom applies no CSS, so both exist). Either
+    // triggers the same setView("learn") — click the first.
+    fireEvent.click((await screen.findAllByRole("button", { name: /^Learn$/ }))[0]);
     // Open the Quadratics concept page (math · high is a collapsed rank — surface it via search).
     fireEvent.change(await screen.findByRole("searchbox", { name: /search concepts/i }), {
       target: { value: "Quadratic functions & equations" },
@@ -440,7 +443,10 @@ describe("Noobtopro — guest concept-drill updates mastery end-to-end (incremen
     vi.stubGlobal("fetch", fetchMock);
 
     render(<Noobtopro />);
-    fireEvent.click(await screen.findByRole("button", { name: /^Learn$/ }));
+    // Both the TopNav tab strip and the mobile BottomNav render a "Learn" button
+    // (CSS hides one per viewport; jsdom applies no CSS, so both exist). Either
+    // triggers the same setView("learn") — click the first.
+    fireEvent.click((await screen.findAllByRole("button", { name: /^Learn$/ }))[0]);
     fireEvent.change(await screen.findByRole("searchbox", { name: /search concepts/i }), {
       target: { value: "Quadratic functions & equations" },
     });
