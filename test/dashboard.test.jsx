@@ -247,17 +247,29 @@ describe("Dashboard — leaderboard, reset, empty state", () => {
 });
 
 describe("Dashboard — drawers (trends + answer review)", () => {
-  it("keeps trend charts in a drawer: hidden until 'See trends' opens it, Escape closes", async () => {
-    render(<Dashboard user={user} scores={scores} history={history} isPro onPractice={() => {}} />);
-    // Closed by default — the line/bar charts are not in the tree.
+  it("keeps trend charts in a drawer: hidden until 'See trends' opens it, fetched lazily, Escape closes", async () => {
+    // "Progress trends" is Pro: the chart series is fetched on open via loadTrends() ->
+    // /api/trends (db/migrations/0024), NOT from the free in-memory history. The trend
+    // events carry the cumulative totalAfter the line chart plots.
+    const trends = [
+      { type: "baseline", subject: null, delta: 0, totalAfter: 40 },
+      { type: "attempt", subject: "math", delta: 5, totalAfter: 70 },
+      { type: "attempt", subject: "physics", delta: -2, totalAfter: 90 },
+    ];
+    const loadTrends = vi.fn(async () => ({ trends }));
+    render(<Dashboard user={user} scores={scores} history={history} isPro loadTrends={loadTrends} onPractice={() => {}} />);
+    // Closed by default — the line/bar charts are not in the tree, and the fetch is lazy.
     expect(screen.queryByRole("img", { name: /total points over time/i })).toBe(null);
     expect(screen.queryByRole("img", { name: /across 2 graded attempts/i })).toBe(null);
+    expect(loadTrends).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: /see trends/i }));
     const dialog = await screen.findByRole("dialog", { name: /trends over time/i });
     expect(dialog).toBeTruthy();
-    expect(screen.getByRole("img", { name: /total points over time.*ending at 90 of 1050/i })).toBeTruthy();
+    // Charts appear only after the Pro-gated fetch resolves.
+    expect(await screen.findByRole("img", { name: /total points over time.*ending at 90 of 1050/i })).toBeTruthy();
     expect(screen.getByRole("img", { name: /across 2 graded attempts/i })).toBeTruthy();
+    expect(loadTrends).toHaveBeenCalled();
 
     fireEvent.keyDown(window, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog", { name: /trends over time/i })).toBe(null));

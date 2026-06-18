@@ -329,6 +329,72 @@ function RecentMoves({ history }) {
   );
 }
 
+// "Progress trends" charts (Pro). The trend series lives in `attempts`, whose direct client
+// SELECT is revoked (db/migrations/0024), so this fetches it through the Pro-gated /api/trends
+// (loadTrends) on open — not from the free in-memory history. Mirrors how ReviewList loads
+// answer history. A non-Pro user never reaches here (the "See trends" button shows the lock +
+// upgrade); the route itself returns 402 as the server backstop.
+function TrendCharts({ loadTrends }) {
+  const [state, setState] = useState({ status: "loading", trends: [] });
+  useEffect(() => {
+    if (typeof loadTrends !== "function") {
+      setState({ status: "ready", trends: [] });
+      return;
+    }
+    let alive = true;
+    loadTrends()
+      .then((res) => {
+        if (!alive) return;
+        if (res && res.error) setState({ status: "error", trends: [] });
+        else setState({ status: "ready", trends: (res && res.trends) || [] });
+      })
+      .catch(() => {
+        if (alive) setState({ status: "error", trends: [] });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [loadTrends]);
+
+  const linePoints = useMemo(
+    () => state.trends.filter((h) => typeof h.totalAfter === "number").map((h) => h.totalAfter),
+    [state.trends]
+  );
+  const barItems = useMemo(
+    () =>
+      state.trends
+        .filter((h) => h.type === "attempt")
+        .map((a) => ({ value: Math.round(a.delta || 0), glyph: SUBJECTS[a.subject]?.glyph || "·" })),
+    [state.trends]
+  );
+
+  if (state.status === "loading") return <p className="np-statsub">Loading your trends…</p>;
+  if (state.status === "error")
+    return <p className="np-statsub">Couldn&rsquo;t load your trends. Please try again.</p>;
+  return (
+    <>
+      <div className="np-card np-chartcard">
+        <div className="np-charttitle">Total points over time</div>
+        <div className="np-chartsub">From your starting scores through every graded attempt.</div>
+        {linePoints.length >= 2 ? (
+          <LineChart values={linePoints} yMax={1050} />
+        ) : (
+          <p className="np-statsub">Answer a practice problem to start the trend line.</p>
+        )}
+      </div>
+      <div className="np-card np-chartcard">
+        <div className="np-charttitle">Points gained and lost</div>
+        <div className="np-chartsub">Each bar is one graded attempt: above the line when your reasoning earned points, below it when it cost them.</div>
+        {barItems.length >= 1 ? (
+          <BarChart items={barItems} />
+        ) : (
+          <p className="np-statsub">No graded attempts yet.</p>
+        )}
+      </div>
+    </>
+  );
+}
+
 export default function Dashboard({
   user,
   scores,
@@ -338,6 +404,7 @@ export default function Dashboard({
   upgradeBusy = false,
   loadLeaderboard,
   loadReviews,
+  loadTrends,
   loadMastery,
   // FRONTEND P1-2: mastery is now LIFTED into the shell and passed in (fetched once
   // for both Dashboard + LearnTab). When provided, we use it directly and skip the
@@ -433,22 +500,10 @@ export default function Dashboard({
   const email = user && user.email;
   const showAvatar = avatar && !imgFailed;
 
-  // PERF (P2-3): the history-derived chart arrays change only with `history`; memoize
-  // them so a drawer/confirm-modal toggle (the things that actually re-render this
-  // component) doesn't redo the reduction every time. Declared HERE — before the
-  // `!user` / `!scores` early returns — so these hooks run unconditionally on every
-  // render (React Rules of Hooks; enforced by eslint react-hooks/rules-of-hooks).
-  const linePoints = useMemo(
-    () => history.filter((h) => typeof h.totalAfter === "number").map((h) => h.totalAfter),
-    [history]
-  );
-  const barItems = useMemo(
-    () =>
-      history
-        .filter((h) => h.type === "attempt")
-        .map((a) => ({ value: Math.round(a.delta || 0), glyph: SUBJECTS[a.subject]?.glyph || "·" })),
-    [history]
-  );
+  // The "Progress trends" chart arrays are no longer derived from the free in-memory
+  // history — the trend series is Pro-gated and fetched on demand by <TrendCharts> via
+  // loadTrends() -> /api/trends (db/migrations/0024). The free history still drives the
+  // KPI "problems graded" count + the "why your reasoning moved" list.
 
   // ---- Guest gate: blurred preview + sign-in prompt (no data, no auth fetches) ----
   if (!user) {
@@ -612,24 +667,8 @@ export default function Dashboard({
       </div>
 
       <Drawer open={drawer === "charts"} title="Your trends over time" titleId="np-drawer-charts" onClose={() => setDrawer(null)}>
-        <div className="np-card np-chartcard">
-          <div className="np-charttitle">Total points over time</div>
-          <div className="np-chartsub">From your starting scores through every graded attempt.</div>
-          {linePoints.length >= 2 ? (
-            <LineChart values={linePoints} yMax={1050} />
-          ) : (
-            <p className="np-statsub">Answer a practice problem to start the trend line.</p>
-          )}
-        </div>
-        <div className="np-card np-chartcard">
-          <div className="np-charttitle">Points gained and lost</div>
-          <div className="np-chartsub">Each bar is one graded attempt: above the line when your reasoning earned points, below it when it cost them.</div>
-          {barItems.length >= 1 ? (
-            <BarChart items={barItems} />
-          ) : (
-            <p className="np-statsub">No graded attempts yet.</p>
-          )}
-        </div>
+        {/* Mount (and fetch) only when the drawer is open — the trend series is Pro-gated. */}
+        {drawer === "charts" && <TrendCharts loadTrends={loadTrends} />}
       </Drawer>
 
       <Drawer open={drawer === "reviews"} title="Review your answers" titleId="np-drawer-reviews" onClose={() => setDrawer(null)}>

@@ -15,7 +15,7 @@ import {
   defaultDifficultyForBand,
   explainRankMove,
 } from "@/lib/scoring";
-import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData, deleteAccount as requestAccountDeletion, submitAgeVerification, loadReviews, loadMastery, loadSubscription } from "@/lib/store";
+import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData, deleteAccount as requestAccountDeletion, submitAgeVerification, loadReviews, loadTrends, loadMastery, loadSubscription } from "@/lib/store";
 import { getSupabase, isSupabaseConfigured, signInWithProvider, signOutUser, PROVIDERS } from "@/lib/supabase";
 import { track } from "@vercel/analytics";
 import { isActiveSubscription } from "@/lib/proStatus";
@@ -1818,6 +1818,7 @@ export default function Noobtopro() {
             upgradeBusy={upgradeBusy}
             loadLeaderboard={loadLeaderboard}
             loadReviews={loadReviews}
+            loadTrends={loadTrends}
             mastery={mastery}
             masteryReady={masteryLoaded}
             onStartDiagnostic={() => { setView("practice"); beginDiagnostic(); }}
