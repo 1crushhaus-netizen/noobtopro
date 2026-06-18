@@ -15,7 +15,7 @@ import {
   defaultDifficultyForBand,
   explainRankMove,
 } from "@/lib/scoring";
-import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData, deleteAccount as requestAccountDeletion, loadReviews, loadMastery, loadSubscription } from "@/lib/store";
+import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData, deleteAccount as requestAccountDeletion, submitAgeVerification, loadReviews, loadMastery, loadSubscription } from "@/lib/store";
 import { getSupabase, isSupabaseConfigured, signInWithProvider, signOutUser, PROVIDERS } from "@/lib/supabase";
 import { track } from "@vercel/analytics";
 import { isActiveSubscription } from "@/lib/proStatus";
@@ -866,21 +866,25 @@ export default function Noobtopro() {
     }
   }
 
-  // P0-10 age gate. A signed-in account that hasn't recorded a one-time age acknowledgement
-  // is blocked from the app by AgeGate until it does. Self-declared (stored in the account's
-  // user_metadata); guests aren't gated (their data is local-only).
+  // Adults-only (18+) age gate. A signed-in account that hasn't been age-verified is blocked
+  // from the app by AgeGate until it is. The verdict is SERVER-AUTHORITATIVE: it lives in
+  // app_metadata (set only by /api/account/age after a server-side age check), which the user
+  // cannot edit. Guests aren't gated here (their data is local-only). Note: the old
+  // user_metadata.age_ack_year flag is intentionally NOT honored, so every existing account
+  // re-attests under the 18+ regime.
   function hasAgeAck(u) {
-    return !!(u && u.user_metadata && (u.user_metadata.age_ack_year || u.user_metadata.birthdate));
+    return !!(u && u.app_metadata && u.app_metadata.age_verified === true);
   }
-  // 18+ path: record the acknowledgement on the account, then refresh `user` so the gate
-  // (derived from user metadata) clears. Throws so AgeGate can surface a save failure.
-  async function confirmAge({ birthYear }) {
+  // 18+ path: POST the DOB to the server, which verifies the age and records the verdict in
+  // app_metadata; then refresh `user` so the gate (derived from app_metadata) clears. Throws
+  // so AgeGate can surface a save/verification failure (incl. an under-18 rejection).
+  async function confirmAge({ dob }) {
+    await submitAgeVerification(dob);
     const sb = getSupabase();
-    if (!sb) throw new Error("Sign-in is not configured.");
-    const { error } = await sb.auth.updateUser({ data: { age_ack_year: birthYear } });
-    if (error) throw new Error(error.message || "Couldn't save that. Please try again.");
-    const { data } = await sb.auth.getUser();
-    setUser((data && data.user) || user);
+    if (sb) {
+      const { data } = await sb.auth.getUser();
+      setUser((data && data.user) || user);
+    }
   }
   // Under-18 path: sign out (no learning data was collected — they never reached the app)
   // and surface why on the landing.

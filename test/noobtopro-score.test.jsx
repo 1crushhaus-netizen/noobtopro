@@ -8,7 +8,7 @@ import { render, screen, fireEvent, cleanup, within } from "@testing-library/rea
 // browser can no longer write scores). This drives the real component against a
 // signed-in Supabase mock whose session carries an access_token.
 
-const USER = { id: "u1", email: "u@example.com", user_metadata: { full_name: "U", age_ack_year: 2000 } };
+const USER = { id: "u1", email: "u@example.com", user_metadata: { full_name: "U" }, app_metadata: { age_verified: true } };
 const SCORES = {
   // weak_concepts are CURRICULUM KEYS now (the grader reports keys) — a real,
   // guided concept so opening it lands on its prepared library page.
@@ -303,7 +303,7 @@ describe("Noobtopro — age gate (P0-10)", () => {
   });
 
   it("does NOT gate a signed-in account that has acknowledged its age", async () => {
-    supa.user = USER; // includes age_ack_year
+    supa.user = USER; // includes app_metadata.age_verified
     vi.stubGlobal("fetch", vi.fn(async () => jsonRes({ isAdmin: false })));
     render(<Noobtopro />);
     expect(await screen.findByText("u@example.com")).toBeTruthy();

@@ -4,7 +4,7 @@ import { ORDER, clampSubjectScore } from "@/lib/scoring";
 import { topicSlugsFor, normalizeTopic } from "@/lib/taxonomy";
 import { conceptByKey, calibratedDrillBand } from "@/lib/curriculum";
 import { masteryStateFor } from "@/lib/mastery";
-import { requireUser } from "@/lib/adminAuth";
+import { requireUser, isAgeVerified } from "@/lib/adminAuth";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { pickVariety, varietyDirectiveText, sanitizeRecentQuestions, avoidListText } from "@/lib/questionVariety";
 import { normalizeReasoningSurface, capTrap, capText, normalizeDifficulty } from "@/lib/gradeInput";
@@ -108,6 +108,15 @@ export async function POST(req) {
     if (hasAuthHeader) {
       const auth = await requireUser(req);
       authedUser = auth.user || null;
+      // Adults-only gate: a signed-in caller must be a verified 18+ account before we
+      // mint a (paid) question token for them. Guests stay bounded by the per-IP + global
+      // budgets below; the authenticated practice/score path is where the gate bites.
+      if (authedUser && !isAgeVerified(authedUser)) {
+        return NextResponse.json(
+          { error: "Please confirm you are 18 or older to continue.", ageRequired: true },
+          { status: 403 }
+        );
+      }
       if (authedUser) {
         const acctRl = await checkRateLimit(`acct:${authedUser.id}:generate`, { max: 60 });
         if (!acctRl.ok) {

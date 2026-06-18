@@ -50,7 +50,7 @@ export default function AgeGate({ onConfirm, onUnderage }) {
     }
     setSubmitting(true);
     try {
-      await onConfirm?.({ birthYear: new Date(dob + "T00:00:00Z").getUTCFullYear() });
+      await onConfirm?.({ dob, birthYear: new Date(dob + "T00:00:00Z").getUTCFullYear() });
       // On success the parent records the ack and unmounts this gate.
     } catch (e2) {
       setErr((e2 && e2.message) || "Couldn't save that. Please try again.");

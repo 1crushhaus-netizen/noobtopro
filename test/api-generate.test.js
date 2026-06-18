@@ -467,7 +467,7 @@ describe("POST /api/generate — mastery-calibrated drill band (RANKS_PLAN §6)"
   });
 
   it("signed-in: the band comes from the SERVER-read concept_mastery row — the body hint is IGNORED", async () => {
-    calib.requireUser.mockResolvedValueOnce({ user: { id: "user-1" } });
+    calib.requireUser.mockResolvedValueOnce({ user: { id: "user-1", app_metadata: { age_verified: true } } });
     calib.adminClient = masteryClient({ attempts: 3, green_hits: 2, last_quality: 90, best_quality: 95 }); // → green
     mockGroqReturning(drillPayload);
     const j = await (await POST(reqAuthed({ kind: "practice", subject: "math", conceptKey: "quadratics", masteryState: "red" }))).json();
@@ -476,11 +476,20 @@ describe("POST /api/generate — mastery-calibrated drill band (RANKS_PLAN §6)"
   });
 
   it("signed-in with no mastery row yet → neutral rank band", async () => {
-    calib.requireUser.mockResolvedValueOnce({ user: { id: "user-1" } });
+    calib.requireUser.mockResolvedValueOnce({ user: { id: "user-1", app_metadata: { age_verified: true } } });
     calib.adminClient = masteryClient(null);
     mockGroqReturning(drillPayload);
     const j = await (await POST(reqAuthed({ kind: "practice", subject: "math", conceptKey: "quadratics", masteryState: "green" }))).json();
     expect(j.difficulty).toBe("intermediate"); // untouched concept; the hint is still ignored
+  });
+
+  it("rejects an age-UNVERIFIED signed-in caller with 403 (adults-only 18+ gate)", async () => {
+    calib.requireUser.mockResolvedValueOnce({ user: { id: "user-1", app_metadata: {} } });
+    const groq = mockGroqReturning(drillPayload); // must NOT be reached
+    const res = await POST(reqAuthed({ kind: "practice", subject: "math", conceptKey: "quadratics" }));
+    expect(res.status).toBe(403);
+    expect((await res.json()).ageRequired).toBe(true);
+    expect(groq).not.toHaveBeenCalled();
   });
 
   it("an INVALID token degrades to the neutral rank band and the route stays open (200)", async () => {

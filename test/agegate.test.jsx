@@ -14,7 +14,7 @@ describe("AgeGate (18+ adults-only age screen)", () => {
     render(<AgeGate onConfirm={onConfirm} onUnderage={vi.fn()} />);
     setDob("2000-05-15");
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
-    await waitFor(() => expect(onConfirm).toHaveBeenCalledWith({ birthYear: 2000 }));
+    await waitFor(() => expect(onConfirm).toHaveBeenCalledWith({ dob: "2000-05-15", birthYear: 2000 }));
   });
 
   it("blocks an under-18 date of birth with adults-only messaging and signs out", () => {
