@@ -867,7 +867,11 @@ async function handleDiagnosticStep(req, body) {
       s: reasoningScore,
       r: rubric,
       w: resolveWeakConcepts(item.subject, checked?.weakConcepts),
-      c: typeof checked?.comment === "string" ? checked.comment.slice(0, 280) : "",
+      // Safety-screen the model-authored "what your reasoning showed" comment AT THE SOURCE,
+      // before it's folded into the signed transcript → persisted → shown (and carried forward
+      // to later practice). The feedback fields are already redacted; the subject comment was
+      // the remaining unscreened model output (content-safety: expanded lexicon).
+      c: redactUnsafe(typeof checked?.comment === "string" ? checked.comment.slice(0, 280) : ""),
     };
     const transcript = [...st.transcript, entry];
     const graded = { subject: item.subject, difficulty: item.band, reasoningScore };

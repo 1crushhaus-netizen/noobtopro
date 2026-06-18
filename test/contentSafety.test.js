@@ -26,6 +26,54 @@ describe("isContentSafe — free-text screen for generated content (audit 06 P1-
   });
 });
 
+describe("isContentSafe — expanded lexicon (targeted, high-precision)", () => {
+  it("blocks the added explicit / slur / exploitation terms (incl. leet + separator evasion)", () => {
+    for (const s of [
+      "post a blowjob photo",
+      "send a handjob clip",
+      "this is a gangbang",
+      "buy a dildo",
+      "talk about masturbation here", // contains "masturbat"
+      "deep throat video",            // folds to "deepthroat"
+      "n1gga",                        // leet variant of an added slur
+      "g4ngb4ng now",                 // leet a -> "gangbang"
+      "child p3d0phil3 material",     // leet -> "pedophile" -> "pedophil"
+      "cream pie scene",              // folds to "creampie"
+      "cunnilingus",
+      "bestiality",
+    ]) {
+      expect(isContentSafe(s)).toBe(false);
+    }
+  });
+
+  it("does NOT false-positive on adversarial STEM phrases that FOLD near a blocked term", () => {
+    // Each of these concatenates (letters-only fold) into a near-miss of a term I deliberately
+    // EXCLUDED for exactly this collision — they must all read as safe.
+    for (const s of [
+      "Convert 3 moles to grams of NaCl",        // "molesto…"  (excluded "molest")
+      "Subtract the mass of minus lutetium",      // "minuslutetium" (excluded "slut")
+      "Since step 3 the series converges",        // "sincestep…" (excluded "incest")
+      "Solve for gypsum solubility in water",     // "forgypsum" (excluded "orgy")
+      "This is a thorny optimization problem",    // "thorny" (excluded "horny")
+      "Run a carbon error analysis on the data",  // "carbonerror" (excluded "boner")
+      "Which ink absorbs more visible light?",    // "whichink" (excluded "chink")
+      "Show here that the limit exists",          // "showhere" (excluded "whore")
+      "The ball fell at 9.8 m/s squared",         // "fellat…" (excluded "fellatio")
+      "When tail risk dominates the variance",    // "whentail" (excluded "hentai")
+      "The specialist found the absolute value",  // "specialist"+"absolute" (excluded "cialis"/"slut")
+      "Model the vacuum shot noise in the sensor",// "vacuumshot" must NOT match kept "cumshot"
+      "Analysis of the canal flow rate",          // "analysis"/"canal" (never added "anal")
+    ]) {
+      expect(isContentSafe(s)).toBe(true);
+    }
+  });
+
+  it("redactUnsafe replaces an added-term hit with the placeholder", () => {
+    expect(redactUnsafe("your reasoning is a total blowjob")).toBe("(removed for safety)");
+    expect(redactUnsafe("clean STEM feedback about moles to grams")).toBe("clean STEM feedback about moles to grams");
+  });
+});
+
 describe("redactUnsafe — screen model-authored output (audit-round2)", () => {
   it("passes safe text through unchanged", () => {
     const s = "Strong setup; next, apply the chain rule to the inner function.";

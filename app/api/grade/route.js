@@ -238,7 +238,8 @@ export async function POST(req) {
         finalAnswerMatches: graded.finalAnswerMatches === true,
         verification,
         weakConcepts,
-        comment: typeof graded.comment === "string" ? graded.comment.slice(0, 2000) : "",
+        // Safety-screen the model-authored subject comment (the feedback fields already are).
+        comment: redactUnsafe(typeof graded.comment === "string" ? graded.comment.slice(0, 2000) : ""),
       });
     }
 

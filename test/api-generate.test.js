@@ -531,4 +531,13 @@ describe("POST /api/generate — malformed/unsafe LLM output never signs a token
     expect(res.status).toBe(500);
     expect((await res.json()).token).toBeUndefined();
   });
+
+  it("500s with NO token when the generated TOPIC fails the content-safety screen (content-safety)", async () => {
+    // The raw model topic is returned to the client, so it's screened too (belt-and-suspenders
+    // alongside the taxonomy-normalized topicSlug).
+    mockGroqReturning({ question: "A valid math question about ratios.", topic: "blowjob techniques", topicSlug: "algebra", targetConcept: "ratios", difficulty: "intermediate" });
+    const res = await POST(req({ kind: "practice", subject: "math", score: 100 }));
+    expect(res.status).toBe(500);
+    expect((await res.json()).token).toBeUndefined();
+  });
 });

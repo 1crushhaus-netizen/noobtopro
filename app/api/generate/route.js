@@ -247,7 +247,7 @@ export async function POST(req) {
     // CONTENT SAFETY (audit 06 P1-1): screen the generated question + concept label before
     // it reaches a (possibly minor) user. Treat a failure as an upstream miss → the client
     // retries and gets a fresh, safe generation, rather than rendering unsafe content.
-    if (!isContentSafe(data.question) || !isContentSafe(data.targetConcept)) {
+    if (!isContentSafe(data.question) || !isContentSafe(data.targetConcept) || !isContentSafe(data.topic)) {
       throw new Error("generated content failed the safety screen");
     }
     // Build an EXPLICIT response (audit P2-2 class: never spread raw model JSON to the
