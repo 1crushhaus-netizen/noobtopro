@@ -42,10 +42,10 @@ describe("mobile: touch targets meet a comfortable size", () => {
     expect(css).toMatch(/summary\.np-cardicon\s*\{[^}]*min-height:\s*44px/);
   });
 
-  it("the weak-concept and concept chips reach 44px on phones (<=480px)", () => {
+  it("the weak-concept, concept, and filter chips reach 44px on phones (<=480px)", () => {
     expect(css).toMatch(/@media \(max-width:\s*480px\)/);
-    // a 480px block bumps the chips to 44px
-    expect(css).toMatch(/\.np-weaktag-btn,\s*\.np-concepttag\s*\{\s*min-height:\s*44px/);
+    // a 480px block bumps the chips (incl. the Learn-tab filter chips) to 44px
+    expect(css).toMatch(/\.np-weaktag-btn,\s*\.np-concepttag,\s*\.np-filterchip\s*\{\s*min-height:\s*44px/);
   });
 });
 
