@@ -110,17 +110,16 @@ describe("Dashboard — mastery-blended score (by-subject, display-layer)", () =
     return { math: subj };
   }
 
-  it("with no mastery, a high-depth subject is BLENDED down to its coverage (0), surfacing the reasoning depth", () => {
+  it("with no mastery, a high-depth subject is FLOORED at its earned band (keeps University, not Elementary)", () => {
     render(<Dashboard user={user} scores={scores} history={history} onPractice={() => {}} />);
-    // math depth 210, but 0 concepts mastered → blended score 0 → Elementary, not University.
-    expect(screen.getAllByText("Elementary").length).toBeGreaterThan(0);
-    // The depth is surfaced (the learner's reasoning is recognized; it converts via mastery),
-    // and the row tells them what's left to master to raise the number.
+    // math depth 210 (University band floor), 0 concepts mastered → the blend is floored at
+    // 210 so the learner KEEPS University rather than cratering to Elementary (the rollout fix).
+    expect(screen.getAllByText("University").length).toBeGreaterThan(0);
+    // The floored headline (210) is shown, and the row still tells them what's left to master.
     expect(
       screen.getByText(/Reasoning depth 210.*0\/\d+ mastered.*master \d+ more concepts in Learn to raise your score/)
     ).toBeTruthy();
-    // The raw depth 210 is NOT shown as the headline anymore — coverage zeroes it.
-    expect(screen.queryAllByText("210").length).toBe(0);
+    expect(screen.getAllByText("210").length).toBeGreaterThan(0);
   });
 
   it("loads mastery via the injected loader and the blended score reflects the new coverage", async () => {

@@ -1,9 +1,10 @@
 // MASTERY-BLENDED SUBJECT SCORE (lib/promotion.js, "Blend depth × coverage",
-// owner decision 2026-06-17): the DISPLAYED subject score = depth × the fraction of
-// the curriculum the learner has mastered (green). 0 mastered → 0; all mastered →
-// the full depth; each newly-mastered concept raises the number. These pin that
-// correlation (the whole point of the change) plus the practice-routing picker that
-// makes ordinary practice accrue mastery.
+// owner decision 2026-06-17; grandfather floor added 2026-06-18): the DISPLAYED subject
+// score = depth × the fraction of the curriculum mastered (green), but FLOORED at the
+// band the depth earned, so demonstrated reasoning is never erased. No coverage → the
+// depth's band floor (rank preserved, not Elementary); all mastered → the full depth;
+// each newly-mastered concept raises the number toward depth. These pin that contract
+// plus the practice-routing picker that makes ordinary practice accrue mastery.
 import { describe, it, expect } from "vitest";
 import {
   masteryCounts,
@@ -14,7 +15,7 @@ import {
   pickPracticeConcept,
 } from "@/lib/promotion";
 import { conceptsFor, RANKS as CURRICULUM_RANKS } from "@/lib/curriculum";
-import { ORDER, SCORE_MAX, rankFor } from "@/lib/scoring";
+import { ORDER, SCORE_MAX, rankFor, band } from "@/lib/scoring";
 
 // A green counter record (≥2 hits at ≥70 — lib/mastery.js) and a yellow (not-green) one.
 const GREEN = { attempts: 2, greenHits: 2, lastQuality: 85, bestQuality: 90 };
@@ -60,9 +61,12 @@ describe("masteryCounts / coverageFraction", () => {
   });
 });
 
-describe("effectiveSubjectScore — depth × coverage", () => {
-  it("0 mastered zeroes a high depth (the reported bug)", () => {
-    expect(effectiveSubjectScore(307, {}, "chemistry")).toBe(0);
+describe("effectiveSubjectScore — depth × coverage, floored at the earned band", () => {
+  it("grandfathers a high depth with no coverage to its band floor (NOT zeroed — the rollout fix)", () => {
+    // 307 (Doctorate, 280–350) with 0 mastered → the band floor 280, never 0, so the
+    // learner keeps their rank instead of cratering to Elementary.
+    expect(effectiveSubjectScore(307, {}, "chemistry")).toBe(280);
+    expect(band(effectiveSubjectScore(307, {}, "chemistry"))).toBe(band(307));
   });
 
   it("full mastery returns the full depth unchanged", () => {
@@ -71,13 +75,17 @@ describe("effectiveSubjectScore — depth × coverage", () => {
     expect(effectiveSubjectScore(SCORE_MAX, full, "chemistry")).toBe(SCORE_MAX);
   });
 
-  it("is monotonic: mastering more never lowers the score, for fixed depth", () => {
+  it("never demotes below the earned band, and rises toward depth as coverage grows", () => {
     const elem = coverMap("math", [CURRICULUM_RANKS[0]], GREEN);
     const elemMid = coverMap("math", [CURRICULUM_RANKS[0], CURRICULUM_RANKS[1]], GREEN);
+    const full = coverMap("math", CURRICULUM_RANKS, GREEN);
     const a = effectiveSubjectScore(300, elem, "math");
     const b = effectiveSubjectScore(300, elemMid, "math");
-    expect(b).toBeGreaterThan(a);
-    expect(a).toBeGreaterThan(0);
+    const f = effectiveSubjectScore(300, full, "math");
+    expect(a).toBe(280); // low coverage clamps to the depth's band floor (Doctorate 280)
+    expect(b).toBeGreaterThanOrEqual(a); // mastering more never lowers it
+    expect(f).toBe(300); // full coverage reaches the full depth
+    expect(f).toBeGreaterThan(a); // and rises above the floor
   });
 
   it("for fixed coverage, stronger reasoning (depth) still earns more", () => {
@@ -104,8 +112,8 @@ describe("effectiveScores — blends every subject, preserves the profile", () =
     const eff = effectiveScores(scores, full);
     expect(ORDER.every((k) => k in eff)).toBe(true);
     expect(eff.math.score).toBe(200); // math fully covered → unchanged
-    expect(eff.chemistry.score).toBe(0); // chemistry 0 coverage → 0
-    expect(eff.physics.score).toBe(0);
+    expect(eff.chemistry.score).toBe(280); // chemistry 0 coverage → floored at its band (307 → Doctorate 280)
+    expect(eff.physics.score).toBe(70); // physics 0 coverage → floored at its band (100 → Middle 70)
     // The reasoning profile rides through untouched.
     expect(eff.math.rubric).toEqual({ principle: 3 });
     expect(eff.math.weakConcepts).toEqual(["x"]);
@@ -119,13 +127,13 @@ describe("effectiveScores — blends every subject, preserves the profile", () =
 });
 
 describe("subjectRankView — the chip's one-shot view", () => {
-  it("surfaces depth, blended effective, counts, and the rank from the effective score", () => {
+  it("surfaces depth, the floored effective, counts, and the rank from the effective score", () => {
     const total = allConceptKeys("chemistry").length;
     const v = subjectRankView(307, {}, "chemistry");
     expect(v.depth).toBe(307);
-    expect(v.effective).toBe(0);
+    expect(v.effective).toBe(280); // floored at the Doctorate band, not zeroed
     expect(v).toMatchObject({ green: 0, total, remaining: total, fullyMastered: false });
-    expect(v.rank).toEqual(rankFor(0)); // Elementary
+    expect(v.rank).toEqual(rankFor(280)); // keeps the depth-earned rank (Doctorate)
   });
 
   it("fullyMastered when every concept is green; effective === depth", () => {
