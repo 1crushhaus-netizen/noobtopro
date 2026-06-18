@@ -2183,11 +2183,11 @@ export default function Noobtopro() {
                     )}
 
                     {feedback && (
-                      // A11y P1-3: the grading result lands asynchronously (replacing
-                      // the composer), so wrap it in a polite live region — screen
-                      // readers announce the reasoning score + delta + feedback when
-                      // they appear, instead of going silent after "Working…".
-                      <div className="fade-up" role="status" aria-live="polite">
+                      // A11y: the concise score + delta is announced by the dedicated
+                      // `.np-livescore` polite region below; this large result block is
+                      // NOT itself a live region (wrapping the whole breakdown + lists in
+                      // aria-live made SR read a verbose wall of text on every grade).
+                      <div className="fade-up">
                         <div className="np-card np-feedhead">
                           <div>
                             <div className="np-eyebrow">Reasoning quality this attempt</div>

@@ -7,7 +7,7 @@ import {
   ORG_ID,
   WEBSITE_ID,
   subjectLabel,
-  subjectColor,
+  subjectTextColor,
   subjectUrl,
   rankUrl,
   conceptUrl,
@@ -67,7 +67,7 @@ export default async function ConceptPage({ params }) {
   const nonce = (await headers()).get("x-nonce") || undefined;
   const { guide, roots, crossRoots, related } = data;
   const label = data.concept.label;
-  const color = subjectColor(subject);
+  const color = subjectTextColor(subject);
   const sLabel = subjectLabel(subject);
   const description = conceptDescription(data);
   const canonical = conceptUrl(subject, rank, key);

@@ -97,7 +97,7 @@ export default function AdminDashboard({ adminApi }) {
     <div className="fade-up">
       <div className="np-pagehead">
         <span className="np-eyebrow--mono">Admin</span>
-        <h2 className="np-h2">Curation and security</h2>
+        <h1 className="np-h2">Curation and security</h1>
         <p className="np-lede">
           Approve concept guides into the public hub, and triage suspicious activity. Actions take effect immediately.
         </p>
