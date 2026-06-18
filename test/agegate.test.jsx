@@ -8,8 +8,8 @@ afterEach(cleanup);
 const setDob = (value) =>
   fireEvent.change(screen.getByLabelText(/date of birth/i), { target: { value } });
 
-describe("AgeGate (P0-10 neutral age screen)", () => {
-  it("confirms a 13+ date of birth, reporting the birth year", async () => {
+describe("AgeGate (18+ adults-only age screen)", () => {
+  it("confirms an 18+ date of birth, reporting the birth year", async () => {
     const onConfirm = vi.fn(async () => {});
     render(<AgeGate onConfirm={onConfirm} onUnderage={vi.fn()} />);
     setDob("2000-05-15");
@@ -17,15 +17,15 @@ describe("AgeGate (P0-10 neutral age screen)", () => {
     await waitFor(() => expect(onConfirm).toHaveBeenCalledWith({ birthYear: 2000 }));
   });
 
-  it("blocks an under-13 date of birth with parental-consent messaging and signs out", () => {
+  it("blocks an under-18 date of birth with adults-only messaging and signs out", () => {
     const onConfirm = vi.fn(async () => {});
     const onUnderage = vi.fn();
     render(<AgeGate onConfirm={onConfirm} onUnderage={onUnderage} />);
-    const eightYearsOld = new Date().getFullYear() - 8;
-    setDob(`${eightYearsOld}-01-01`);
+    const sixteenYearsOld = new Date().getFullYear() - 16;
+    setDob(`${sixteenYearsOld}-01-01`);
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
-    // Blocked: parental-consent message shown, never confirmed.
-    expect(screen.getByText(/ages 13 and up/i)).toBeTruthy();
+    // Blocked: adults-only message shown, never confirmed.
+    expect(screen.getByText(/adults-only service for ages 18 and over/i)).toBeTruthy();
     expect(onConfirm).not.toHaveBeenCalled();
     // Signing out from the blocked state triggers the underage handler.
     fireEvent.click(screen.getByRole("button", { name: /sign out/i }));

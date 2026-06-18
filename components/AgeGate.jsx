@@ -3,13 +3,12 @@
 import React, { useState } from "react";
 import Icon from "@/components/Icon";
 
-// P0-10: a neutral, one-time age screen shown right after sign-up (account creation),
-// before the signed-in app is usable. Self-declared date of birth (the standard COPPA
-// "neutral age screen"): a user below MIN_AGE is blocked with parental-consent messaging
-// and signed out; at/above it, the parent records the acknowledgement on the account so
-// it's never asked again. Guests (local-only data) are not gated — this fires only once a
-// real account exists.
-const MIN_AGE = 13;
+// A neutral, one-time age screen shown right after sign-up (account creation), before the
+// signed-in app is usable. noobtopro is an adults-only service: a user must self-declare a
+// date of birth of MIN_AGE or older to continue. Anyone below MIN_AGE is blocked and signed
+// out; at/above it, the acknowledgement is recorded on the account so it's never asked again.
+// Guests (local-only data) are not gated — this fires only once a real account exists.
+const MIN_AGE = 18;
 
 function ageFromISO(iso) {
   if (!iso) return null;
@@ -65,11 +64,11 @@ export default function AgeGate({ onConfirm, onUnderage }) {
         <div className="np-surface-elevated np-modal" role="dialog" aria-modal="true" aria-labelledby="np-age-blk-title">
           <div className="np-modal-spark" aria-hidden="true"><Icon name="lock" size={22} /></div>
           <h2 id="np-age-blk-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
-            Ask a parent or guardian
+            For ages {MIN_AGE} and over
           </h2>
           <p className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
-            noobtopro is for ages {MIN_AGE} and up. Please ask a parent or guardian to set it up
-            together with you.
+            noobtopro is an adults-only service for ages {MIN_AGE} and over. Please come back
+            once you&rsquo;re {MIN_AGE}.
           </p>
           <button className="np-btn np-secondary np-btn--block" onClick={() => onUnderage?.()}>
             <Icon name="login" size={16} /> Sign out

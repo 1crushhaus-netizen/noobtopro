@@ -872,7 +872,7 @@ export default function Noobtopro() {
   function hasAgeAck(u) {
     return !!(u && u.user_metadata && (u.user_metadata.age_ack_year || u.user_metadata.birthdate));
   }
-  // 13+ path: record the acknowledgement on the account, then refresh `user` so the gate
+  // 18+ path: record the acknowledgement on the account, then refresh `user` so the gate
   // (derived from user metadata) clears. Throws so AgeGate can surface a save failure.
   async function confirmAge({ birthYear }) {
     const sb = getSupabase();
@@ -882,11 +882,11 @@ export default function Noobtopro() {
     const { data } = await sb.auth.getUser();
     setUser((data && data.user) || user);
   }
-  // Under-13 path: sign out (no learning data was collected — they never reached the app)
+  // Under-18 path: sign out (no learning data was collected — they never reached the app)
   // and surface why on the landing.
   async function handleUnderage() {
     try { await signOutUser(); } catch {}
-    setError("noobtopro is for ages 13 and up. Please ask a parent or guardian to set it up with you.");
+    setError("noobtopro is an adults-only service for ages 18 and over.");
   }
 
   // Dashboard → "Delete account": permanent erasure (cancels any Pro subscription, deletes

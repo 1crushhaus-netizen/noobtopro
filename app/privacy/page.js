@@ -111,13 +111,12 @@ export default function PrivacyPage() {
         <p>We will respond to verified requests within the timeframe required by applicable law.</p>
       </Section>
 
-      <Section heading="7. Children's privacy">
+      <Section heading="7. Age requirement (18+)">
         <p>
-          noobtopro is intended for users aged <strong>13 and older</strong>. Users under the age of
-          digital consent in their jurisdiction may use the Service only with the involvement and
-          consent of a parent or guardian. We ask for age at sign-up and do not knowingly collect
-          personal information from a child under 13 without verifiable parental consent. If you
-          believe a child has provided us personal information without such consent, contact us at
+          noobtopro is an <strong>adults-only service intended for users aged 18 and older</strong>.
+          The Service is not directed to children or minors, and we do not knowingly collect personal
+          information from anyone under 18. We ask for date of birth at sign-up to confirm eligibility.
+          If you believe a person under 18 has provided us personal information, contact us at
           <strong> [privacy@your-domain]</strong> and we will delete it.
         </p>
       </Section>

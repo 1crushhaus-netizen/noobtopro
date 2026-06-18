@@ -20,9 +20,11 @@ export default function TermsPage() {
 
       <Section heading="1. Eligibility">
         <p>
-          You must be at least <strong>13 years old</strong> to use the Service. If you are under the
-          age of digital consent in your jurisdiction, you may use the Service only with the consent
-          and supervision of a parent or guardian, who agrees to these Terms on your behalf.
+          noobtopro is an <strong>adults-only service</strong>. You must be at least{" "}
+          <strong>18 years old</strong> to create an account or use the Service. By creating an
+          account or using the Service, you represent and warrant that you are 18 years of age or
+          older. The Service is not directed to, and we do not knowingly permit use by, anyone under
+          18. We may suspend or terminate any account we believe belongs to a person under 18.
         </p>
       </Section>
 
