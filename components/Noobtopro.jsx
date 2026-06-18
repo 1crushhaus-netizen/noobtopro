@@ -15,7 +15,7 @@ import {
   defaultDifficultyForBand,
   explainRankMove,
 } from "@/lib/scoring";
-import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData, deleteAccount as requestAccountDeletion, submitAgeVerification, loadReviews, loadMastery, loadSubscription } from "@/lib/store";
+import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData, deleteAccount as requestAccountDeletion, submitAgeVerification, exportMyData, loadReviews, loadMastery, loadSubscription } from "@/lib/store";
 import { getSupabase, isSupabaseConfigured, signInWithProvider, signOutUser, PROVIDERS } from "@/lib/supabase";
 import { track } from "@vercel/analytics";
 import { isActiveSubscription } from "@/lib/proStatus";
@@ -906,6 +906,31 @@ export default function Noobtopro() {
       return true;
     } catch (e) {
       setError(e.message || "Could not delete your account.");
+      return false;
+    }
+  }
+
+  // Dashboard → "Download my data": GDPR access/portability. Fetch the JSON bundle and save
+  // it as a file. Returns true on success / false on error (the Dashboard button clears its
+  // own busy state on false); errors surface in the global banner.
+  async function exportData() {
+    try {
+      const data = await exportMyData();
+      if (typeof window !== "undefined") {
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "noobtopro-data-export.json";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
+      setError("");
+      return true;
+    } catch (e) {
+      setError(e.message || "Could not export your data.");
       return false;
     }
   }
@@ -1825,6 +1850,7 @@ export default function Noobtopro() {
             onLearn={openLearn}
             onReset={resetProgress}
             onDeleteAccount={deleteAccount}
+            onExport={user ? exportData : undefined}
             onSignIn={() => (isSupabaseConfigured ? openSignIn() : setShowAuthNote(true))}
             onUpgrade={startCheckout}
             onManageSubscription={openPortal}
