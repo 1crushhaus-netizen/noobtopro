@@ -1128,3 +1128,52 @@ summary.np-cardicon { min-height: 44px; }
     transition-duration: .01ms !important;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Cookie/analytics consent banner (components/ConsentManager.jsx). A bottom-anchored
+   bar that loads the non-essential analytics only after an explicit opt-in (ePrivacy
+   Art. 5(3)). High z-index so it sits above app overlays; respects safe-area insets.
+--------------------------------------------------------------------------- */
+.np-consent {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: max(16px, env(safe-area-inset-bottom));
+  z-index: 1000;
+  width: min(720px, calc(100vw - 32px));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 20px;
+  padding: 16px 18px;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-elevated);
+  box-shadow: var(--shadow-lg);
+}
+.np-consent-body { flex: 1 1 320px; min-width: 0; }
+.np-consent-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 4px;
+  color: var(--text);
+}
+.np-consent-text {
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+  color: var(--muted);
+}
+.np-consent-text a { color: var(--text); text-underline-offset: 2px; }
+.np-consent-actions {
+  display: flex;
+  gap: 10px;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+.np-consent-btn { white-space: nowrap; }
+@media (max-width: 520px) {
+  .np-consent { gap: 12px; }
+  .np-consent-actions { width: 100%; }
+  .np-consent-btn { flex: 1 1 0; }
+}

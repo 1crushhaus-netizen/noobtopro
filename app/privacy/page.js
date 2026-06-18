@@ -69,7 +69,8 @@ export default function PrivacyPage() {
             question, and any photo of your work you upload are sent to Groq to produce a grade.
             Do not include personal or sensitive information in your answers.
           </li>
-          <li><strong>Vercel</strong> — hosting and privacy-friendly analytics.</li>
+          <li><strong>Vercel</strong> — hosting and privacy-friendly analytics (Web Analytics &amp; Speed Insights).</li>
+          <li><strong>Ahrefs</strong> — privacy-friendly, cookieless web analytics for understanding traffic.</li>
           <li><strong>Polar</strong> — payment processing and subscription management (Merchant of Record).</li>
         </ul>
         <p>We do not sell your personal information.</p>
@@ -77,11 +78,18 @@ export default function PrivacyPage() {
 
       <Section heading="4. Cookies and analytics">
         <p>
-          We use Vercel Web Analytics and Vercel Speed Insights, which are designed to be
-          privacy-friendly: they do <strong>not</strong> use advertising cookies and do not collect
-          personally identifiable information for cross-site tracking. We use a small amount of
-          browser storage strictly necessary to keep you signed in (via Supabase) and to remember
-          preferences such as your theme. We do not use third-party advertising trackers.
+          We use a small amount of browser storage that is <strong>strictly necessary</strong> to keep
+          you signed in (via Supabase), to remember preferences such as your theme, and to remember your
+          analytics choice. These do not require consent.
+        </p>
+        <p>
+          For <strong>analytics</strong> we use Vercel Web Analytics, Vercel Speed Insights, and Ahrefs
+          Web Analytics. They are designed to be privacy-friendly — they do <strong>not</strong> use
+          advertising cookies and do not collect personally identifiable information for cross-site
+          tracking — but they are not strictly necessary, so they load <strong>only after you opt in</strong>
+          via our cookie banner. You can change or withdraw your choice at any time through
+          &quot;Cookie preferences&quot; in the footer, and we honor Global Privacy Control (GPC) signals
+          as an opt-out. We do not use third-party advertising trackers.
         </p>
       </Section>
 
