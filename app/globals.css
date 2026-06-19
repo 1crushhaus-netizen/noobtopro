@@ -215,6 +215,9 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
+/* A11y (2.4.11): offset in-page anchor jumps + scrolled-to focus targets so the
+   sticky top nav never covers the focused/anchored content. */
+html { scroll-padding-top: 72px; }
 
 body {
   background: var(--bg);
@@ -436,7 +439,7 @@ body {
 
 /* Theme switcher — 3-way segmented control (light / system / dark) */
 .np-theme { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: var(--radius-pill); padding: 3px; background: var(--tint-1); }
-.np-theme-btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border: none; border-radius: var(--radius-pill); background: none; color: var(--faint); cursor: pointer; transition: color .15s ease, background .15s ease; }
+.np-theme-btn { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border: none; border-radius: var(--radius-pill); background: none; color: var(--faint); cursor: pointer; transition: color .15s ease, background .15s ease; }
 .np-theme-btn:hover { color: var(--text); }
 .np-theme-btn.active { background: var(--tint-2); color: var(--text); }
 
@@ -449,7 +452,7 @@ body {
 .np-diag-proggroup { display: flex; gap: 5px; flex: 1; }
 .np-qmeta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-bottom: 12px; }
 .np-metaline { font-family: var(--mono); font-size: 12px; letter-spacing: var(--eyebrow-ls); }
-.np-topic { background: var(--tint-1); border: 1px solid var(--line); border-radius: var(--radius-inset); padding: 3px 9px; font-size: 12px; }
+.np-topic { background: var(--tint-1); border: 1px solid var(--line); border-radius: var(--radius-inset); padding: 3px 9px; font-size: 12px; max-width: 100%; overflow-wrap: anywhere; }
 .np-livescore { margin-left: auto; font-family: var(--mono); font-weight: 700; border: 1px solid; border-radius: var(--radius-pill); padding: 4px 12px; font-size: 13px; }
 /* A11y P2-8: questions are LLM output and can carry long unbroken tokens (URLs, big
    numbers, formulae); overflow-wrap:anywhere lets them break so they can't force
@@ -479,7 +482,7 @@ body {
   line-height: 1.4;
   transition: border-color .15s ease, background .15s ease;
 }
-.np-field::placeholder { color: var(--faint); }
+.np-field::placeholder { color: var(--muted); }
 .np-field:hover:not(:disabled) { background: var(--tint-2); }
 .np-field:focus, .np-field:focus-visible {
   outline: 2px solid var(--focus); outline-offset: 2px;
@@ -496,7 +499,7 @@ body {
 .np-field[type="date"]::-webkit-calendar-picker-indicator:hover,
 .np-field[type="time"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 /* An empty (required) date reads as a placeholder: faint until a real date lands. */
-.np-field[type="date"]:invalid { color: var(--faint); }
+.np-field[type="date"]:invalid { color: var(--muted); }
 
 /* Field label + inline validation message — the shared pair every form field uses. */
 .np-field-label { display: block; margin-bottom: 7px; }
@@ -521,9 +524,11 @@ body {
 .np-eyebrow--sm { font-size: 10.5px; }
 .np-eyebrow--xs { font-size: 10px; letter-spacing: .06em; line-height: 1.25; }
 .np-eyebrow--icon { display: inline-flex; align-items: center; gap: 7px; }
-.np-eyebrow--good { color: var(--phys); }
-.np-eyebrow--improve { color: var(--math); }
-.np-eyebrow--error { color: var(--chem); }
+/* A11y (1.4.3): valence eyebrows are small (11px) meaning-bearing text, so they use
+   the accessible -text accent variants rather than the bright chart/border accents. */
+.np-eyebrow--good { color: var(--phys-text); }
+.np-eyebrow--improve { color: var(--math-text); }
+.np-eyebrow--error { color: var(--chem-text); }
 .np-eyebrow--subject { color: var(--subject, var(--muted)); }
 
 .np-feedhead { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 14px; }
@@ -537,16 +542,16 @@ body {
 .np-card--accent { border-color: var(--accent, var(--line)); }
 .np-socratic { margin-bottom: 14px; border-color: var(--line-strong); }
 .np-cardicon { display: flex; align-items: center; gap: 7px; font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin-bottom: 8px; font-weight: 600; }
-.np-socratictext { font-family: var(--display); font-size: 16px; font-weight: 500; line-height: 1.5; }
+.np-socratictext { font-family: var(--display); font-size: 16px; font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; }
 .np-lesson { margin-bottom: 18px; }
-.np-lessontext { font-size: 14px; line-height: 1.65; color: var(--text); }
+.np-lessontext { font-size: 14px; line-height: 1.65; color: var(--text); overflow-wrap: anywhere; }
 
 /* ---- Learn tab: curated written guide on the concept page ---- */
-.np-guideproblem { font-size: 14px; line-height: 1.6; color: var(--text); background: var(--tint-1); border: 1px solid var(--line); border-radius: var(--radius-inset); padding: 12px 14px; margin: 0 0 12px; }
+.np-guideproblem { font-size: 14px; line-height: 1.6; color: var(--text); background: var(--tint-1); border: 1px solid var(--line); border-radius: var(--radius-inset); padding: 12px 14px; margin: 0 0 12px; overflow-wrap: anywhere; }
 .np-guidesteps { margin: 0; padding-left: 24px; display: grid; gap: 8px; }
 .np-guidesteps li { font-size: 14px; line-height: 1.6; color: var(--text); }
 .np-guidesteps li::marker { color: var(--muted); font-weight: 600; }
-.np-guideanswer { font-size: 14px; line-height: 1.6; color: var(--text); margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--line); }
+.np-guideanswer { font-size: 14px; line-height: 1.6; color: var(--text); margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
 .np-selfqs { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .np-selfqs li { font-size: 14px; line-height: 1.6; color: var(--text); position: relative; padding-left: 24px; }
 .np-selfqs li::before { content: "?"; position: absolute; left: 4px; top: 0; color: var(--muted); font-family: var(--ui); font-weight: 700; }
@@ -587,7 +592,7 @@ body {
 .np-erritem:last-child { border-bottom: none; }
 .np-errbadge { flex: 0 0 auto; font-family: var(--mono); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; border: 1px solid; border-radius: var(--radius-pill); padding: 2px 9px; white-space: nowrap; }
 .np-errbody { flex: 1; min-width: 0; }
-.np-errwhat { font-size: 14px; line-height: 1.5; color: var(--text); }
+.np-errwhat { font-size: 14px; line-height: 1.5; color: var(--text); overflow-wrap: anywhere; }
 .np-skip { color: var(--muted); font-size: 13px; white-space: nowrap; display: inline-flex; align-items: center; min-height: 44px; }
 .np-skip:disabled { opacity: var(--disabled-opacity); cursor: not-allowed; }
 .np-skip:not(:disabled):hover { color: var(--text); }
@@ -612,7 +617,7 @@ body {
 .np-statnum { font-family: var(--mono); font-size: var(--fs-stat); font-weight: 700; line-height: 1.1; letter-spacing: -.02em; }
 .np-statsub { font-size: 13px; color: var(--muted); }
 .np-chartcard { margin-bottom: 16px; }
-.np-charttitle { font-family: var(--display); font-size: 15px; font-weight: 600; letter-spacing: -.01em; margin-bottom: 2px; }
+.np-charttitle { font-family: var(--display); font-size: 15px; font-weight: 600; letter-spacing: -.01em; margin: 0 0 2px; }
 .np-sectiontitle { font-family: var(--display); font-size: var(--fs-title); font-weight: 600; letter-spacing: -.015em; margin: 0 0 4px; }
 .np-emptytitle { font-family: var(--display); font-size: 18px; font-weight: 600; margin: 0 0 8px; }
 .np-chartsub { font-size: 13px; color: var(--muted); margin-bottom: 14px; }
@@ -654,7 +659,9 @@ body {
 /* ---- "save your progress" modal ---- */
 .np-modal-backdrop {
   position: fixed; inset: 0; z-index: 100;
-  display: flex; align-items: center; justify-content: center;
+  /* `safe center` keeps short dialogs centered but pins a taller-than-viewport dialog
+     to the top so it can't clip; overflow-y lets it scroll (phone landscape, 400% zoom). */
+  display: flex; align-items: safe center; justify-content: center; overflow-y: auto;
   padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
   background: var(--scrim);
   backdrop-filter: blur(4px);
@@ -804,11 +811,13 @@ body {
 .np-concepttag--assumed::before { content: "✓"; }
 .np-concepttag--yellow::before { content: "…"; }
 .np-concepttag--red::before    { content: "!"; }
-.np-concepttag--green  { border-color: var(--phys);   color: var(--phys);   background: var(--phys-soft); }
+/* A11y (1.4.3): the chip TEXT uses the accessible -text accent variants (≥4.5:1 on
+   both themes); the bright accent stays on the BORDER (non-text, 3:1 suffices). */
+.np-concepttag--green  { border-color: var(--phys);   color: var(--phys-text);   background: var(--phys-soft); }
 /* Assumed (inferred, not demonstrated): the mastered green, but HOLLOW + dashed so
    it reads as tentative — distinct from earned solid green at a glance. */
-.np-concepttag--assumed { border-color: var(--phys); border-style: dashed; color: var(--phys); background: transparent; }
-.np-concepttag--yellow { border-color: var(--math);   color: var(--math);   background: var(--math-soft); }
+.np-concepttag--assumed { border-color: var(--phys); border-style: dashed; color: var(--phys-text); background: transparent; }
+.np-concepttag--yellow { border-color: var(--math);   color: var(--math-text);   background: var(--math-soft); }
 .np-concepttag--red    { border-color: var(--danger-border); color: var(--danger); background: var(--danger-soft); }
 .np-concepttag--green:hover  { border-color: var(--phys);   background: var(--phys-soft); }
 .np-concepttag--assumed:hover { border-color: var(--phys); background: var(--phys-soft); }
@@ -977,6 +986,10 @@ body {
 @media (max-width: 560px) {
   .np-dash-kpis { grid-template-columns: 1fr; }
   .np-dash-gateblur { grid-template-columns: 1fr; }
+  /* Stack the action row full-width so the (up to 7) long-labelled buttons don't
+     wrap into an uneven, overflowing grid on phones. */
+  .np-dash-actions { gap: 8px; }
+  .np-dash-actbtn { flex: 1 1 100%; }
 }
 
 /* ---- admin dashboard ---- */
@@ -1033,6 +1046,11 @@ body {
 @media (max-width: 640px) {
   .np-topnav-tabs { display: none; }
 
+  /* PERF (INP): two stacked backdrop-filters (the sticky top bar + the fixed bottom
+     bar) re-rasterize their blurred backdrop on every scroll frame on mobile — the
+     most expensive scroll-time effect. Drop the blur for a solid fill on phones. */
+  .np-topnav { background: var(--bg); backdrop-filter: none; -webkit-backdrop-filter: none; }
+
   .np-bottomnav {
     display: flex;
     position: fixed;
@@ -1042,9 +1060,7 @@ body {
     gap: 2px;
     padding: 6px 8px;
     padding-bottom: max(6px, env(safe-area-inset-bottom));
-    background: color-mix(in srgb, var(--bg) 92%, transparent);
-    backdrop-filter: saturate(140%) blur(10px);
-    -webkit-backdrop-filter: saturate(140%) blur(10px);
+    background: var(--bg);
     border-top: 1px solid var(--line);
   }
   .np-bottomnav-tab {

@@ -42,9 +42,9 @@ const ENGINE = [
   ["refresh", "Unified Glicko-2 ranking",
     "Each axis is a difficulty-adjusted rating judged against the question’s level. Beating a hard problem climbs; acing an easy one barely moves you. Score, radar, and leaderboard never disagree."],
   ["shield", "Built to resist gaming",
-    "Jargon-salad scores single digits. Farming one topic damps your gains. Scoring is server-authoritative over an HMAC-signed step chain, so you can’t forge a grade or skip a step."],
+    "Jargon-salad scores single digits. Farming one topic damps your gains. Scoring is server-authoritative over a tamper-proof, signed step chain, so you can’t forge a grade or skip a step."],
   ["clip", "Photo-of-work grading",
-    "Snap a photo of your handwritten solution. A vision model reads your steps and grades the reasoning, with a graceful text fallback. Free on your diagnostic, unlimited with Pro for practice."],
+    "Snap a photo of your handwritten solution. A vision model reads your steps and grades the reasoning, with a graceful text fallback. One free photo grade on your diagnostic; unlimited with Pro for practice."],
   ["bulb", "Learn, don’t leak",
     "Stuck? It won’t hand you the answer; it asks the right question and teaches the one concept you’re missing, with the proof or derivation behind it."],
 ];
@@ -73,7 +73,7 @@ const FREE_FEATURES = [
   "Full adaptive diagnostic + your 0–350 rank",
   "Anonymous leaderboard placement",
   "Every curated concept guide",
-  "~5 graded practice problems / day",
+  "Up to 5 graded practice problems / day",
   "Reasoning radar + typed feedback",
 ];
 const PRO_FEATURES = [
@@ -252,8 +252,7 @@ export default function Landing({
           </h1>
           <p className="np-lp-sub">
             Real problems in math, physics, and chemistry, graded on how you reason, not what you
-            recall. noobtopro pinpoints your level, then gives you a structured path from where you
-            are to Doctorate-level mastery.
+            recall. noobtopro pinpoints your level, then gives you a structured path to climb.
           </p>
           <div className="np-lp-herocta">
             <button className="np-btn np-primary np-big" onClick={onProveIt} disabled={busy}>
@@ -262,6 +261,8 @@ export default function Landing({
             <a className="np-ghost np-lp-secondary" href="#how">See how it works</a>
           </div>
           <div className="np-lp-herometa">
+            <span>9 problems · ~10 min</span>
+            <span className="np-lp-dot">·</span>
             <span>math · physics · chemistry</span>
             <span className="np-lp-dot">·</span>
             <span>0–350 per subject</span>
@@ -449,7 +450,7 @@ export default function Landing({
                         id={qid}
                         className="np-lp-faq-q"
                         aria-expanded={open}
-                        aria-controls={aid}
+                        aria-controls={open ? aid : undefined}
                         onClick={() => setOpenFaq(open ? null : id)}
                       >
                         <span>{q}</span>

@@ -25,6 +25,11 @@ function strokeAttrs(size) {
     strokeWidth: 2,
     strokeLinecap: "round",
     strokeLinejoin: "round",
+    // Icons are decorative: the accessible name lives on the parent control
+    // (button/link aria-label or adjacent text). Hide them from AT and the tab
+    // order so they aren't announced as empty/extra graphics (WCAG 1.1.1, 4.1.2).
+    "aria-hidden": true,
+    focusable: "false",
   };
 }
 
@@ -50,9 +55,9 @@ const ICONS = {
   flag: (s) => <svg {...strokeAttrs(s)}><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7" /></svg>,
   login: (s) => <svg {...strokeAttrs(s)}><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3" /></svg>,
   logout: (s) => <svg {...strokeAttrs(s)}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></svg>,
-  lock: (s) => <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor"><path d="M12 1.5a4.5 4.5 0 0 0-4.5 4.5V9H6.75A1.75 1.75 0 0 0 5 10.75v9.5C5 21.22 5.78 22 6.75 22h10.5c.97 0 1.75-.78 1.75-1.75v-9.5C19 9.78 18.22 9 17.25 9H16.5V6A4.5 4.5 0 0 0 12 1.5Zm2.5 7.5h-5V6a2.5 2.5 0 0 1 5 0v3Z" /></svg>,
-  spark: (s) => <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.9 6.1L20 10l-6.1 1.9L12 18l-1.9-6.1L4 10l6.1-1.9z" /></svg>,
-  google: (s) => <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor"><path d="M21.8 10.04H12v3.96h5.62c-.25 1.34-1 2.48-2.13 3.24v2.69h3.45c2.02-1.86 3.18-4.6 3.18-7.85 0-.73-.07-1.43-.2-2.08z" /><path d="M12 22c2.7 0 4.96-.9 6.62-2.43l-3.45-2.69c-.96.64-2.18 1.02-3.17 1.02-2.6 0-4.8-1.76-5.59-4.12H2.84v2.78A10 10 0 0 0 12 22z" /><path d="M6.41 13.78a6 6 0 0 1 0-3.56V7.44H2.84a10 10 0 0 0 0 9.12z" /><path d="M12 5.98c1.47 0 2.79.51 3.83 1.5l2.86-2.86A9.6 9.6 0 0 0 12 2 10 10 0 0 0 2.84 7.44l3.57 2.78C7.2 7.74 9.4 5.98 12 5.98z" /></svg>,
+  lock: (s) => <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M12 1.5a4.5 4.5 0 0 0-4.5 4.5V9H6.75A1.75 1.75 0 0 0 5 10.75v9.5C5 21.22 5.78 22 6.75 22h10.5c.97 0 1.75-.78 1.75-1.75v-9.5C19 9.78 18.22 9 17.25 9H16.5V6A4.5 4.5 0 0 0 12 1.5Zm2.5 7.5h-5V6a2.5 2.5 0 0 1 5 0v3Z" /></svg>,
+  spark: (s) => <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M12 2l1.9 6.1L20 10l-6.1 1.9L12 18l-1.9-6.1L4 10l6.1-1.9z" /></svg>,
+  google: (s) => <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M21.8 10.04H12v3.96h5.62c-.25 1.34-1 2.48-2.13 3.24v2.69h3.45c2.02-1.86 3.18-4.6 3.18-7.85 0-.73-.07-1.43-.2-2.08z" /><path d="M12 22c2.7 0 4.96-.9 6.62-2.43l-3.45-2.69c-.96.64-2.18 1.02-3.17 1.02-2.6 0-4.8-1.76-5.59-4.12H2.84v2.78A10 10 0 0 0 12 22z" /><path d="M6.41 13.78a6 6 0 0 1 0-3.56V7.44H2.84a10 10 0 0 0 0 9.12z" /><path d="M12 5.98c1.47 0 2.79.51 3.83 1.5l2.86-2.86A9.6 9.6 0 0 0 12 2 10 10 0 0 0 2.84 7.44l3.57 2.78C7.2 7.74 9.4 5.98 12 5.98z" /></svg>,
   menu: (s) => <svg {...strokeAttrs(s)}><path d="M3 6h18M3 12h18M3 18h18" /></svg>,
   user: (s) => <svg {...strokeAttrs(s)}><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7" /></svg>,
 };

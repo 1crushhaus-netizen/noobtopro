@@ -137,7 +137,7 @@ function KpiStats({ scores, attempts }) {
   return (
     <div className="np-dash-kpis">
       <div className="np-card np-lift np-statcard">
-        <span className="np-eyebrow np-eyebrow--xs">Doctorate index</span>
+        <span className="np-eyebrow np-eyebrow--xs" title="Your overall standing across all three subjects on the 0–350 scale.">Doctorate index</span>
         {/* Neutral ink like its siblings — the KPI is not a subject or a valence,
             so it gets no chromatic accent under the greyscale system. */}
         <span className="np-statnum">
@@ -232,7 +232,7 @@ function RadarPanel({ scores, onPractice, onLearn }) {
   return (
     <div className="np-card np-dash-radar" data-reveal style={{ "--ri": 0 }}>
       <div className="np-dash-cardhead">
-        <div className="np-charttitle">Reasoning profile</div>
+        <h2 className="np-charttitle">Reasoning profile</h2>
         <div className="np-chartsub" style={{ marginBottom: 0 }}>
           Where you reason well across the dimensions we grade, and where to focus next.
         </div>
@@ -373,7 +373,7 @@ function TrendCharts({ loadTrends }) {
   return (
     <>
       <div className="np-card np-chartcard">
-        <div className="np-charttitle">Total points over time</div>
+        <h2 className="np-charttitle">Total points over time</h2>
         <div className="np-chartsub">From your starting scores through every graded attempt.</div>
         {linePoints.length >= 2 ? (
           <LineChart values={linePoints} yMax={1050} />
@@ -382,7 +382,7 @@ function TrendCharts({ loadTrends }) {
         )}
       </div>
       <div className="np-card np-chartcard">
-        <div className="np-charttitle">Points gained and lost</div>
+        <h2 className="np-charttitle">Points gained and lost</h2>
         <div className="np-chartsub">Each bar is one graded attempt: above the line when your reasoning earned points, below it when it cost them.</div>
         {barItems.length >= 1 ? (
           <BarChart items={barItems} />
@@ -571,7 +571,7 @@ export default function Dashboard({
   const identity = (
     <div className="np-card np-dash-identity">
       {showAvatar ? (
-        <img className="np-avatar" src={avatar} alt="" referrerPolicy="no-referrer" onError={() => setImgFailed(true)} />
+        <img className="np-avatar" src={avatar} alt="" width={48} height={48} referrerPolicy="no-referrer" onError={() => setImgFailed(true)} />
       ) : (
         <div className="np-avatar np-avatarfallback">{String(name).charAt(0).toUpperCase()}</div>
       )}
@@ -684,7 +684,7 @@ export default function Dashboard({
               onClick={() => { withdrawCancelRef.current = null; setWithdrawError(""); setWithdrawResult(null); setWithdrawPhase("confirm"); }}
               title="EU 14-day right of withdrawal — cancel immediately with a pro-rata refund"
             >
-              <Icon name="refresh" size={14} /> Withdraw from contract here
+              <Icon name="refresh" size={14} /> Cancel &amp; get a refund
             </button>
           )}
           {!isPro && proEnabled ? (

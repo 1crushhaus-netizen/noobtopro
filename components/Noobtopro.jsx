@@ -36,9 +36,9 @@ import ScoreBreakdown, { ErrorList, hasReasoningError } from "@/components/Score
 // own deps: charts, the leaderboard, the curriculum browser) on the critical path,
 // inflating main-thread time and Interaction-to-Next-Paint. Code-splitting them
 // into on-demand chunks keeps the initial `/` bundle to just the landing + flow.
-const Dashboard = dynamic(() => import("@/components/Dashboard"), { loading: () => <Loader subject="dashboard" /> });
-const LearnTab = dynamic(() => import("@/components/LearnTab"), { loading: () => <Loader subject="learn" /> });
-const AdminDashboard = dynamic(() => import("@/components/AdminDashboard"), { loading: () => <Loader subject="admin" /> });
+const Dashboard = dynamic(() => import("@/components/Dashboard"), { loading: () => <Loader subject="dashboard" reserve /> });
+const LearnTab = dynamic(() => import("@/components/LearnTab"), { loading: () => <Loader subject="learn" reserve /> });
+const AdminDashboard = dynamic(() => import("@/components/AdminDashboard"), { loading: () => <Loader subject="admin" reserve /> });
 import Landing from "@/components/Landing";
 import TopNav from "@/components/TopNav";
 import BottomNav from "@/components/BottomNav";
@@ -46,8 +46,30 @@ import { useScrolled } from "@/components/useReveal";
 import { SubjectGlyph, deltaColor } from "@/components/ui";
 
 /* ----------------------------- helpers ----------------------------- */
+// A hard client-side timeout so a hung request (a stalled LLM grade, a flaky
+// network) can never leave the UI spinning forever — it rejects with a clear,
+// retryable message instead (audit P0-6). 60s is generous for LLM grading.
+const REQUEST_TIMEOUT_MS = 60000;
+async function fetchWithTimeout(path, init) {
+  if (typeof AbortController === "undefined") return fetch(path, init);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(path, { ...init, signal: controller.signal });
+  } catch (e) {
+    if (e && (e.name === "AbortError" || controller.signal.aborted)) {
+      const err = new Error("This is taking longer than expected — check your connection and try again.");
+      err.timeout = true;
+      throw err;
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function api(path, body) {
-  const res = await fetch(path, {
+  const res = await fetchWithTimeout(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -88,7 +110,7 @@ async function authApi(path, body) {
     const { data } = await sb.auth.getSession();
     token = (data && data.session && data.session.access_token) || null;
   }
-  const res = await fetch(path, {
+  const res = await fetchWithTimeout(path, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: JSON.stringify(body || {}),
@@ -266,10 +288,15 @@ const AnswerComposer = React.memo(function AnswerComposer({
 }) {
   const fileRef = useRef(null);
   const [text, setText] = useState(initialValue);
+  // Guards against a double-submit / no-feedback tap on the most-repeated action
+  // (audit P0-3): once submitted, the button locks until the question changes
+  // (lockKey) — which for the diagnostic is the immediate advance to the next step.
+  const [submitting, setSubmitting] = useState(false);
   // Re-seed the local field when the question changes (lockKey). Keyed on lockKey
   // (not initialValue) so the parent's per-keystroke blur sync can't clobber the box.
   useEffect(() => {
     setText(initialValue);
+    setSubmitting(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lockKey]);
   const canSubmit = (text && text.trim().length > 0) || img;
@@ -305,6 +332,9 @@ const AnswerComposer = React.memo(function AnswerComposer({
         onBlur={() => onText && onText(text)}
         placeholder={placeholder || "Show your full reasoning: every step, not just the answer."}
         rows={6}
+        // Cap the answer so a runaway paste can't bloat the single all-answers
+        // diagnostic request toward the platform body limit (audit P0-4).
+        maxLength={8000}
       />
       {img && (
         <div style={{ padding: "0 16px 8px", display: "flex", alignItems: "center", gap: 10 }}>
@@ -327,7 +357,7 @@ const AnswerComposer = React.memo(function AnswerComposer({
             e.target.value = "";
           }}
         />
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
           {onSkip && (
             <button
               type="button"
@@ -340,7 +370,16 @@ const AnswerComposer = React.memo(function AnswerComposer({
               {skipLocked ? `I don't know (${skipIn}s)` : "I don't know"}
             </button>
           )}
-          <button className="np-btn np-primary" disabled={!canSubmit || loading} onClick={() => onSubmit(text)}>
+          <button
+            className="np-btn np-primary"
+            disabled={!canSubmit || loading || submitting}
+            title={!canSubmit ? "Add your reasoning or attach a photo to submit" : undefined}
+            onClick={() => {
+              if (submitting || loading) return;
+              setSubmitting(true);
+              onSubmit(text);
+            }}
+          >
             {loading ? "Working…" : submitLabel} {!loading && <Icon name="arrow" size={16} />}
           </button>
         </div>
@@ -353,7 +392,7 @@ const AnswerComposer = React.memo(function AnswerComposer({
 // shared TopNav (components/TopNav.jsx) — its only home, the Dashboard bento has
 // no identity bar.
 
-function Loader({ subject }) {
+function Loader({ subject, reserve = false }) {
   const lines = ["Reading your reasoning line by line", "Weighing the thinking, not just the answer", "Scoring against the rubric"];
   const [i, setI] = useState(0);
   useEffect(() => {
@@ -361,7 +400,7 @@ function Loader({ subject }) {
     return () => clearInterval(t);
   }, []);
   return (
-    <div className="np-card fade-up" role="status" aria-live="polite" style={{ textAlign: "center", padding: "48px 24px" }}>
+    <div className="np-card fade-up" role="status" aria-live="polite" style={{ textAlign: "center", padding: "48px 24px", minHeight: reserve ? "60vh" : undefined }}>
       <div className="np-pulse" style={{ fontFamily: "var(--mono)", fontSize: 13, letterSpacing: 1, color: "var(--muted)" }}>
         {subject ? subject.toUpperCase() : "EVALUATING"}
       </div>
@@ -386,6 +425,10 @@ export default function Noobtopro() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [showAuthNote, setShowAuthNote] = useState(false);
+  // True when a guest→account progress migration failed atomically (the guest copy
+  // is intact). Drives an explicit, actionable "retry saving" banner (audit P0-5)
+  // instead of a dead generic error the user can only dismiss.
+  const [migrationFailed, setMigrationFailed] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [resetNotice, setResetNotice] = useState(false); // transient "progress was reset" toast
   const [user, setUser] = useState(null);
@@ -533,9 +576,11 @@ export default function Noobtopro() {
     const mig = await migrateGuestToAccount();
     if (myRun !== hydrateRun.current) return;
     if (mig && mig.error) {
-      // Migration failed atomically (nothing written); the guest copy is kept
-      // for a retry on the next load. Let the user know.
-      setError("We couldn't save your guest progress just now. Please try again.");
+      // Migration failed atomically (nothing written); the guest copy is kept, so
+      // surface an explicit retry affordance (audit P0-5) rather than a dead banner.
+      setMigrationFailed(true);
+    } else if (mig) {
+      setMigrationFailed(false);
     }
     const st = await loadState();
     if (myRun !== hydrateRun.current) return; // superseded by a newer hydrate
@@ -1171,8 +1216,14 @@ export default function Noobtopro() {
         setDiagError(e.message);
         return;
       }
+      if (e && (e.status === 402 || e.upgrade)) {
+        // Paywall hit mid-diagnostic: a retry can't succeed, so surface the upgrade
+        // path instead of an unwinnable "Try again" loop (audit P0-2).
+        setUpgradeNudge(e.message || "You've reached a free-tier limit. Upgrade to Pro to keep going.");
+        return;
+      }
       diagFailed.current.push({ q, a });
-      setDiagError(e.message || "Grading hit a snag. Please try again.");
+      setDiagError(e.message || "We couldn't grade an answer just now. Your work is saved — retry to finish.");
     }
   }
 
@@ -1644,7 +1695,27 @@ export default function Noobtopro() {
     return () => clearTimeout(t);
   }, [resetNotice]);
 
-  const bgInert = (showSaveModal && !user) || !!upgradeNudge || showRebaselineConfirm || overlayActive ? true : undefined;
+  // P0-4: warn before a tab close / refresh discards in-progress, ungraded answers
+  // (the diagnostic and practice composers hold text in memory). Native browser
+  // confirm only — covers the close/refresh vector; in-app navigation guarding is a
+  // separate, larger change (it must intercept the brand-Restart and every tab).
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const hasWork =
+      (stage === "diagnostic" && Object.values(answers).some((a) => a && typeof a.text === "string" && a.text.trim())) ||
+      (stage === "practice" && typeof pText === "string" && pText.trim().length > 0);
+    if (!hasWork) return undefined;
+    const onBeforeUnload = (e) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [stage, answers, pText]);
+
+  // Every overlay must make the rest of the page inert so keyboard/SR users can't
+  // Tab behind it. The modals render as SIBLINGS of `.np-app` (below), so inerting
+  // `.np-app` contains focus to the open dialog. `showConsent` (the CRD checkout
+  // consent gate) was previously missing here — without it, focus could escape the
+  // legally-required consent dialog into the nav/footer (audit P0-8).
+  const bgInert = (showSaveModal && !user) || !!upgradeNudge || showConsent || showRebaselineConfirm || overlayActive ? true : undefined;
 
   // PERF (P2-7): stabilize the callback props whose bodies use ONLY React's stable
   // state setters, so a keystroke-driven Noobtopro re-render doesn't churn their
@@ -1653,6 +1724,19 @@ export default function Noobtopro() {
   // (per-render) functions — onProveIt/onSignIn/onPractice/onLearn/etc. — are left as
   // inline arrows: memoizing them safely would require also stabilizing those
   // functions (a larger refactor tied to the P1-1 monolith split, deferred here).
+  // Retry a failed guest→account migration (audit P0-5). The guest blob is still in
+  // localStorage, so this just re-runs the atomic fold and re-hydrates on success.
+  async function retryMigration() {
+    setMigrationFailed(false);
+    const mig = await migrateGuestToAccount();
+    if (mig && mig.error) {
+      setMigrationFailed(true);
+      return;
+    }
+    hydrate();
+    refreshMastery();
+  }
+
   const onDismissError = useCallback(() => setError(""), []);
   const onDismissAuthNote = useCallback(() => setShowAuthNote(false), []);
   const onCloseDashboard = useCallback(() => setView("practice"), []);
@@ -1935,6 +2019,12 @@ export default function Noobtopro() {
             <button className="np-ghost" onClick={() => setShowAuthNote(false)}><Icon name="x" size={14} /> dismiss</button>
           </div>
         )}
+        {migrationFailed && (
+          <div className="np-error fade-up" role="alert">
+            <span>We couldn&rsquo;t save your guest progress to your account — your results are still here. Retry to keep them across devices.</span>
+            <button className="np-btn np-secondary" onClick={retryMigration}>Retry saving my progress</button>
+          </div>
+        )}
         {error && (
           <div className="np-error fade-up" role="alert">
             <span>{error}</span>
@@ -2096,6 +2186,15 @@ export default function Noobtopro() {
                 <span className="np-sronly" role="status" aria-live="polite">
                   {`Diagnostic progress: ${ORDER.map((s) => `${SUBJECTS[s].label} ${diagAnswered[s] || 0} of ${curQ.stepsTotal || 3} answered`).join(", ")}.`}
                 </span>
+                {/* P0-1: a background step-grade failure used to be invisible until the
+                    final waiting card. Surface it inline the moment it happens, with a
+                    retry, so the learner isn't answering on top of silently-lost work. */}
+                {diagError && (
+                  <div className="np-error fade-up" role="alert" style={{ marginBottom: 16 }}>
+                    <span>{diagError}</span>
+                    <button className="np-btn np-secondary" onClick={retryDiagnostic}>Retry now</button>
+                  </div>
+                )}
                 <div className="np-qmeta">
                   <SubjectGlyph subject={curSubject} />
                   <span className="np-metaline">
@@ -2153,7 +2252,7 @@ export default function Noobtopro() {
             )}
 
             {/* SCORING */}
-            {stage === "scoring" && <Loader subject="evaluating all three" />}
+            {stage === "scoring" && <Loader subject="scoring all three subjects" />}
 
             {/* DASHBOARD (subject scores) */}
             {stage === "dashboard" && scores && (
@@ -2252,7 +2351,7 @@ export default function Noobtopro() {
                             </div>
                           );
                         })()}
-                        <button className="np-btn np-secondary np-btn--block np-btn--subject" style={{ marginTop: 14, "--subject": SUBJECTS[k].color }} onClick={() => startPractice(k)}>
+                        <button className="np-btn np-secondary np-btn--block" style={{ marginTop: 14 }} onClick={() => startPractice(k)}>
                           Practice {SUBJECTS[k].label} <Icon name="arrow" size={15} />
                         </button>
                       </div>

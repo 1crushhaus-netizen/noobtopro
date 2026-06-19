@@ -130,10 +130,13 @@ export default function ConsentManager({ ahrefsKey }) {
             </p>
           </div>
           <div className="np-consent-actions">
+            {/* EU ePrivacy / EDPB: Accept and Reject must have EQUAL prominence on the
+                same layer (no "false hierarchy" nudge), so both use the same secondary
+                button style rather than a filled-primary Accept. */}
             <button className="np-btn np-secondary np-consent-btn" onClick={() => decide("denied")}>
               Reject
             </button>
-            <button className="np-btn np-primary np-consent-btn" onClick={() => decide("granted")}>
+            <button className="np-btn np-secondary np-consent-btn" onClick={() => decide("granted")}>
               Accept
             </button>
           </div>
