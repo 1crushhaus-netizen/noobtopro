@@ -1,4 +1,5 @@
 import LegalLayout, { Section } from "@/components/LegalLayout";
+import { LEGAL } from "@/lib/legal";
 
 export const metadata = {
   title: "Privacy Policy", // root template appends " — noobtopro" (SEO P2-2)
@@ -14,7 +15,8 @@ export default function PrivacyPage() {
   return (
     <LegalLayout title="Privacy Policy">
       <p>
-        This Privacy Policy explains how <strong>[Company Legal Name]</strong> (&quot;noobtopro&quot;,
+        This Privacy Policy explains how <strong>{LEGAL.businessName}</strong>, operated by{" "}
+        {LEGAL.operatorName} (a {LEGAL.businessForm}) (&quot;noobtopro&quot;,
         &quot;we&quot;, &quot;us&quot;) collects, uses, and protects information when you use the
         noobtopro website and application (the &quot;Service&quot;). By using the Service you agree to
         this Policy.
@@ -113,10 +115,14 @@ export default function PrivacyPage() {
           <li>
             Permanently delete your entire account and all associated data (and cancel any Pro
             subscription) in-app via <em>Dashboard → Delete account</em>, or by contacting us at
-            <strong> [privacy@your-domain]</strong>.
+            <strong> {LEGAL.contactEmail}</strong>.
           </li>
         </ul>
         <p>We will respond to verified requests within the timeframe required by applicable law.</p>
+        <p>
+          If you are in the EU/EEA, you also have the right to lodge a complaint with a data-protection
+          supervisory authority. Our lead authority is the {LEGAL.supervisoryAuthority}.
+        </p>
       </Section>
 
       <Section heading="7. Age requirement (18+)">
@@ -125,7 +131,7 @@ export default function PrivacyPage() {
           The Service is not directed to children or minors, and we do not knowingly collect personal
           information from anyone under 18. We ask for date of birth at sign-up to confirm eligibility.
           If you believe a person under 18 has provided us personal information, contact us at
-          <strong> [privacy@your-domain]</strong> and we will delete it.
+          <strong> {LEGAL.contactEmail}</strong> and we will delete it.
         </p>
       </Section>
 
@@ -153,8 +159,8 @@ export default function PrivacyPage() {
 
       <Section heading="11. Contact">
         <p>
-          Questions about this Policy or your data: <strong>[privacy@your-domain]</strong>,
-          <strong> [Company Legal Name], [Registered Address]</strong>.
+          Questions about this Policy or your data: <strong>{LEGAL.contactEmail}</strong>,
+          <strong> {LEGAL.businessName}, {LEGAL.city}, {LEGAL.country}</strong>.
         </p>
       </Section>
     </LegalLayout>

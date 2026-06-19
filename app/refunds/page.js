@@ -1,4 +1,5 @@
 import LegalLayout, { Section } from "@/components/LegalLayout";
+import { LEGAL } from "@/lib/legal";
 
 export const metadata = {
   title: "Refund & Cancellation Policy", // root template appends " — noobtopro" (SEO P2-2)
@@ -44,7 +45,7 @@ export default function RefundsPage() {
           refunds at your discretion.
         </p>
         <p>
-          To request a refund, contact <strong>[support@your-domain]</strong> with your account email
+          To request a refund, contact <strong>{LEGAL.contactEmail}</strong> with your account email
           and the date of the charge. Approved refunds are returned to your original payment method via
           Polar.
         </p>
@@ -67,8 +68,8 @@ export default function RefundsPage() {
 
       <Section heading="6. Contact">
         <p>
-          Billing questions: <strong>[support@your-domain]</strong>,
-          <strong> [Company Legal Name]</strong>.
+          Billing questions: <strong>{LEGAL.contactEmail}</strong>,
+          <strong> {LEGAL.businessName}</strong>.
         </p>
       </Section>
     </LegalLayout>

@@ -6,7 +6,7 @@ import { render, screen, fireEvent, cleanup, act } from "@testing-library/react"
 // signed-in user's scores in memory without reloading them from the DB, so their
 // progress appeared to vanish (Profile showed the empty state) until a refresh.
 
-const USER = { id: "u1", email: "1crushhaus@gmail.com", user_metadata: { full_name: "crushhaus" }, app_metadata: { age_verified: true } };
+const USER = { id: "u1", email: "user@example.com", user_metadata: { full_name: "Test User" }, app_metadata: { age_verified: true } };
 const SCORES = {
   math: { score: 50, weakConcepts: ["x"], comment: "" },
   physics: { score: 40, weakConcepts: [], comment: "" },

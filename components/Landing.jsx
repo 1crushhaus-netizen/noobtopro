@@ -514,6 +514,8 @@ export default function Landing({
             <a href="/privacy" style={{ color: "var(--muted)", textDecoration: "none" }}>Privacy</a>
             <a href="/terms" style={{ color: "var(--muted)", textDecoration: "none" }}>Terms</a>
             <a href="/refunds" style={{ color: "var(--muted)", textDecoration: "none" }}>Refunds</a>
+            <a href="/cookies" style={{ color: "var(--muted)", textDecoration: "none" }}>Cookies</a>
+            <a href="/legal" style={{ color: "var(--muted)", textDecoration: "none" }}>Legal</a>
             {/* Reopen the consent banner so a prior choice can be changed as easily as it was
                 given (GDPR/ePrivacy withdrawal of consent). ConsentManager listens for this event. */}
             <button
