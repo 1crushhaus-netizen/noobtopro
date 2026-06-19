@@ -40,6 +40,7 @@ const LearnTab = dynamic(() => import("@/components/LearnTab"), { loading: () =>
 const AdminDashboard = dynamic(() => import("@/components/AdminDashboard"), { loading: () => <Loader subject="admin" /> });
 import Landing from "@/components/Landing";
 import TopNav from "@/components/TopNav";
+import BottomNav from "@/components/BottomNav";
 import { useScrolled } from "@/components/useReveal";
 import { SubjectGlyph, deltaColor } from "@/components/ui";
 
@@ -1613,6 +1614,19 @@ export default function Noobtopro() {
     );
   }
 
+  // Primary view tabs for the signed-in app shell. Built once and fed to BOTH the
+  // TopNav tab strip (desktop) and the mobile BottomNav, so the two never drift.
+  // null when there's no app chrome (intro / sign-in / landing).
+  const appTabs = chrome
+    ? [
+        { id: "practice", label: "Practice", icon: "target", active: view === "practice", onClick: () => setView("practice") },
+        ...(scores ? [{ id: "learn", label: "Learn", icon: "book", active: view === "learn", onClick: () => setView("learn") }] : []),
+        // One merged Dashboard tab (was Progress + Profile); a guest who clicks it gets the sign-in gate.
+        { id: "dashboard", label: "Dashboard", icon: "grid", active: view === "dashboard", onClick: () => setView("dashboard") },
+        ...(user && isAdmin ? [{ id: "admin", label: "Admin", icon: "shield", active: view === "admin", onClick: () => setView("admin") }] : []),
+      ]
+    : null;
+
   return (
     <div className="np-root">
       {/* A11y P1-4: skip-to-content as the first focusable element of the app shell
@@ -1738,13 +1752,7 @@ export default function Noobtopro() {
           scrolled={navScrolled}
           onBrand={reset}
           brandTitle="Restart"
-          tabs={chrome ? [
-            { id: "practice", label: "Practice", icon: "target", active: view === "practice", onClick: () => setView("practice") },
-            ...(scores ? [{ id: "learn", label: "Learn", icon: "book", active: view === "learn", onClick: () => setView("learn") }] : []),
-            // One merged Dashboard tab (was Progress + Profile); a guest who clicks it gets the sign-in gate.
-            { id: "dashboard", label: "Dashboard", icon: "grid", active: view === "dashboard", onClick: () => setView("dashboard") },
-            ...(user && isAdmin ? [{ id: "admin", label: "Admin", icon: "shield", active: view === "admin", onClick: () => setView("admin") }] : []),
-          ] : undefined}
+          tabs={appTabs || undefined}
           user={chrome ? user : undefined}
           // The nav's overall-rank chip reflects MASTERY too: pass the mastery-blended
           // scores (depth × coverage) once the map has loaded, raw depth before then (so
@@ -1760,6 +1768,10 @@ export default function Noobtopro() {
           }
           signOut={chrome && user ? { onClick: handleSignOut, label: "Sign out", title: user.email || "" } : undefined}
         />
+
+        {/* Mobile-only primary nav: on phones the TopNav tab strip is hidden (CSS) and
+            these same tabs render in a fixed, thumb-reachable bottom bar instead. */}
+        {appTabs && <BottomNav tabs={appTabs} />}
 
         <div className="np-frame">
           <div className="np-shell">
