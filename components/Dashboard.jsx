@@ -419,6 +419,7 @@ export default function Dashboard({
   onLearn,
   onReset,
   onDeleteAccount,
+  onExport,
   onSignIn,
   onUpgrade,
   onManageSubscription,
@@ -461,6 +462,8 @@ export default function Dashboard({
     const cur = (currency || "").toUpperCase();
     return cur ? `${amt} ${cur}` : amt;
   };
+  // "Download my data" (GDPR access/portability) in-flight flag.
+  const [exporting, setExporting] = useState(false);
   // Tasteful staggered scroll-reveal for the bento's main panels (shared hook).
   const { ref: revealRef, armed } = useScrollReveal();
   // Per-concept mastery map for the §7 breadth gate. Prefer the LIFTED prop (fetched
@@ -692,9 +695,22 @@ export default function Dashboard({
               <Icon name="spark" size={14} /> {upgradeBusy ? "Starting…" : "Upgrade to Pro"}
             </button>
           ) : null}
+          {/* GDPR access/portability — a non-destructive "save a copy of my data". Sits at
+              the head of the account-actions group (takes the right-push when no Pro/upgrade
+              button precedes it). */}
+          {onExport && (
+            <button
+              className="np-btn np-secondary np-dash-actbtn"
+              style={!isPro && !proEnabled ? { marginLeft: "auto" } : undefined}
+              disabled={exporting}
+              onClick={async () => { setExporting(true); try { await onExport(); } finally { setExporting(false); } }}
+            >
+              {exporting ? "Preparing…" : "Download my data"}
+            </button>
+          )}
           <button
             className="np-btn np-danger np-dash-actbtn"
-            style={isPro || proEnabled ? undefined : { marginLeft: "auto" }}
+            style={!isPro && !proEnabled && !onExport ? { marginLeft: "auto" } : undefined}
             onClick={() => { resetPrevFocus.current = document.activeElement; setConfirmAction("reset"); }}
           >
             Reset my progress

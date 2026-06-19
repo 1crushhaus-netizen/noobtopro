@@ -474,3 +474,21 @@ describe("Dashboard — EU withdrawal control (CRD Art. 11a)", () => {
     expect(screen.queryByRole("button", { name: /withdraw from contract here/i })).toBe(null);
   });
 });
+
+describe("Dashboard — Download my data (GDPR access/portability)", () => {
+  it("renders the button, calls onExport, and shows a busy state until it resolves", async () => {
+    let resolve;
+    const onExport = vi.fn(() => new Promise((r) => { resolve = r; }));
+    render(<Dashboard user={user} scores={scores} history={history} onExport={onExport} onPractice={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /download my data/i }));
+    expect(onExport).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("button", { name: /preparing/i })).toBeTruthy();
+    await act(async () => { resolve(true); });
+    await waitFor(() => expect(screen.getByRole("button", { name: /download my data/i })).toBeTruthy());
+  });
+
+  it("omits the button when onExport is not provided", () => {
+    render(<Dashboard user={user} scores={scores} history={history} onPractice={() => {}} />);
+    expect(screen.queryByRole("button", { name: /download my data/i })).toBe(null);
+  });
+});
