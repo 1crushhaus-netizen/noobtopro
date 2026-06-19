@@ -20,7 +20,7 @@ import { RUBRIC_KEYS, RUBRIC_LABELS, RUBRIC_SHORT, RUBRIC_MAX } from "@/lib/scor
 // `color` may be a CSS var() (it's applied via style, not attributes); the
 // default is the neutral ink — the total-points trend is a cross-subject
 // aggregate, so it carries no subject accent.
-export function LineChart({ values, yMax = 1050, color = "var(--text)" }) {
+function LineChartBase({ values, yMax = 1050, color = "var(--text)" }) {
   const W = 620, H = 200, padL = 36, padR = 14, padT = 16, padB = 22;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
@@ -57,7 +57,7 @@ export function LineChart({ values, yMax = 1050, color = "var(--text)" }) {
   );
 }
 
-export function BarChart({ items }) {
+function BarChartBase({ items }) {
   const W = 620, H = 200, padL = 36, padR = 14, padT = 16, padB = 26;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
@@ -118,7 +118,7 @@ export function BarChart({ items }) {
 // interpolation of 5 counts — a shape cue, not a continuous density estimate.
 // `tracks`: [{ key, label, color (CSS color, vars OK — applied via style),
 //             counts: number[5], you: { band } | null }]
-export function RankDistribution({ tracks, rankLabels = [] }) {
+function RankDistributionBase({ tracks, rankLabels = [] }) {
   // Tight viewBox: this renders in a ~1/3-width card, so every extra unit of
   // width scales the axis type down with the chart.
   const W = 480, H = 230, padL = 14, padR = 14, padT = 14, padB = 32;
@@ -191,7 +191,7 @@ export function RankDistribution({ tracks, rankLabels = [] }) {
   );
 }
 
-export function MiniBar({ value, color, max = 350 }) {
+function MiniBarBase({ value, color, max = 350 }) {
   // `value` rides the 0–350 subject-score scale; normalize to a CSS percent.
   return (
     <div style={{ flex: 1, height: 8, background: "var(--tint-2)", borderRadius: 4, overflow: "hidden" }}>
@@ -203,7 +203,7 @@ export function MiniBar({ value, color, max = 350 }) {
 // Hand-rolled inline-SVG radar/spider chart (no dependency, matching the other
 // charts above). Axes = the 9 rubric dimensions (0–RUBRIC_MAX); ONE polygon per
 // subject so the learner compares their reasoning profile across subjects.
-export function RadarChart({ subjects }) {
+function RadarChartBase({ subjects }) {
   // Sized for the 9 reasoning axes. The label ring sits well outside the data ring
   // (1.55·R ≈ 53px clear) and each label is anchored AND baselined per quadrant, so
   // the spoke names never read as touching the plotted polygons. The viewBox hugs
@@ -282,3 +282,13 @@ export function RadarChart({ subjects }) {
     </svg>
   );
 }
+
+// Memoized (audit P1-P7): each chart is a pure function of its props, so a parent
+// (Dashboard) re-render from an unrelated interaction — opening a drawer, a confirm
+// modal, the mastery fetch landing — no longer recomputes the SVG geometry, the
+// Catmull-Rom curves, or the accessible-summary strings when the data is unchanged.
+export const LineChart = React.memo(LineChartBase);
+export const BarChart = React.memo(BarChartBase);
+export const RankDistribution = React.memo(RankDistributionBase);
+export const MiniBar = React.memo(MiniBarBase);
+export const RadarChart = React.memo(RadarChartBase);

@@ -287,14 +287,21 @@ function RadarPanel({ scores, onPractice, onLearn }) {
 function RecentMoves({ history }) {
   // Newest first. In normal page flow we keep a generous slice (the page scrolls);
   // the learner can scroll back through their recent history.
-  const moves = history
-    .filter((a) => a.type === "attempt" && typeof a.rationale === "string" && a.rationale.trim())
-    .slice(-25)
-    .reverse()
-    // P2-1: carry the attempt timestamp so the list can key by a STABLE field
-    // (timestamp + subject) instead of the array index — index keys mis-associate
-    // rows as new attempts land at the head of the reversed slice.
-    .map((a) => ({ t: a.t, subject: a.subject, delta: Math.round(a.delta || 0), rationale: a.rationale }));
+  // PERF (P1-P7): memoize the O(history) filter/slice/reverse/map so it only
+  // recomputes when `history` actually changes — not on every Dashboard re-render
+  // (drawer open/close, confirm modals, mastery fetch landing).
+  const moves = useMemo(
+    () =>
+      history
+        .filter((a) => a.type === "attempt" && typeof a.rationale === "string" && a.rationale.trim())
+        .slice(-25)
+        .reverse()
+        // P2-1: carry the attempt timestamp so the list can key by a STABLE field
+        // (timestamp + subject) instead of the array index — index keys mis-associate
+        // rows as new attempts land at the head of the reversed slice.
+        .map((a) => ({ t: a.t, subject: a.subject, delta: Math.round(a.delta || 0), rationale: a.rationale })),
+    [history]
+  );
 
   return (
     <div className="np-card np-dash-panel np-dash-moves">

@@ -184,7 +184,28 @@ async function prepareImage(file) {
           const ctx = canvas.getContext("2d");
           if (ctx) {
             ctx.drawImage(el, 0, 0, canvas.width, canvas.height);
-            const b64 = String(canvas.toDataURL("image/jpeg", 0.8)).split(",")[1];
+            // toBlob + async FileReader keeps the JPEG encode OFF the synchronous
+            // main-thread path (toDataURL blocks for hundreds of ms on a multi-MB
+            // phone photo — the device class that uses photo-of-work most; audit
+            // P1-P4). Falls back to toDataURL where toBlob is unavailable.
+            const b64 = await new Promise((resolve) => {
+              if (typeof canvas.toBlob !== "function") {
+                try { resolve(String(canvas.toDataURL("image/jpeg", 0.8)).split(",")[1] || ""); }
+                catch { resolve(""); }
+                return;
+              }
+              canvas.toBlob(
+                (blob) => {
+                  if (!blob) { resolve(""); return; }
+                  const r = new FileReader();
+                  r.onload = () => resolve(String(r.result).split(",")[1] || "");
+                  r.onerror = () => resolve("");
+                  r.readAsDataURL(blob);
+                },
+                "image/jpeg",
+                0.8
+              );
+            });
             if (b64) return { data: b64, mime: "image/jpeg" };
           }
         }
@@ -1805,6 +1826,10 @@ export default function Noobtopro() {
   // Primary view tabs for the signed-in app shell. Built once and fed to BOTH the
   // TopNav tab strip (desktop) and the mobile BottomNav, so the two never drift.
   // null when there's no app chrome (intro / sign-in / landing).
+  // NOTE: this is intentionally a plain const, NOT useMemo — it sits AFTER the
+  // component's early returns (age gate / landing), where a hook would violate the
+  // Rules of Hooks. Memoizing the tab array safely requires the P1-P1 monolith split
+  // (hoisting the chrome/tab derivation above the early returns) — deferred.
   const appTabs = chrome
     ? [
         { id: "practice", label: "Practice", icon: "target", active: view === "practice", onClick: () => setView("practice") },
