@@ -63,9 +63,9 @@ export default function AgeGate({ onConfirm, onUnderage }) {
       <div style={wrap}>
         <div className="np-surface-elevated np-modal" role="dialog" aria-modal="true" aria-labelledby="np-age-blk-title">
           <div className="np-modal-spark" aria-hidden="true"><Icon name="lock" size={22} /></div>
-          <h2 id="np-age-blk-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+          <h1 id="np-age-blk-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
             For ages {MIN_AGE} and over
-          </h2>
+          </h1>
           <p className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
             noobtopro is an adults-only service for ages {MIN_AGE} and over. Please come back
             once you&rsquo;re {MIN_AGE}.
@@ -80,11 +80,11 @@ export default function AgeGate({ onConfirm, onUnderage }) {
 
   return (
     <div style={wrap}>
-      <form className="np-surface-elevated np-modal" onSubmit={submit} aria-labelledby="np-age-title">
+      <form className="np-surface-elevated np-modal" onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="np-age-title">
         <div className="np-modal-spark" aria-hidden="true"><Icon name="spark" size={22} /></div>
-        <h2 id="np-age-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+        <h1 id="np-age-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
           One quick thing
-        </h2>
+        </h1>
         <p className="np-lede" style={{ textAlign: "center", margin: "0 auto 20px" }}>
           Enter your date of birth to continue. We use this only to confirm your age.
         </p>

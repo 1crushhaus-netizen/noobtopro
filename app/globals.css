@@ -889,7 +889,7 @@ body {
    summary sizing on equal specificity) ---- */
 summary.np-cardicon { min-height: 44px; }
 @media (max-width: 480px) {
-  .np-weaktag-btn, .np-concepttag { min-height: 44px; }
+  .np-weaktag-btn, .np-concepttag, .np-filterchip { min-height: 44px; }
 }
 
 /* =============================================================================
