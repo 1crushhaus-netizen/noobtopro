@@ -36,9 +36,9 @@ import ScoreBreakdown, { ErrorList, hasReasoningError } from "@/components/Score
 // own deps: charts, the leaderboard, the curriculum browser) on the critical path,
 // inflating main-thread time and Interaction-to-Next-Paint. Code-splitting them
 // into on-demand chunks keeps the initial `/` bundle to just the landing + flow.
-const Dashboard = dynamic(() => import("@/components/Dashboard"), { loading: () => <Loader subject="dashboard" /> });
-const LearnTab = dynamic(() => import("@/components/LearnTab"), { loading: () => <Loader subject="learn" /> });
-const AdminDashboard = dynamic(() => import("@/components/AdminDashboard"), { loading: () => <Loader subject="admin" /> });
+const Dashboard = dynamic(() => import("@/components/Dashboard"), { loading: () => <Loader subject="dashboard" reserve /> });
+const LearnTab = dynamic(() => import("@/components/LearnTab"), { loading: () => <Loader subject="learn" reserve /> });
+const AdminDashboard = dynamic(() => import("@/components/AdminDashboard"), { loading: () => <Loader subject="admin" reserve /> });
 import Landing from "@/components/Landing";
 import TopNav from "@/components/TopNav";
 import BottomNav from "@/components/BottomNav";
@@ -391,7 +391,7 @@ const AnswerComposer = React.memo(function AnswerComposer({
 // shared TopNav (components/TopNav.jsx) — its only home, the Dashboard bento has
 // no identity bar.
 
-function Loader({ subject }) {
+function Loader({ subject, reserve = false }) {
   const lines = ["Reading your reasoning line by line", "Weighing the thinking, not just the answer", "Scoring against the rubric"];
   const [i, setI] = useState(0);
   useEffect(() => {
@@ -399,7 +399,7 @@ function Loader({ subject }) {
     return () => clearInterval(t);
   }, []);
   return (
-    <div className="np-card fade-up" role="status" aria-live="polite" style={{ textAlign: "center", padding: "48px 24px" }}>
+    <div className="np-card fade-up" role="status" aria-live="polite" style={{ textAlign: "center", padding: "48px 24px", minHeight: reserve ? "60vh" : undefined }}>
       <div className="np-pulse" style={{ fontFamily: "var(--mono)", fontSize: 13, letterSpacing: 1, color: "var(--muted)" }}>
         {subject ? subject.toUpperCase() : "EVALUATING"}
       </div>

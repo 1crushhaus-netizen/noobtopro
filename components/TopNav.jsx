@@ -129,7 +129,7 @@ function NavIdentity({ user, scores }) {
     // exposed to AT or on touch). role=group so AT announces it as the identity cluster.
     <div className="np-topnav-id" title={user.email || name} role="group" aria-label={`Signed in as ${name}`}>
       {showAvatar ? (
-        <img className="np-avatar np-topnav-avatar" src={avatar} alt="" referrerPolicy="no-referrer" onError={() => setImgFailed(true)} />
+        <img className="np-avatar np-topnav-avatar" src={avatar} alt="" width={30} height={30} referrerPolicy="no-referrer" onError={() => setImgFailed(true)} />
       ) : (
         <div className="np-avatar np-avatarfallback np-topnav-avatar">{String(name).charAt(0).toUpperCase()}</div>
       )}

@@ -378,7 +378,7 @@ describe("Dashboard — guest gate", () => {
 describe("Dashboard — EU withdrawal control (CRD Art. 11a)", () => {
   const DAY = 24 * 60 * 60 * 1000;
 
-  it("offers 'Withdraw from contract here' to an in-window Pro user; confirming calls onWithdraw and shows the durable confirmation", async () => {
+  it("offers 'Cancel & get a refund' to an in-window Pro user; confirming calls onWithdraw and shows the durable confirmation", async () => {
     const onWithdraw = vi.fn(async () => ({
       ok: true,
       withdrawnAt: "2026-06-18T10:00:00Z",
@@ -398,7 +398,7 @@ describe("Dashboard — EU withdrawal control (CRD Art. 11a)", () => {
         onPractice={() => {}}
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: /withdraw from contract here/i }));
+    fireEvent.click(screen.getByRole("button", { name: /get a refund/i }));
     // The confirm dialog explains withdraw ≠ cancel; confirming runs the withdrawal.
     await screen.findByRole("dialog", { name: /withdraw from your subscription/i });
     await act(async () => {

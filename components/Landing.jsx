@@ -261,6 +261,8 @@ export default function Landing({
             <a className="np-ghost np-lp-secondary" href="#how">See how it works</a>
           </div>
           <div className="np-lp-herometa">
+            <span>9 problems · ~10 min</span>
+            <span className="np-lp-dot">·</span>
             <span>math · physics · chemistry</span>
             <span className="np-lp-dot">·</span>
             <span>0–350 per subject</span>

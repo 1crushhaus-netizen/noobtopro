@@ -300,7 +300,7 @@ describe("Noobtopro — age gate (P0-10)", () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonRes({ isAdmin: false })));
     render(<Noobtopro />);
     // The neutral age screen is shown instead of the dashboard.
-    expect(await screen.findByText("One quick thing")).toBeTruthy();
+    expect(await screen.findByText(/18 or older/i)).toBeTruthy();
     expect(screen.getByLabelText(/date of birth/i)).toBeTruthy();
     // The signed-in app identity (email in the sidebar) must NOT be reachable yet.
     expect(screen.queryByText("u@example.com")).toBeNull();
@@ -311,6 +311,6 @@ describe("Noobtopro — age gate (P0-10)", () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonRes({ isAdmin: false })));
     render(<Noobtopro />);
     expect(await screen.findByText("u@example.com")).toBeTruthy();
-    expect(screen.queryByText("One quick thing")).toBeNull();
+    expect(screen.queryByText(/18 or older/i)).toBeNull();
   });
 });

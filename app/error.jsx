@@ -28,16 +28,14 @@ export default function Error({ error, reset }) {
     >
       <h1 className="np-h2" style={{ margin: 0 }}>Something went wrong</h1>
       <p className="np-lede" style={{ margin: 0, maxWidth: "48ch" }}>
-        An unexpected error interrupted the page. Your saved progress is safe.
+        An unexpected error interrupted the page. Any previously saved progress is safe.
       </p>
-      <button
-        type="button"
-        className="np-btn np-primary"
-        style={{ marginTop: "var(--space-2)" }}
-        onClick={() => reset()}
-      >
-        Try again
-      </button>
+      <div style={{ display: "flex", gap: "var(--space-3)", flexWrap: "wrap", justifyContent: "center", marginTop: "var(--space-2)" }}>
+        <button type="button" className="np-btn np-primary" onClick={() => reset()}>
+          Try again
+        </button>
+        <a className="np-btn np-secondary" href="/">Back to noobtopro</a>
+      </div>
     </div>
   );
 }

@@ -73,6 +73,15 @@ export default function AgeGate({ onConfirm, onUnderage, guest = false }) {
             noobtopro is an adults-only service for ages {MIN_AGE} and over. Please come back
             once you&rsquo;re {MIN_AGE}.
           </p>
+          {/* P2-U4: a mistyped birth year shouldn't be an unrecoverable lock-out —
+              let the user correct it before the destructive home/sign-out action. */}
+          <button
+            className="np-btn np-primary np-btn--block"
+            style={{ marginBottom: 10 }}
+            onClick={() => { setBlocked(false); setErr(""); setDob(""); }}
+          >
+            Re-enter date of birth
+          </button>
           <button className="np-btn np-secondary np-btn--block" onClick={() => onUnderage?.()}>
             <Icon name={guest ? "back" : "login"} size={16} /> {guest ? "Back to home" : "Sign out"}
           </button>
@@ -86,10 +95,11 @@ export default function AgeGate({ onConfirm, onUnderage, guest = false }) {
       <form className="np-surface-elevated np-modal" onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="np-age-title">
         <div className="np-modal-spark" aria-hidden="true"><Icon name="spark" size={22} /></div>
         <h1 id="np-age-title" className="np-h2 np-modal-title">
-          One quick thing
+          Confirm you&rsquo;re {MIN_AGE} or older
         </h1>
         <p className="np-lede np-modal-subtitle">
-          Enter your date of birth to continue. We use this only to confirm your age.
+          noobtopro is an adults-only service ({MIN_AGE}+). Enter your date of birth to continue —
+          we use it only to verify your age.
         </p>
         <label htmlFor="np-age-dob" className="np-eyebrow np-eyebrow--xs np-field-label">
           Date of birth
@@ -102,9 +112,11 @@ export default function AgeGate({ onConfirm, onUnderage, guest = false }) {
           onChange={(e) => setDob(e.target.value)}
           required
           className="np-field"
+          aria-invalid={err ? true : undefined}
+          aria-describedby={err ? "np-age-err" : undefined}
         />
         {err && (
-          <p role="alert" className="np-field-error">{err}</p>
+          <p id="np-age-err" role="alert" className="np-field-error">{err}</p>
         )}
         <button type="submit" className="np-btn np-primary np-btn--block" style={{ marginTop: 18 }} disabled={submitting || !dob}>
           {submitting ? "Saving…" : "Continue"}

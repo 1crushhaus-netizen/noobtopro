@@ -617,7 +617,7 @@ body {
 .np-statnum { font-family: var(--mono); font-size: var(--fs-stat); font-weight: 700; line-height: 1.1; letter-spacing: -.02em; }
 .np-statsub { font-size: 13px; color: var(--muted); }
 .np-chartcard { margin-bottom: 16px; }
-.np-charttitle { font-family: var(--display); font-size: 15px; font-weight: 600; letter-spacing: -.01em; margin-bottom: 2px; }
+.np-charttitle { font-family: var(--display); font-size: 15px; font-weight: 600; letter-spacing: -.01em; margin: 0 0 2px; }
 .np-sectiontitle { font-family: var(--display); font-size: var(--fs-title); font-weight: 600; letter-spacing: -.015em; margin: 0 0 4px; }
 .np-emptytitle { font-family: var(--display); font-size: 18px; font-weight: 600; margin: 0 0 8px; }
 .np-chartsub { font-size: 13px; color: var(--muted); margin-bottom: 14px; }
@@ -1046,6 +1046,11 @@ body {
 @media (max-width: 640px) {
   .np-topnav-tabs { display: none; }
 
+  /* PERF (INP): two stacked backdrop-filters (the sticky top bar + the fixed bottom
+     bar) re-rasterize their blurred backdrop on every scroll frame on mobile — the
+     most expensive scroll-time effect. Drop the blur for a solid fill on phones. */
+  .np-topnav { background: var(--bg); backdrop-filter: none; -webkit-backdrop-filter: none; }
+
   .np-bottomnav {
     display: flex;
     position: fixed;
@@ -1055,9 +1060,7 @@ body {
     gap: 2px;
     padding: 6px 8px;
     padding-bottom: max(6px, env(safe-area-inset-bottom));
-    background: color-mix(in srgb, var(--bg) 92%, transparent);
-    backdrop-filter: saturate(140%) blur(10px);
-    -webkit-backdrop-filter: saturate(140%) blur(10px);
+    background: var(--bg);
     border-top: 1px solid var(--line);
   }
   .np-bottomnav-tab {

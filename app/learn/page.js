@@ -84,7 +84,7 @@ export default async function LearnHub() {
           Learn math, physics &amp; chemistry — by reasoning
         </h1>
         <p className="np-lede">
-          {total} curated guides across three subjects and four levels. Every concept gets a clear
+          {total} curated guides across three subjects and four ranks. Every concept gets a clear
           explanation, one fully worked example you can follow step by step, and self-check questions —
           because on noobtopro, understanding is measured by <em>how you reason</em>, not what you memorize.
         </p>
@@ -132,10 +132,10 @@ export default async function LearnHub() {
       </section>
 
       {/* Ranks explainer */}
-      <section aria-label="Levels" style={{ marginTop: 40 }}>
+      <section aria-label="Ranks" style={{ marginTop: 40 }}>
         <h2 className="np-h2">One ladder: Elementary → Doctorate</h2>
         <p className="np-lede">
-          Every subject is organized on the same 0–350 scale, split into curriculum levels. Start anywhere —
+          Every subject is organized on the same 0–350 scale, split into curriculum ranks. Start anywhere —
           each guide names the foundations it builds on, so you can climb in the right order.
         </p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
