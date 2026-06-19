@@ -17,6 +17,9 @@ const store = vi.hoisted(() => ({
   loadReviews: vi.fn(async () => ({ reviews: [] })),
   loadTrends: vi.fn(async () => ({ trends: [] })),
   loadMastery: vi.fn(async () => ({ mastery: {} })),
+  hasGuestAgeAck: vi.fn(() => true),
+  recordGuestAgeAck: vi.fn(),
+  clearGuestAgeAck: vi.fn(),
 }));
 vi.mock("@/lib/store", () => store);
 vi.mock("@/lib/supabase", () => ({
