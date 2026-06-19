@@ -34,6 +34,7 @@ const ICONS = {
   arrow: (s) => <svg {...strokeAttrs(s)}><path d="M5 12h14M13 6l6 6-6 6" /></svg>,
   back: (s) => <svg {...strokeAttrs(s)}><path d="M19 12H5M11 18l-6-6 6-6" /></svg>,
   x: (s) => <svg {...strokeAttrs(s)}><path d="M6 6l12 12M18 6 6 18" /></svg>,
+  check: (s) => <svg {...strokeAttrs(s)}><path d="M20 6 9 17l-5-5" /></svg>,
   clip: (s) => <svg {...strokeAttrs(s)}><path d="M21.4 11.05 12.25 20.2a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>,
   bulb: (s) => <svg {...strokeAttrs(s)}><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.3h6c0-1 .4-1.8 1-2.3A7 7 0 0 0 12 2Z" /></svg>,
   refresh: (s) => <svg {...strokeAttrs(s)}><path d="M21 12a9 9 0 1 1-2.64-6.36M21 4v5h-5" /></svg>,
@@ -52,6 +53,8 @@ const ICONS = {
   lock: (s) => <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor"><path d="M12 1.5a4.5 4.5 0 0 0-4.5 4.5V9H6.75A1.75 1.75 0 0 0 5 10.75v9.5C5 21.22 5.78 22 6.75 22h10.5c.97 0 1.75-.78 1.75-1.75v-9.5C19 9.78 18.22 9 17.25 9H16.5V6A4.5 4.5 0 0 0 12 1.5Zm2.5 7.5h-5V6a2.5 2.5 0 0 1 5 0v3Z" /></svg>,
   spark: (s) => <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.9 6.1L20 10l-6.1 1.9L12 18l-1.9-6.1L4 10l6.1-1.9z" /></svg>,
   google: (s) => <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor"><path d="M21.8 10.04H12v3.96h5.62c-.25 1.34-1 2.48-2.13 3.24v2.69h3.45c2.02-1.86 3.18-4.6 3.18-7.85 0-.73-.07-1.43-.2-2.08z" /><path d="M12 22c2.7 0 4.96-.9 6.62-2.43l-3.45-2.69c-.96.64-2.18 1.02-3.17 1.02-2.6 0-4.8-1.76-5.59-4.12H2.84v2.78A10 10 0 0 0 12 22z" /><path d="M6.41 13.78a6 6 0 0 1 0-3.56V7.44H2.84a10 10 0 0 0 0 9.12z" /><path d="M12 5.98c1.47 0 2.79.51 3.83 1.5l2.86-2.86A9.6 9.6 0 0 0 12 2 10 10 0 0 0 2.84 7.44l3.57 2.78C7.2 7.74 9.4 5.98 12 5.98z" /></svg>,
+  menu: (s) => <svg {...strokeAttrs(s)}><path d="M3 6h18M3 12h18M3 18h18" /></svg>,
+  user: (s) => <svg {...strokeAttrs(s)}><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7" /></svg>,
 };
 
 function Icon({ name, size = 16 }) {
