@@ -25,16 +25,6 @@ import { ORDER, SUBJECTS } from "@/lib/scoring";
      prefers-reduced-motion kill-switch in globals.css. Styles: .np-lp-* layer.
    ========================================================================== */
 
-// A small check glyph for the pricing rows (Icon.jsx has no "check").
-function Check() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-      strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M20 6 9 17l-5-5" />
-    </svg>
-  );
-}
-
 const STEPS = [
   ["01", "Prove it",
     "An adaptive placement walks nine graded steps across math, physics, and chemistry, drawn from a curated, standardized bank. Explain each step, or tap “I don’t know” to skip."],
@@ -400,7 +390,7 @@ export default function Landing({
               <div className="np-lp-plan-tag">Everything you need to find where you stand.</div>
               <ul className="np-lp-feats">
                 {FREE_FEATURES.map((f) => (
-                  <li key={f}><Check />{f}</li>
+                  <li key={f}><Icon name="check" size={15} />{f}</li>
                 ))}
               </ul>
               <button className="np-btn np-primary np-lp-plan-cta" onClick={onProveIt} disabled={busy}>
@@ -413,12 +403,12 @@ export default function Landing({
               <div className="np-lp-plan-tag">Unlimited practice and the full toolkit.</div>
               <ul className="np-lp-feats">
                 {PRO_FEATURES.map((f) => (
-                  <li key={f}><Check />{f}</li>
+                  <li key={f}><Icon name="check" size={15} />{f}</li>
                 ))}
               </ul>
               {isPro ? (
                 <button className="np-signinbtn np-lp-plan-cta" disabled>
-                  You're Pro ✓
+                  You're Pro <Icon name="check" size={15} />
                 </button>
               ) : (
                 <button className="np-btn np-primary np-lp-plan-cta" onClick={onUpgrade || onSignIn} disabled={busy}>

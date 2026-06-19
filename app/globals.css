@@ -43,6 +43,31 @@
   --ui: var(--font-geist-sans, system-ui), system-ui, sans-serif;
   --mono: var(--font-geist-mono, ui-monospace), ui-monospace, monospace;
 
+  /* Type scale — the design system's named steps (theme-invariant). The display
+     tier (hero → stat) and the eyebrow size are single-sourced here so a global
+     type tweak happens in ONE place; the smaller body/label sizes stay literal at
+     their use sites where they read as local micro-adjustments. */
+  --fs-hero: clamp(34px, 6vw, 60px);
+  --fs-h1: clamp(24px, 3.4vw, 34px);
+  --fs-h2: clamp(24px, 3.4vw, 34px);
+  --fs-title: 19px;
+  --fs-stat: 32px;
+  --fs-lg: 17px;
+  --fs-body: 15px;
+  --fs-sm: 13.5px;
+  --fs-xs: 12px;
+  --fs-eyebrow: 11px;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+  --lh-tight: 1.12;
+  --lh-snug: 1.4;
+  --lh-body: 1.6;
+  --ls-tight: -.025em;
+  --ls-snug: -.01em;
+  --ls-eyebrow: .08em;
+
   /* White-tint scale (fills / hovers on dark) */
   --tint-1: rgba(255, 255, 255, .045);
   --tint-2: rgba(255, 255, 255, .08);
@@ -94,6 +119,8 @@
   --space-4: 16px;
   --space-5: 24px;
   --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
 
   /* Card padding */
   --pad-card: 20px;
@@ -110,6 +137,11 @@
 
   /* Shared motion easing (the landing's "Dynamic" curve, now app-wide). */
   --ease: cubic-bezier(.2, .7, .2, 1);
+  /* Motion durations — the design system's named steps. fast = hovers/taps,
+     med = panel/nav transitions, slow = scroll-reveal/score animations. */
+  --dur-fast: .15s;
+  --dur-med: .25s;
+  --dur-slow: .6s;
 }
 
 [data-theme="light"] {
@@ -292,7 +324,7 @@ body {
 /* In-app page/section titles share the landing's SECTION-title scale (.np-lp-h2):
    the app NEVER uses the 60px hero. .np-h1 and .np-h2 resolve to the same recipe
    so an in-app page head reads identically to a landing section head. */
-.np-h1, .np-h2 { font-family: var(--display); font-weight: 600; font-size: clamp(24px, 3.4vw, 34px); line-height: 1.12; letter-spacing: -.025em; margin: 0 0 6px; }
+.np-h1, .np-h2 { font-family: var(--display); font-weight: 600; font-size: var(--fs-h1); line-height: var(--lh-tight); letter-spacing: var(--ls-tight); margin: 0 0 6px; }
 .np-lede { font-size: 15px; color: var(--muted); line-height: 1.6; max-width: 64ch; margin: 14px 0 26px; }
 .np-lede em, .np-h1 em { color: var(--text); font-style: normal; font-weight: 600; }
 
@@ -325,7 +357,18 @@ body {
 .np-subjectrow { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 30px; }
 .np-chip { border: 1px solid var(--line-strong); border-radius: var(--radius-pill); padding: 6px 14px; font-size: 13px; font-weight: 500; color: var(--text); background: var(--tint-1); }
 
+/* Badge — the design system's small mono status pill (rank chip, admin flag,
+   "Pro" marker). Mono face + tabular numerals; an optional valence tints it with a
+   meaning-bearing accent (the -text variants keep small tinted labels at AA on
+   both themes). For the colored curriculum tags use a mastery .np-concepttag. */
+.np-badge { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: var(--fs-xs); font-weight: 500; letter-spacing: .02em; font-variant-numeric: tabular-nums; color: var(--muted); background: var(--tint-1); border: 1px solid var(--line); border-radius: var(--radius-pill); padding: 3px 10px; white-space: nowrap; }
+.np-badge--ok { color: var(--phys-text); border-color: var(--success-border); }
+.np-badge--warn { color: var(--math-text); border-color: var(--math-soft); }
+.np-badge--danger { color: var(--danger); border-color: var(--danger-border); }
+
 .np-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-card); padding: var(--pad-card); }
+/* The design system's Card `compact` variant — tighter padding for dense cells. */
+.np-card--compact { padding: var(--pad-card-compact); }
 
 /* =============================================================================
    Buttons — ONE base + role modifiers (primary · secondary · danger · ghost)
@@ -351,7 +394,12 @@ body {
 .np-danger:hover:not(:disabled) { background: var(--danger-soft); border-color: var(--danger-border-strong); }
 .np-danger svg { color: var(--danger); }
 .np-btn--block { width: 100%; justify-content: center; }
-.np-big { font-size: 15px; padding: 14px 24px; min-height: 52px; margin-top: 6px; }
+/* The size ladder, also exposed under the design system's `.np-btn--sm`/`--lg`
+   names: sm 38px (nav CTA) · md 44px (.np-btn base) · lg 52px (page CTA). `.np-big`
+   shares the lg recipe and adds the page-CTA top margin. */
+.np-big, .np-btn--lg { font-size: 15px; padding: 14px 24px; min-height: 52px; }
+.np-big { margin-top: 6px; }
+.np-btn--sm { min-height: 38px; padding: 8px 18px; font-size: 13.5px; }
 /* Intro primary-action row */
 .np-introcta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
 .np-introcta .np-big { margin-top: 0; }
@@ -406,7 +454,7 @@ body {
 /* A11y P2-8: questions are LLM output and can carry long unbroken tokens (URLs, big
    numbers, formulae); overflow-wrap:anywhere lets them break so they can't force
    horizontal scroll on a 320px viewport (WCAG 1.4.10 Reflow). */
-.np-question { font-family: var(--display); font-size: 17px; line-height: 1.55; font-weight: 500; margin-bottom: 16px; overflow-wrap: anywhere; }
+.np-question { font-family: var(--display); font-size: var(--fs-lg); line-height: 1.55; font-weight: 500; margin-bottom: 16px; overflow-wrap: anywhere; }
 
 .np-input { width: 100%; background: transparent; border: none; outline: none; resize: vertical; color: var(--text); font-family: var(--ui); font-size: 16px; line-height: 1.6; padding: 18px 18px 8px; min-height: 120px; }
 .np-input:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 4px; }
@@ -469,7 +517,7 @@ body {
 .np-weaktag { background: var(--tint-1); border: 1px solid var(--line); border-radius: var(--radius-inset); padding: 3px 8px; font-size: 12px; }
 
 /* ---- canonical eyebrow (the small UPPERCASE section/stat label) ---- */
-.np-eyebrow { font-family: var(--ui); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: var(--eyebrow-ls); color: var(--muted); }
+.np-eyebrow { font-family: var(--ui); font-size: var(--fs-eyebrow); font-weight: 600; text-transform: uppercase; letter-spacing: var(--eyebrow-ls); color: var(--muted); }
 .np-eyebrow--sm { font-size: 10.5px; }
 .np-eyebrow--xs { font-size: 10px; letter-spacing: .06em; line-height: 1.25; }
 .np-eyebrow--icon { display: inline-flex; align-items: center; gap: 7px; }
@@ -546,9 +594,13 @@ body {
 
 .np-feedactions { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 
-.np-error, .np-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-radius: var(--radius-alert); padding: 12px 16px; margin-bottom: 18px; font-size: 14px; }
-.np-error { background: var(--danger-soft); border: 1px solid var(--danger-border); color: var(--danger-fg); }
-.np-banner { background: var(--success-soft); border: 1px solid var(--success-border); color: var(--success-fg); }
+/* Alert — the canonical inline banner. `.np-error`/`.np-banner` are the app's
+   long-standing aliases; `.np-alert` + `--danger`/`--success` is the design
+   system's component API, sharing the SAME recipe so either spelling renders
+   identically. */
+.np-error, .np-banner, .np-alert { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-radius: var(--radius-alert); padding: 12px 16px; margin-bottom: 18px; font-size: 14px; }
+.np-error, .np-alert--danger { background: var(--danger-soft); border: 1px solid var(--danger-border); color: var(--danger-fg); }
+.np-banner, .np-alert--success { background: var(--success-soft); border: 1px solid var(--success-border); color: var(--success-fg); }
 
 .np-foot { max-width: var(--w-content); margin: 48px auto 0; font-size: 12px; color: var(--faint); font-family: var(--ui); text-align: center; }
 
@@ -557,11 +609,11 @@ body {
    ========================================================================== */
 .np-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 18px; }
 .np-statcard { display: flex; flex-direction: column; gap: 4px; }
-.np-statnum { font-family: var(--mono); font-size: 32px; font-weight: 700; line-height: 1.1; letter-spacing: -.02em; }
+.np-statnum { font-family: var(--mono); font-size: var(--fs-stat); font-weight: 700; line-height: 1.1; letter-spacing: -.02em; }
 .np-statsub { font-size: 13px; color: var(--muted); }
 .np-chartcard { margin-bottom: 16px; }
 .np-charttitle { font-family: var(--display); font-size: 15px; font-weight: 600; letter-spacing: -.01em; margin-bottom: 2px; }
-.np-sectiontitle { font-family: var(--display); font-size: 19px; font-weight: 600; letter-spacing: -.015em; margin: 0 0 4px; }
+.np-sectiontitle { font-family: var(--display); font-size: var(--fs-title); font-weight: 600; letter-spacing: -.015em; margin: 0 0 4px; }
 .np-emptytitle { font-family: var(--display); font-size: 18px; font-weight: 600; margin: 0 0 8px; }
 .np-chartsub { font-size: 13px; color: var(--muted); margin-bottom: 14px; }
 .np-chart { width: 100%; height: auto; display: block; }
@@ -1046,7 +1098,7 @@ summary.np-cardicon { min-height: 44px; }
 .np-lp-glow { position: absolute; left: 50%; top: -12%; transform: translateX(-50%); width: min(820px, 96vw); height: 460px; background: radial-gradient(50% 50% at 50% 50%, var(--tint-2), transparent 72%); pointer-events: none; }
 .np-lp-hero > .np-lp-container { position: relative; }
 .np-lp-eyebrow { display: inline-block; font-family: var(--mono); font-size: 12px; letter-spacing: var(--eyebrow-ls); text-transform: uppercase; color: var(--faint); }
-.np-lp-h1 { font-family: var(--display); font-weight: 600; font-size: clamp(34px, 6vw, 60px); line-height: 1.05; letter-spacing: -.035em; margin: 16px auto 0; max-width: 18ch; }
+.np-lp-h1 { font-family: var(--display); font-weight: 600; font-size: var(--fs-hero); line-height: 1.05; letter-spacing: -.035em; margin: 16px auto 0; max-width: 18ch; }
 .np-lp-h1 em { font-style: normal; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 6px; text-decoration-color: var(--line-strong); }
 .np-lp-sub { font-size: clamp(15px, 1.6vw, 18px); color: var(--muted); max-width: 58ch; margin: 22px auto 0; line-height: 1.55; }
 .np-lp-herocta { display: flex; gap: 16px; align-items: center; justify-content: center; flex-wrap: wrap; margin-top: 30px; }
@@ -1059,7 +1111,7 @@ summary.np-cardicon { min-height: 44px; }
 .np-lp-section--alt { background: var(--panel2); }
 .np-lp-head { max-width: 56ch; margin-bottom: 36px; }
 .np-lp-head--center { text-align: center; margin-left: auto; margin-right: auto; }
-.np-lp-h2 { font-family: var(--display); font-weight: 600; font-size: clamp(24px, 3.4vw, 34px); line-height: 1.12; letter-spacing: -.025em; margin: 10px 0 0; }
+.np-lp-h2 { font-family: var(--display); font-weight: 600; font-size: var(--fs-h2); line-height: var(--lh-tight); letter-spacing: var(--ls-tight); margin: 10px 0 0; }
 .np-lp-lede { font-size: 15px; color: var(--muted); line-height: 1.6; margin: 14px 0 0; }
 .np-lp-lede--center { margin-left: auto; margin-right: auto; max-width: 56ch; }
 
@@ -1222,8 +1274,8 @@ summary.np-cardicon { min-height: 44px; }
    lights them up for [data-reveal] page sections. Hover-lift is OPT-IN via
    `.np-lift` so the dashboard's dense cells aren't all animated — only feature/
    step/score cards and the like get the lift. */
-.np-card.np-lift { transition: translate .2s var(--ease), border-color .2s ease, background .2s ease; }
-.np-card.np-lift:hover { translate: 0 -3px; border-color: var(--line-strong); }
+.np-card.np-lift, .np-card--lift { transition: translate .2s var(--ease), border-color .2s ease, background .2s ease; }
+.np-card.np-lift:hover, .np-card--lift:hover { translate: 0 -3px; border-color: var(--line-strong); }
 /* In-app primary buttons get the same arrow-nudge the landing's do. */
 .np-app .np-primary svg { transition: transform .18s var(--ease); }
 .np-app .np-primary:hover svg { transform: translateX(3px); }
