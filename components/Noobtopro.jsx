@@ -373,6 +373,7 @@ const AnswerComposer = React.memo(function AnswerComposer({
           <button
             className="np-btn np-primary"
             disabled={!canSubmit || loading || submitting}
+            title={!canSubmit ? "Add your reasoning or attach a photo to submit" : undefined}
             onClick={() => {
               if (submitting || loading) return;
               setSubmitting(true);

@@ -42,7 +42,7 @@ const ENGINE = [
   ["refresh", "Unified Glicko-2 ranking",
     "Each axis is a difficulty-adjusted rating judged against the question’s level. Beating a hard problem climbs; acing an easy one barely moves you. Score, radar, and leaderboard never disagree."],
   ["shield", "Built to resist gaming",
-    "Jargon-salad scores single digits. Farming one topic damps your gains. Scoring is server-authoritative over an HMAC-signed step chain, so you can’t forge a grade or skip a step."],
+    "Jargon-salad scores single digits. Farming one topic damps your gains. Scoring is server-authoritative over a tamper-proof, signed step chain, so you can’t forge a grade or skip a step."],
   ["clip", "Photo-of-work grading",
     "Snap a photo of your handwritten solution. A vision model reads your steps and grades the reasoning, with a graceful text fallback. One free photo grade on your diagnostic; unlimited with Pro for practice."],
   ["bulb", "Learn, don’t leak",
@@ -450,7 +450,7 @@ export default function Landing({
                         id={qid}
                         className="np-lp-faq-q"
                         aria-expanded={open}
-                        aria-controls={aid}
+                        aria-controls={open ? aid : undefined}
                         onClick={() => setOpenFaq(open ? null : id)}
                       >
                         <span>{q}</span>
