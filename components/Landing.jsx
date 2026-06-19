@@ -252,8 +252,7 @@ export default function Landing({
           </h1>
           <p className="np-lp-sub">
             Real problems in math, physics, and chemistry, graded on how you reason, not what you
-            recall. noobtopro pinpoints your level, then gives you a structured path from where you
-            are to Doctorate-level mastery.
+            recall. noobtopro pinpoints your level, then gives you a structured path to climb.
           </p>
           <div className="np-lp-herocta">
             <button className="np-btn np-primary np-big" onClick={onProveIt} disabled={busy}>

@@ -10,8 +10,8 @@ import { contributionBreakdown, RUBRIC_MAX } from "@/lib/scoring";
 // resolves the var() tokens, so both themes stay in lockstep.
 export const ERROR_TYPES = {
   conceptual: { label: "Conceptual", color: "var(--danger)" },
-  strategic: { label: "Strategic", color: "var(--math)" },
-  reasoning: { label: "Reasoning", color: "var(--math)" },
+  strategic: { label: "Strategic", color: "var(--math-text)" },
+  reasoning: { label: "Reasoning", color: "var(--math-text)" },
   "execution-slip": { label: "Slip", color: "var(--muted)" },
   communication: { label: "Communication", color: "var(--muted)" },
 };
