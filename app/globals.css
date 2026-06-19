@@ -885,6 +885,58 @@ body {
   padding-bottom: max(60px, env(safe-area-inset-bottom));
 }
 
+/* ---- mobile bottom navigation (.np-bottomnav) ----
+   On phones the signed-in view tabs move OUT of the cramped top row (where they
+   were squeezed into an unusable, clipped sliver between the brand and the
+   theme/sign-out cluster) into a fixed, thumb-reachable bottom bar. Exactly one
+   primary nav is visible per viewport: the top-nav tab strip is hidden ≤640px
+   (below) and this bar is hidden above it — so there's never a duplicate
+   "Primary" nav in the a11y tree. z-index sits below modals (100) / drawers
+   (110) / toasts (200) so those still cover it; it's inside .np-app, so it also
+   inherits `inert` when a modal is open. Safe-area aware (home indicator). */
+.np-bottomnav { display: none; }
+
+@media (max-width: 640px) {
+  .np-topnav-tabs { display: none; }
+
+  .np-bottomnav {
+    display: flex;
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 90;
+    justify-content: space-around;
+    gap: 2px;
+    padding: 6px 8px;
+    padding-bottom: max(6px, env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    backdrop-filter: saturate(140%) blur(10px);
+    -webkit-backdrop-filter: saturate(140%) blur(10px);
+    border-top: 1px solid var(--line);
+  }
+  .np-bottomnav-tab {
+    flex: 1 1 0; min-width: 0;
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    padding: 6px 4px;
+    border: 0; background: none; cursor: pointer;
+    color: var(--muted); font-family: inherit; font-size: 11px; line-height: 1;
+    border-radius: 10px;
+    transition: color .15s ease, background .15s ease;
+  }
+  .np-bottomnav-tab svg { opacity: .8; }
+  .np-bottomnav-tab .np-bottomnav-label {
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .np-bottomnav-tab:hover { color: var(--text); }
+  .np-bottomnav-tab.active { color: var(--text); background: var(--tint-2); }
+  .np-bottomnav-tab.active svg { opacity: 1; }
+  .np-bottomnav-tab:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
+
+  /* Clear the fixed bar so it never covers content or the last action. */
+  .np-shell { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+  /* Float transient toasts above the bar instead of behind it. */
+  .np-toast { bottom: calc(64px + env(safe-area-inset-bottom)); }
+}
+
 /* ---- mobile touch-target comfort (kept LAST so these win over the base chip/
    summary sizing on equal specificity) ---- */
 summary.np-cardicon { min-height: 44px; }

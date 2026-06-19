@@ -58,7 +58,9 @@ describe("Noobtopro — URL hash reflects the active app view", () => {
     await waitFor(() => expect(window.location.hash).toBe("#practice"));
 
     // Opening the Dashboard tab updates the hash to match the view.
-    fireEvent.click(screen.getByRole("button", { name: /^dashboard$/i }));
+    // Top tab strip + mobile BottomNav both render a Dashboard button (CSS hides
+    // one per viewport; jsdom applies no CSS). Either fires setView — click first.
+    fireEvent.click(screen.getAllByRole("button", { name: /^dashboard$/i })[0]);
     await waitFor(() => expect(window.location.hash).toBe("#dashboard"));
   });
 
