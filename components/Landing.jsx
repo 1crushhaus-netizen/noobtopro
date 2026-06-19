@@ -514,6 +514,15 @@ export default function Landing({
             <a href="/privacy" style={{ color: "var(--muted)", textDecoration: "none" }}>Privacy</a>
             <a href="/terms" style={{ color: "var(--muted)", textDecoration: "none" }}>Terms</a>
             <a href="/refunds" style={{ color: "var(--muted)", textDecoration: "none" }}>Refunds</a>
+            {/* Reopen the consent banner so a prior choice can be changed as easily as it was
+                given (GDPR/ePrivacy withdrawal of consent). ConsentManager listens for this event. */}
+            <button
+              type="button"
+              style={{ color: "var(--muted)", background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit" }}
+              onClick={() => { if (typeof window !== "undefined") window.dispatchEvent(new Event("noobtopro:open-consent")); }}
+            >
+              Cookie preferences
+            </button>
           </nav>
           <span className="np-lp-foot-tech">Next.js · Supabase · Groq</span>
           <span className="np-lp-foot-copy">© {YEAR} noobtopro</span>

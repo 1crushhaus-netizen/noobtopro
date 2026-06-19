@@ -2,8 +2,7 @@ import "./globals.css";
 import { headers } from "next/headers";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
-import { SpeedInsights } from "@vercel/speed-insights/next";
-import { Analytics } from "@vercel/analytics/next";
+import ConsentManager from "@/components/ConsentManager";
 
 // Canonical production origin. metadataBase makes the auto-generated
 // opengraph-image / twitter-image URLs absolute, which crawlers and link
@@ -159,20 +158,14 @@ export default async function RootLayout({ children }) {
             text child — already unicode-escaped above, so no dangerouslySetInnerHTML).
             ld+json is non-executable data, but carry the nonce too for consistency. */}
         <script nonce={nonce} type="application/ld+json">{structuredData}</script>
-        {/* Ahrefs Web Analytics — cookieless organic-traffic/SEO tracking. Loaded from
-            analytics.ahrefs.com (allow-listed in lib/csp.js script-src + connect-src) and
-            carries the per-request CSP nonce. The data-key is a public site identifier. */}
-        <script
-          src="https://analytics.ahrefs.com/analytics.js"
-          data-key="T96nmRUfiiNKYhmeieDgOg"
-          nonce={nonce}
-          async
-        />
       </head>
       <body>
         {children}
-        <SpeedInsights />
-        <Analytics />
+        {/* ePrivacy Art. 5(3): the non-essential analytics (Vercel Web Analytics + Speed
+            Insights + Ahrefs) load ONLY after the visitor opts in. The Ahrefs data-key is a
+            public site identifier; the script is injected client-side post-consent and
+            allow-listed in lib/csp.js (host-source, so no nonce needed). */}
+        <ConsentManager ahrefsKey="T96nmRUfiiNKYhmeieDgOg" />
       </body>
     </html>
   );
