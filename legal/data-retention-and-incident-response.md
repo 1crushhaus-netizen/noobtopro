@@ -14,9 +14,9 @@
 | 2 | Scores/ranks/history | `scores`, `attempts`, `concept_mastery` | scores, glicko, rank moves | Contract/LI | life of account / until "reset progress" | cascade on delete; `delete_user_data()` on reset |
 | 3 | Answer text + feedback | `attempt_reviews` | question, free-text answer (≤12k), rubric, feedback | Contract | life of account; consider auto-trim > **[12 mo]** | cascade off `attempts` |
 | 4 | Photos | **not stored** (→ Groq, discarded) | handwriting images (transient) | Contract | **zero/transient** (confirm Groq retention; **enable ZDR**) | n/a |
-| 5 | Subscription/billing | `subscriptions` (local) + **Polar** | status, polar IDs, period end (no card data) | Contract/**Legal (tax)** | local: deleted on account deletion; **tax records at Polar: [6–10 yr]** | local cascade + Polar revoke |
-| 6 | Security/event logs (incl. IP) | `security_events`, `rate_limits` | client **IP**, route, flagged sample | LI (security) | **[90 days]** then delete | `prune_security_data(90)` — **MUST be scheduled** |
-| 7 | Analytics | Vercel/Ahrefs | pageviews, performance | **Consent**/LI | processor default; **[14 mo]** max | processor-side config |
+| 5 | Subscription/billing | `subscriptions` (local) + **Polar** | status, polar IDs, period end (no card data) | Contract/**Legal (tax)** | local: deleted on account deletion (~30 days); **tax records at Polar (MoR): invoices 8 yr (§257 HGB / §147 AO), other accounting up to 10 yr** | local cascade + Polar revoke |
+| 6 | Security/event logs (incl. IP) | `security_events`, `rate_limits` | client **IP**, route, flagged sample | LI (security) | **up to 90 days** then delete (prune currently UNSCHEDULED → schedule) | `prune_security_data(90)` — **MUST be scheduled** |
+| 7 | Analytics | Vercel (Web Analytics + Speed Insights) / Ahrefs | pageviews, performance | **Consent**/LI | processor default; **up to 14 mo** max | processor-side config |
 | 8 | DSAR/erasure logs | [request log] | requester email, type, action | Legal | **[3 yr]** after closure | scheduled purge |
 | 9 | Breach records (Art. 33(5)) | [breach register] | facts, effects, remediation | Legal | **[5 yr]** | scheduled purge |
 
@@ -25,7 +25,7 @@
 ## Breach-response runbook (target: SA decision within 72h of awareness)
 1. **Detect & contain** (rotate keys, revoke tokens, isolate); **record the awareness time** (starts the 72h clock).
 2. **Triage & assess risk** (categories — note no card data, no stored photos; numbers; EU/UK/US residents) using EDPB factors.
-3. **SA notification (by 72h)** to your lead SA **[name]** unless unlikely to risk rights; include Art. 33(3) content; **phased notice** permitted (file on time, supplement).
+3. **SA notification (by 72h)** to the lead SA **LDI NRW** (Düsseldorf) unless unlikely to risk rights; include Art. 33(3) content; **phased notice** permitted (file on time, supplement). **If filed after 72h, give reasons for the delay** (Art. 33(1)).
 4. **Data-subject notification (Art. 34)** if **high risk** — clear language, without undue delay (skip only if encrypted/neutralised/disproportionate → public notice).
 5. **US residents** — notify per applicable **state** breach laws (often 30–60 days; check AG/credit-bureau thresholds).
 6. **Document everything** (Art. 33(5)) even if not reported; retain **[5 yr]**.
@@ -48,6 +48,10 @@
   Art. 9 data) — but recommended; **document the decision** (status currently unknown).
 - **EU Art. 27 representative — N/A** (EU-established). **UK Art. 27 representative — likely
   REQUIRED** for ongoing UK users with no UK establishment — appoint and name in the policy.
+- **Art. 30 Records of Processing (RoPA) — MAINTAINED internally.** The <250-staff carve-out
+  (Art. 30(5)) does **not** apply here: processing is **not occasional** (continuous account,
+  grading, ranking and security-log processing) and is therefore not exempt. We keep and update an
+  internal RoPA covering each processing activity above.
 
 ## Engineering fixes the analysis demands (hand to dev)
 1. **Schedule** the `security_events`/`concept_reports` prune (Vercel Cron / Supabase pg_cron) — currently admin-load only.
@@ -56,7 +60,8 @@
 4. **Enable Groq ZDR**; **strip EXIF** (incl. precise geolocation) on photo upload.
 
 ### Open questions for counsel
-Retention periods (esp. statutory tax years for **[member state]**) · lead SA / establishment ·
-UK representative · DPO decision · DPIA sign-off (+ confirm Art. 22 not engaged) · Groq biometric/
-retention confirmation in the DPA · Art. 30 records (the <250-employee carve-out likely doesn't
-apply) · sub-processor DPAs in place.
+Statutory tax years confirmed for **Germany** (invoices 8 yr, other accounting up to 10 yr —
+§257 HGB / §147 AO); lead SA = **LDI NRW** · UK representative · DPO decision · DPIA sign-off
+(+ confirm Art. 22 not engaged) · Groq biometric/retention confirmation in the DPA · Art. 30 RoPA
+**maintained** (the <250-employee carve-out does not apply — non-occasional processing) ·
+sub-processor DPAs in place.

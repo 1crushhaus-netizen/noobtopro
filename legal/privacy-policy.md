@@ -1,19 +1,21 @@
 # Privacy Policy — noobtopro
 
-> **DRAFT for counsel review — not legal advice.** Fill every `[placeholder]`. GDPR-first,
-> globally usable. See `sub-processors.md`, `cookie-policy.md`, and
+> **Good-faith draft — counsel review recommended; not legal advice.** Entity details
+> still shown as `[bracketed]` (e.g. the registered address) are completed once the business
+> is registered. See `sub-processors.md`, `cookie-policy.md`, and
 > `data-retention-and-incident-response.md` for the detail referenced below.
 
-**Last updated:** [DATE]
+**Last updated:** 19 June 2026
 
-This Privacy Policy explains how **[Company Legal Name]** ("noobtopro", "we", "us", "our")
-collects, uses, shares, and protects personal data when you use the noobtopro website and
-application (the "Service"). It is provided under Articles 12–14 of the EU General Data
-Protection Regulation ("GDPR") and equivalent laws (UK GDPR, and US state privacy laws — see
-the regional sections). This is a notice, not a contract.
+This Privacy Policy explains how **noobtopro**, operated by Russell Rozario (a sole proprietorship
+(Einzelunternehmen) under German law) ("noobtopro", "we", "us", "our"), collects, uses, shares, and
+protects personal data when you use the noobtopro website and application (the "Service"). It is
+provided under Articles 12–14 of the EU General Data Protection Regulation ("GDPR") and equivalent
+laws (UK GDPR, and US state privacy laws — see the regional sections). **This is a privacy notice,
+not a contract** — the contract that governs your use of the Service is our Terms of Service.
 
 noobtopro is an educational tool that uses an AI model to assess the reasoning in your math,
-physics, and chemistry work and assigns a relative skill "rank." **The rank is not an
+physics, and chemistry work and gives you rubric-based feedback and a score. **This is not an
 accredited exam, qualification, or certification.**
 
 > **Region-specific terms.** If you are in the **UK**, the **United States/California**, or
@@ -25,22 +27,24 @@ accredited exam, qualification, or certification.**
 
 ## 1. Who is responsible for your data (Controller)
 
-- **[Company Legal Name]**
-- **[Registered Address, EU Member State]**
-- Email: **[privacy@your-domain]**
+- **noobtopro** (operated by Russell Rozario, a sole proprietorship (Einzelunternehmen) under
+  German law)
+- **[Registered business address — to be added upon registration]**, Cologne (Köln), North
+  Rhine-Westphalia, Germany
+- Email: **russellrozario@noobto.pro**
 
-**Data Protection Officer:** [We have appointed a DPO reachable at [dpo@your-domain] / We are
-not required to appoint a DPO; for any privacy question contact [privacy@your-domain]].
-*[COUNSEL: confirm DPO requirement.]*
+**Data Protection Officer:** We are **not required to appoint a DPO** — our processing does not meet
+the thresholds in §38 of the German Federal Data Protection Act (BDSG) or GDPR Art. 37. For any
+privacy question contact **russellrozario@noobto.pro**.
 
-**EU/EEA establishment & lead authority:** Our main establishment in the EU is in **[EU Member
-State]**, where decisions about the purposes and means of processing are made. Our lead
-supervisory authority is **[Lead Supervisory Authority]**. *[COUNSEL: confirm the member state
-of central administration and that the one-stop-shop applies (EDPB Opinion 04/2024).]*
+**EU/EEA establishment & lead authority:** Our establishment in the EU is in **Germany**, where
+decisions about the purposes and means of processing are made. Our lead supervisory authority is
+**Landesbeauftragte für Datenschutz und Informationsfreiheit Nordrhein-Westfalen (LDI NRW),
+Kavalleriestraße 2–4, 40213 Düsseldorf, Germany**.
 
-**EU/UK Representative:** [Not applicable, as we are established in the EU / Our UK
-representative is [name & contact]]. *[COUNSEL: a UK Art. 27 representative is likely required
-for UK users — confirm.]*
+**EU/UK Representative:** Because we are **established in the EU, we are not required to appoint an
+EU Art. 27 representative**. If we offer the Service to users in the **United Kingdom**, a UK
+representative may be appointed for UK users; any such appointment will be noted here.
 
 ---
 
@@ -48,11 +52,11 @@ for UK users — confirm.]*
 
 | Category | Examples | Source |
 |---|---|---|
-| **Account & identity** | Name, email address, profile picture | You / your Google (or GitHub/Discord) sign-in |
-| **Age confirmation** | Date of birth / 18+ attestation (we store the verification + birth year, not the full DOB) | You, at sign-up |
+| **Account & identity** | Name, email address, profile picture | You / your Google sign-in (GitHub/Discord may be offered in future but are currently disabled) |
+| **Age confirmation** | 18+ self-declaration; for account holders a server-recorded verification verdict and **birth year only** (not the full date of birth) | You, at sign-up |
 | **Learning content you submit** | Problems answered, your written reasoning, **photos of your handwritten work** uploaded for grading | You |
-| **Progress data** | Scores, per-subject ranks, reasoning rubrics, attempt history, concept mastery | Generated by the Service |
-| **Billing data** | Subscription status and identifiers (we do **not** receive or store full card details) | Our payment provider, Polar |
+| **Progress data** | Scores, reasoning rubrics, attempt history, concept mastery | Generated by the Service |
+| **Billing data** | Subscription status and identifiers (we do **not** receive or store full card details) | Polar, as Merchant of Record |
 | **Technical & usage data** | Approximate page-view/performance data | Analytics tools (see Section 7) |
 
 **Guest mode.** If you are not signed in, your progress is stored only in your own browser's
@@ -66,13 +70,11 @@ for grading is transmitted for that single purpose.
 | Purpose | Data used | Legal basis |
 |---|---|---|
 | Create and operate your account; authenticate you | Account & identity | **Contract** — Art. 6(1)(b) |
-| Confirm you are 18+ (the Service is adults-only) | Date of birth / attestation | **Legal obligation / legitimate interests** — Art. 6(1)(c)/(f) *[COUNSEL: confirm]* |
-| **Grade your reasoning and compute your rank** (incl. sending your answer, the question, and any uploaded photo to our AI provider) | Learning content, progress | **Contract** — Art. 6(1)(b) |
-| Save your progress and show your position on the **anonymous** leaderboard | Progress | **Contract** — Art. 6(1)(b) |
-| Process and manage your Pro subscription | Billing | **Contract** — Art. 6(1)(b) |
+| Confirm you are 18+ (the Service is adults-only) | Age confirmation | **Legal obligation / legitimate interests** — Art. 6(1)(c)/(f) |
+| **Grade your reasoning** (incl. sending your answer, the question, and any uploaded photo to our AI provider) and save your progress | Learning content, progress | **Contract** — Art. 6(1)(b) + **legitimate interests** in providing accurate automated educational feedback — Art. 6(1)(f) |
+| Process and manage your Pro subscription | Billing | **Contract** — Art. 6(1)(b); **legal obligation** for records we must keep — Art. 6(1)(c) |
 | Security, abuse prevention, debugging | Account, technical | **Legitimate interests** — Art. 6(1)(f) (Recital 49) |
 | Product analytics and performance measurement | Technical & usage | **Consent** — Art. 6(1)(a) + ePrivacy (see Section 7) |
-| Marketing communications (only if you opt in) | Account & identity | **Consent** — Art. 6(1)(a) |
 
 Where we rely on **legitimate interests**, you may **object** (Section 6). Where we rely on
 **consent**, you may **withdraw it at any time** without affecting prior processing.
@@ -82,33 +84,39 @@ Where we rely on **legitimate interests**, you may **object** (Section 6). Where
 ## 4. Photos of handwritten work and sensitive data
 
 We process photos you upload **only to read and grade the work shown** — we do **not** use
-facial recognition or any technique to identify you from an image. On this basis, photos are
-**not** treated as biometric "special category data" (GDPR Art. 9; Recital 51).
+facial recognition or any technique to identify you from an image, and we do **not** store the
+photo on our servers after grading. On this basis, photos are **not** treated as biometric
+"special category data" (GDPR Art. 9; Recital 51).
+
+The text of your answer, the question, and any uploaded photo are sent to our AI inference
+provider, **Groq**, in the **United States** to produce a grade. Your submissions and photos are
+**not used to train** the model.
 
 **Please do not upload images containing faces, ID documents, or information about your health,
 beliefs, or other sensitive matters**, and do not write such information in your answers. We do
 not ask for and do not want special-category data. If you believe you submitted such data,
-contact **[privacy@your-domain]** and we will delete it. *[COUNSEL: confirm no Art. 9
-processing; document the Recital 51 analysis in the Art. 30 records.]*
+contact **russellrozario@noobto.pro** and we will delete it.
 
 ---
 
 ## 5. Who we share data with (recipients & processors)
 
-We share personal data only with service providers ("processors") acting on our instructions
-under data-processing agreements, and only as needed to run the Service. **We do not sell your
-personal data.** A current list is in `sub-processors.md` (publish at **[link]**).
+We share personal data with the providers below, which act either as our **processors** (on our
+instructions, under data-processing agreements) or as **independent controllers** (they determine
+their own purposes for certain data), and only as needed to run the Service. **We do not sell your
+personal data.** A current list is in `sub-processors.md` (published at `/legal/sub-processors`).
 
 | Provider | Role | Data involved | Location |
 |---|---|---|---|
-| **Supabase** | Authentication & database (processor) | Account, progress | US (region us-east-1) |
-| **Groq** | AI inference for grading & question generation (processor) | Your answer text, the question, **uploaded photos** | United States |
-| **Polar** | Payments — **Merchant of Record; independent controller** for payment/tax | Billing | [confirm] |
-| **Vercel** | Hosting; Web Analytics; Speed Insights (processor) | Technical & usage | US/[EU] |
-| **Ahrefs** | Web Analytics (processor) | Technical & usage | Singapore |
-| **Google / GitHub / Discord** | Sign-in (OAuth; independent controller) you choose | Account & identity | US |
+| **Supabase, Inc.** | Authentication & database (**processor**) | Account, progress | US (AWS us-east-1) |
+| **Groq, Inc.** | AI inference for grading (**processor**) | Your answer text, the question, **uploaded photos** | United States |
+| **Vercel, Inc.** | Hosting; Web Analytics; Speed Insights (**processor**) | Technical & usage | US (AWS) |
+| **Ahrefs Pte. Ltd.** | Web Analytics (**processor**) | Aggregated traffic metrics | US (AWS); entity in Singapore |
+| **Polar Software, Inc.** | Payments — **Merchant of Record / seller of record; independent controller** for payment & tax | Billing | United States |
+| **Google LLC** | Sign in with Google (OAuth; **independent controller**) | Account & identity | United States |
 
-Some of these are outside the EU/EEA — see **Section 9**.
+Polar is not our payment processor or our processor — it is the seller of record and an
+independent controller. Some of these recipients are outside the EU/EEA — see **Section 9**.
 
 ---
 
@@ -121,7 +129,7 @@ significant effect (22) — see Section 11.
 
 **How to exercise.** Delete your scores/history in-app (**Dashboard → Reset my progress**),
 permanently delete your account and all associated data (**Dashboard → Delete account**, which
-also cancels any Pro subscription), or email **[privacy@your-domain]**.
+also cancels any Pro subscription), or email **russellrozario@noobto.pro**.
 
 We respond within **one month** (extendable by **two further months** for complex/numerous
 requests, with notice in the first month). We may verify your identity first. Requests are free
@@ -129,24 +137,25 @@ unless manifestly unfounded or excessive.
 
 **Right to complain.** You may lodge a complaint with a supervisory authority, in particular in
 your EU/EEA Member State of residence, work, or where an alleged infringement occurred (Art.
-77). Our lead authority is **[Lead Supervisory Authority]** (**[link]**). [UK users: the ICO —
-ico.org.uk. US users: see Section 12.]
+77). Our lead authority is **Landesbeauftragte für Datenschutz und Informationsfreiheit
+Nordrhein-Westfalen (LDI NRW), Kavalleriestraße 2–4, 40213 Düsseldorf, Germany**. UK users: the
+ICO — ico.org.uk. US users: see Section 12.
 
 ---
 
 ## 7. Cookies, analytics, and similar technologies
 
-> See **`cookie-policy.md`** (to publish at `/cookies`) for the full list and your choices.
+> See **`cookie-policy.md`** (published at `/cookies`) for the full list and your choices.
 
 A small amount of browser storage is **strictly necessary** to keep you signed in (via
-Supabase) and to remember preferences such as your theme; this does not require consent.
+Supabase) and to remember preferences such as your theme and your analytics choice; this does not
+require consent.
 
 For measurement we use **Vercel Web Analytics**, **Vercel Speed Insights**, and **Ahrefs Web
 Analytics**. We do not use advertising cookies or third-party advertising trackers. **These
 analytics technologies are not strictly necessary, so — in the EU/EEA and UK — we load them
 only with your consent**, in line with the ePrivacy Directive (Art. 5(3)) and EDPB Guidelines
-2/2023. *[COUNSEL/cookies: "cookieless" is not automatically consent-exempt — confirm the
-banner gating.]*
+2/2023. We honor Global Privacy Control (GPC) signals as an opt-out.
 
 ---
 
@@ -154,13 +163,14 @@ banner gating.]*
 
 > Full schedule in **`data-retention-and-incident-response.md`**.
 
-- **Account & progress data:** while your account is active, then deleted within **[30] days**
-  of account deletion (some backups may persist briefly).
-- **Uploaded photos:** used only to produce a grade and **not retained on our systems after
-  grading** *[COUNSEL: confirm Groq retention; enable Zero-Data-Retention].*
-- **Billing records:** retained by Polar for the **statutory tax/accounting period [e.g. up to
-  10 years]** as required by law, even after account deletion.
-- **Security logs (incl. IP):** up to **[90] days**.
+- **Account & progress data:** kept for the **life of your account**, then deleted on account
+  deletion (some backups may persist briefly).
+- **Uploaded photos:** processed transiently to produce a grade and **not stored on our systems
+  after grading**.
+- **Billing & tax records:** retained by Polar as Merchant of Record for the **statutory
+  tax/accounting periods** required by law, even after account deletion.
+- **Security logs (incl. IP):** up to **90 days**.
+- **Analytics data:** about **14 months** per our analytics providers' standard configuration.
 - We keep data no longer than necessary (GDPR Art. 5(1)(e)).
 
 ---
@@ -169,15 +179,18 @@ banner gating.]*
 
 > Full mechanism detail in **`sub-processors.md`**.
 
-Some processors (e.g. **Supabase (us-east-1)**, **Groq** (US), **Ahrefs** (Singapore), certain
-Vercel/Polar operations) process data outside the EU/EEA and UK. Where this happens we rely on:
+Some recipients process data outside the EU/EEA and UK, principally in the United States. Where
+this happens we rely on appropriate safeguards for each recipient:
 
-- the **EU-US Data Privacy Framework** adequacy decision (for DPF-certified recipients —
-  currently **Vercel** and **Google**); and/or
+- the **EU-US Data Privacy Framework** adequacy decision (with UK and Swiss extensions), under
+  which **Vercel** and **Google** are certified; and/or
 - the European Commission's **Standard Contractual Clauses** (plus the UK Addendum/IDTA) with a
-  transfer impact assessment and supplementary measures (for **Supabase**, **Groq**, **Ahrefs**).
+  Transfer Impact Assessment and supplementary measures, for **Supabase** (US), **Groq** (US),
+  and **Ahrefs** (a Singapore entity processing data in the **US** on AWS).
+- For payments, **Polar** acts as Merchant of Record and independent controller under its own
+  policy and safeguards.
 
-You can request a copy of the safeguards by emailing **[privacy@your-domain]**.
+You can request a copy of the safeguards by emailing **russellrozario@noobto.pro**.
 
 ---
 
@@ -186,18 +199,20 @@ You can request a copy of the safeguards by emailing **[privacy@your-domain]**.
 Data is encrypted in transit. Access to your account data is restricted to you through
 row-level security, and sensitive operations run server-side. No method is perfectly secure,
 but we work to protect your information and will notify you and the relevant authority of a
-personal-data breach where required by law.
+personal-data breach where required by law (GDPR Arts. 33–34).
 
 ---
 
-## 11. Automated processing and the AI rank
+## 11. Automated processing and the AI grade (GDPR Art. 22)
 
-Your work is assessed by an AI model that generates a grade and a relative skill **rank
-(0–350)**. This is **profiling**, but the rank is **for your learning only**, is **not** an
-exam, qualification, or certification, and produces **no legal or similarly significant
-effect** on you. For these reasons this is **not** a "solely automated decision with legal or
-similarly significant effect" under GDPR Art. 22. You may still contact us at
-**[privacy@your-domain]** to discuss a grade or request human review. See `ai-transparency-notice.md`.
+Your work is assessed by an AI model that generates rubric-based feedback and a score. This is
+**profiling**, but in our assessment it produces **no legal or similarly significant effect** on
+you: it is **user-initiated**, **advisory and for your learning only**, and is **computed
+server-side from a published rubric**. It is **not** an exam, qualification, or certification, and
+is not shared with any institution. For these reasons it is **not** a "solely automated decision
+with legal or similarly significant effect" under GDPR Art. 22. You may still contact us at
+**russellrozario@noobto.pro** to discuss a result and request **human review**. See
+`ai-transparency-notice.md`.
 
 ---
 
@@ -205,17 +220,18 @@ similarly significant effect" under GDPR Art. 22. You may still contact us at
 
 - **United Kingdom:** UK GDPR rights mirror Section 6; the supervisory authority is the ICO.
 - **United States / California (CCPA/CPRA) and other US states:** see the **US State Privacy
-  Notice** (drafted in this pack — Do-Not-Sell/Share, GPC honoring, Limit-Sensitive-PI,
-  authorized agents, non-discrimination). *[Slot the full US section here.]*
+  Notice** (published at `/legal/us-privacy`) — Do-Not-Sell/Share, GPC honoring,
+  Limit-Sensitive-PI, authorized agents, non-discrimination.
 
 ---
 
 ## 13. Children
 
 noobtopro is an **adults-only service for users aged 18 and older**. It is not directed to
-children, and we do not knowingly collect data from anyone under 18. We confirm age at sign-up.
-If you believe someone under 18 has provided us data, contact **[privacy@your-domain]** and we
-will delete it.
+children, and we do not knowingly collect data from anyone under 18. We rely on an age
+self-declaration at sign-up; for account holders we record a server-side verdict and birth year
+only. If you believe someone under 18 has provided us data, contact
+**russellrozario@noobto.pro** and we will delete it.
 
 ---
 
@@ -226,13 +242,15 @@ provide a more prominent notice.
 
 ## 15. Contact
 
-**[privacy@your-domain]** — **[Company Legal Name], [Registered Address]**. EU lead supervisory
-authority: **[Lead Supervisory Authority]**.
+**russellrozario@noobto.pro** — **noobtopro, Cologne (Köln), Germany**. EU lead supervisory
+authority: **Landesbeauftragte für Datenschutz und Informationsfreiheit Nordrhein-Westfalen
+(LDI NRW), Kavalleriestraße 2–4, 40213 Düsseldorf, Germany**.
 
 ---
 
-### Gaps fixed vs. the current `/privacy` page (counsel checklist)
+### Gaps fixed vs. the prior `/privacy` page (counsel checklist)
 Lawful bases per purpose · full rights enumeration incl. complaint right · retention periods ·
-named transfer safeguards · complete processor list incl. **Ahrefs** · automated-decision
-disclosure · DPO/representative line · Recital-51 photo analysis · corrected
-"notice-not-contract" framing.
+named transfer safeguards per recipient · processor vs. independent-controller split incl.
+**Ahrefs** · automated-decision (Art. 22) disclosure · DPO/representative line · Recital-51 photo
+analysis · corrected "notice-not-contract" framing · leaderboard references removed (feature
+being removed from the product).

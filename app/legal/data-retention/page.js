@@ -22,23 +22,27 @@ export default function DataRetentionPage() {
       <Section heading="1. How long we keep your data">
         <p>
           We keep personal data only for as long as we need it for the purpose it was collected, or
-          for as long as the law requires us to. The table below summarizes the main categories.
+          for as long as the law requires us to. The table below sets out the main categories,
+          together with the concrete retention period or the criteria we use to determine it.
         </p>
         <ul>
           <li>
             <strong>Account &amp; sign-in details</strong> (your name, email, profile picture from
             an OAuth provider, and the birth year used for age verification) are kept for the{" "}
-            <strong>life of your account</strong>. If an account stays inactive for a long period we
-            may delete it after giving you notice first.
+            <strong>life of your account</strong> and are then erased{" "}
+            <strong>within about 30 days</strong> of you deleting your account (a short window that
+            lets the deletion propagate across our systems and backups). If an account stays
+            inactive for an extended period we may delete it after giving you notice first.
           </li>
           <li>
             <strong>Scores, ranks and learning history</strong> (your scores, rating, rank changes
             and concept mastery) are kept for the life of your account, or until you reset your
-            progress.
+            progress, and are then deleted within the same ~30-day window.
           </li>
           <li>
             <strong>Your answers and feedback</strong> (the question, your free-text answer, and the
-            rubric-based feedback) are kept for the life of your account.
+            rubric-based feedback) are kept for the life of your account and deleted within the same
+            ~30-day window after account deletion.
           </li>
           <li>
             <strong>Handwriting photos are not stored.</strong> When you submit a photo for grading
@@ -47,25 +51,32 @@ export default function DataRetentionPage() {
           </li>
           <li>
             <strong>Subscription &amp; billing records.</strong> We store basic subscription status
-            and identifiers (no card details). Payments are handled by our merchant of record,{" "}
-            {LEGAL.mor}, who retains the tax and invoicing records that they are legally required to
-            keep. Our local subscription records are deleted when your account is deleted.
+            and identifiers (no card details); our local subscription records are deleted when your
+            account is deleted. Payments are handled by our merchant of record, {LEGAL.mor}, which —
+            as the seller of record — retains the underlying tax and invoicing records for the
+            periods German statutory law requires: broadly{" "}
+            <strong>8 years for invoices</strong> and <strong>up to 10 years</strong> for other
+            accounting records (§&nbsp;257 HGB, §&nbsp;147 AO). These statutory periods are set by
+            law and take precedence over the deletion of our local records.
           </li>
           <li>
             <strong>Security &amp; event logs</strong> (such as a request&rsquo;s IP address and the
-            route accessed) are kept on a short-lived basis and then deleted, so we can protect the
-            Service against abuse.
+            route accessed) are retained for <strong>up to 90 days</strong> and then deleted, so we
+            can protect the Service against abuse, investigate incidents and meet our security
+            obligations.
           </li>
           <li>
-            <strong>Analytics</strong> (aggregate page views and performance) are retained according
-            to our analytics providers&rsquo; standard configuration; see our{" "}
+            <strong>Analytics</strong> (aggregate page views and performance) are retained for{" "}
+            <strong>up to 14 months</strong> and then deleted or fully aggregated; see our{" "}
             <a href="/cookies">Cookie Policy</a>.
           </li>
         </ul>
         <p>
-          Where a specific statutory retention period applies (for example, tax and accounting
-          records held by our payment provider), that period overrides the general rule above and we
-          keep the relevant records for as long as the law requires.
+          Where a specific statutory retention period applies (for example, the tax and accounting
+          records held by our payment provider described above), that period overrides the general
+          rule and we — or the provider — keep the relevant records for as long as the law requires.
+          When the purpose for keeping a category of data ends and no statutory period applies, we
+          delete or anonymise it.
         </p>
       </Section>
 
@@ -127,7 +138,9 @@ export default function DataRetentionPage() {
           If a personal-data breach occurs that is likely to result in a risk to your rights and
           freedoms, we will notify the competent supervisory authority{" "}
           <strong>without undue delay and, where feasible, within 72 hours</strong> of becoming aware
-          of it, in line with Article&nbsp;33 of the GDPR.
+          of it, in line with Article&nbsp;33 of the GDPR. Where notification is delayed beyond
+          72&nbsp;hours, we accompany it with the reasons for the delay, and we may provide the
+          required information in phases as it becomes available.
         </p>
         <p>
           Where a breach is likely to result in a <strong>high risk</strong> to your rights and

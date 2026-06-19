@@ -37,19 +37,26 @@ Because Pro is supplied immediately, at checkout you **expressly request immedia
 performed** (see the checkout consent text in §10A). Even so:
 - You keep a **14-day right of withdrawal** from the day your subscription starts.
 - If you withdraw within 14 days **after** access began at your request, you remain liable only
-  for a **proportionate (pro-rata) amount** for the part already provided (on the monthly price),
-  and we refund the remainder. Example: withdrawing on day 3 of a 30-day month refunds roughly
-  27/30 of the price.
+  for a **proportionate (pro-rata) amount** for the part already provided, and we refund the
+  remainder. The proportion is **calculated on the total price agreed in the contract** (Art. 14(3));
+  because Pro has **no minimum term**, the only committed price is the current month's **€9.99**, so
+  we pro-rate against that month — not against any longer/annual figure. Example: withdrawing on
+  day 3 of a 30-day month refunds roughly 27/30 of the €9.99.
 - **No reason is required.** To withdraw, use the **"Withdraw from contract here"** control in
   your dashboard (available throughout the 14-day period) — confirming it immediately ends the
   subscription and issues the refund through Polar — or email **russellrozario@noobto.pro**, or
-  use the model form in Annex A.
+  use the model form in Annex A. After you withdraw, **we send you a confirmation of your
+  withdrawal on a durable medium** (and make a downloadable record available) as lasting proof.
 
 If we failed to capture your express consent and acknowledgement, or to give you the required
 pre-contract information, **you bear no cost** for the period before withdrawal.
 
-UK consumers have equivalent rights under the Consumer Contracts (Information, Cancellation and
-Additional Charges) Regulations 2013, plus quality rights under the Consumer Rights Act 2015.
+UK consumers have equivalent statutory rights under the Consumer Contracts (Information,
+Cancellation and Additional Charges) Regulations 2013, whose formal route is **cancellation by a
+clear notice** (e.g. by emailing russellrozario@noobto.pro, or via the Annex A form) within 14
+days; the self-serve **"Withdraw from contract here"** button is offered to UK consumers as a
+**convenience** for giving that notice and does not replace or limit the statutory route. UK
+consumers also have quality rights under the Consumer Rights Act 2015.
 
 ## 3. The same 14-day withdrawal is offered worldwide
 We extend the **same one-click, self-serve 14-day withdrawal with a pro-rata refund** (§2) to
@@ -86,8 +93,9 @@ If a renewal fails, we may retry and/or pause Pro access until payment succeeds.
 charge is an error, contact us **before** starting a chargeback so we can resolve it.
 
 ## 8. Price changes
-Any price change applies only to **future** billing periods, with notice beforehand so you can
-cancel if you disagree.
+Any price change applies only to **future** billing periods, with **at least 7 days' advance
+notice** (sent by Polar to your checkout email) before it takes effect, so you can cancel if you
+disagree.
 
 ## 9. Contact
 Billing & refunds: **russellrozario@noobto.pro** — **noobtopro**, a sole proprietorship
@@ -116,13 +124,18 @@ created — see `lib/consent.js` (`IMMEDIATE_ACCESS_CONSENT_TEXT`) and `app/api/
 **C. Mandatory withdrawal function (Art. 11a, from 19 June 2026):** implemented as a prominent,
 always-available **"Withdraw from contract here"** control during the 14-day period → short
 confirm dialog → **"Confirm withdrawal"** → immediate termination + pro-rata refund via Polar
-(`app/api/account/withdraw/route.js`).
+(`app/api/account/withdraw/route.js`). On withdrawal we send the consumer an **acknowledgement on
+a durable medium** (confirmation email + downloadable record) so they have lasting proof of the
+withdrawal.
 
-**D. Post-purchase confirmation (Art. 8(7) durable medium):** Polar, as Merchant of Record, sends
-the purchase confirmation and receipt by email. *Verify Polar's confirmation states: what was
-bought; €9.99/month incl. taxes; the monthly auto-renewal date; seller/MoR = Polar Software, Inc.;
-service provider = noobtopro; the recorded immediate-access consent; and the 14-day withdrawal
-right and how to exercise it. Add any missing items to a first-party confirmation if needed.*
+**B/D are the trader's responsibility.** The **order-button label (Art. 8(2))** and the
+**post-purchase confirmation on a durable medium (Art. 8(7))** are provided at **Polar's checkout**,
+which Polar renders as Merchant of Record — **but compliance remains noobtopro's responsibility as
+the trader** (MoR status does not offload it). *Verify Polar's confirmation states: what was bought;
+€9.99/month incl. taxes; the monthly auto-renewal date; seller/MoR = Polar Software, Inc.; service
+provider = noobtopro; the recorded immediate-access consent; and the 14-day withdrawal right and how
+to exercise it. Where anything is missing, provide it via a **first-party confirmation** (email +
+downloadable record) as a fallback.*
 
 ---
 

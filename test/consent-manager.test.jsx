@@ -42,7 +42,7 @@ describe("ConsentManager — ePrivacy prior-consent gate", () => {
     expect(tag).toBeTruthy();
     expect(tag.getAttribute("data-key")).toBe("K1");
     expect(tag.src).toContain("analytics.ahrefs.com");
-    expect(window.localStorage.getItem(KEY)).toBe("granted");
+    expect(JSON.parse(window.localStorage.getItem(KEY)).choice).toBe("granted"); // auditable {choice,ts,version} record
     expect(screen.queryByRole("dialog", { name: /cookies & analytics/i })).toBe(null);
   });
 
@@ -52,7 +52,7 @@ describe("ConsentManager — ePrivacy prior-consent gate", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: /cookies & analytics/i })).toBe(null));
     expect(analyticsLoaded()).toBe(false);
     expect(ahrefsTag()).toBe(null);
-    expect(window.localStorage.getItem(KEY)).toBe("denied");
+    expect(JSON.parse(window.localStorage.getItem(KEY)).choice).toBe("denied"); // auditable {choice,ts,version} record
   });
 
   it("a stored 'granted' choice loads analytics immediately with no banner", async () => {
@@ -84,6 +84,6 @@ describe("ConsentManager — ePrivacy prior-consent gate", () => {
     // Switching to Accept now loads the trackers.
     fireEvent.click(screen.getByRole("button", { name: /^accept$/i }));
     await waitFor(() => expect(analyticsLoaded()).toBe(true));
-    expect(window.localStorage.getItem(KEY)).toBe("granted");
+    expect(JSON.parse(window.localStorage.getItem(KEY)).choice).toBe("granted"); // auditable {choice,ts,version} record
   });
 });

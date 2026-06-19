@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 const va = vi.hoisted(() => ({ track: vi.fn() }));
 vi.mock("@vercel/analytics", () => ({ track: (...a) => va.track(...a) }));
 
-import { track, hasAnalyticsConsent, CONSENT_STORAGE_KEY } from "@/lib/analytics";
+import { track, hasAnalyticsConsent, CONSENT_STORAGE_KEY, writeConsent, readConsentChoice, CONSENT_VERSION } from "@/lib/analytics";
 
 beforeEach(() => {
   va.track.mockReset();
@@ -39,5 +39,28 @@ describe("lib/analytics — ePrivacy consent gate on track()", () => {
     window.localStorage.setItem(CONSENT_STORAGE_KEY, "granted");
     va.track.mockImplementation(() => { throw new Error("boom"); });
     expect(() => track("x")).not.toThrow();
+  });
+});
+
+describe("lib/analytics — consent record format", () => {
+  it("writeConsent stores an auditable {choice, ts, version} record; readConsentChoice reads it back", () => {
+    window.localStorage.clear();
+    writeConsent("granted");
+    const rec = JSON.parse(window.localStorage.getItem(CONSENT_STORAGE_KEY));
+    expect(rec.choice).toBe("granted");
+    expect(rec.version).toBe(CONSENT_VERSION);
+    expect(typeof rec.ts).toBe("string");
+    expect(readConsentChoice()).toBe("granted");
+  });
+  it("reads a LEGACY bare 'granted'/'denied' string for back-compat", () => {
+    window.localStorage.clear();
+    window.localStorage.setItem(CONSENT_STORAGE_KEY, "granted");
+    expect(readConsentChoice()).toBe("granted");
+    expect(hasAnalyticsConsent()).toBe(true);
+  });
+  it("ignores a malformed record (undecided)", () => {
+    window.localStorage.clear();
+    window.localStorage.setItem(CONSENT_STORAGE_KEY, "{not json");
+    expect(readConsentChoice()).toBe(null);
   });
 });

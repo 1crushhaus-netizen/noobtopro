@@ -62,3 +62,24 @@ describe("proRataRefundMinor (Art. 14(3) — pay only for the part used)", () =>
     expect(proRataRefundMinor(1000, end, start)).toBe(1000);
   });
 });
+
+describe("withdrawalAcknowledgementText — CRD Art. 11a durable medium", () => {
+  it("includes the account, the withdrawal date/time, and the issued pro-rata refund", async () => {
+    const { withdrawalAcknowledgementText } = await import("@/lib/consent");
+    const t = withdrawalAcknowledgementText({
+      accountEmail: "a@b.com",
+      withdrawnAt: "2026-06-19T10:00:00.000Z",
+      refund: { status: "issued", amountMinor: 933, currency: "eur" },
+    });
+    expect(t).toContain("a@b.com");
+    expect(t).toContain("2026-06-19T10:00:00.000Z");
+    expect(t).toContain("9.33 EUR");
+    expect(t).toMatch(/Art\.?\s*11a/);
+    expect(t).toContain("Merchant of Record");
+  });
+  it("handles the no-refund case without throwing", async () => {
+    const { withdrawalAcknowledgementText } = await import("@/lib/consent");
+    const t = withdrawalAcknowledgementText({ refund: { status: "none" } });
+    expect(t).toContain("no refundable remainder");
+  });
+});

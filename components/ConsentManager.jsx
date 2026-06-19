@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Analytics } from "@vercel/analytics/next";
-import { CONSENT_STORAGE_KEY as STORAGE_KEY } from "@/lib/analytics";
+import { readConsentChoice, writeConsent } from "@/lib/analytics";
 
 // ---------------------------------------------------------------------------
 // ConsentManager — EU/ePrivacy prior-consent gate for the NON-essential analytics.
@@ -30,13 +30,7 @@ import { CONSENT_STORAGE_KEY as STORAGE_KEY } from "@/lib/analytics";
 export const OPEN_CONSENT_EVENT = "noobtopro:open-consent";
 
 function readStoredChoice() {
-  if (typeof window === "undefined") return null;
-  try {
-    const v = window.localStorage.getItem(STORAGE_KEY);
-    return v === "granted" || v === "denied" ? v : null;
-  } catch {
-    return null;
-  }
+  return readConsentChoice();
 }
 
 // A standing browser opt-out signal (Global Privacy Control / legacy Do-Not-Track).
@@ -102,11 +96,7 @@ export default function ConsentManager({ ahrefsKey }) {
   function decide(value) {
     setChoice(value);
     setShowBanner(false);
-    try {
-      window.localStorage.setItem(STORAGE_KEY, value);
-    } catch {
-      /* storage blocked — the in-memory choice still gates this session */
-    }
+    writeConsent(value); // persist an auditable {choice, ts, version} record (storage-safe)
   }
 
   if (!mounted) return null;

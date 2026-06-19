@@ -178,38 +178,7 @@ describe("Dashboard — reasoning radar + what-to-work-on", () => {
   });
 });
 
-describe("Dashboard — leaderboard, reset, empty state", () => {
-  it("renders the anonymous-tiers leaderboard (distribution + own position, NO identities)", async () => {
-    const tiers = {
-      overall: { counts: [3, 2, 1, 0, 0], total: 6, you: { band: 1, score: 30, above: 3 } },
-      math: { counts: [1, 1, 2, 1, 1], total: 6, you: { band: 3, score: 60, above: 2 } },
-      physics: { counts: [4, 1, 1, 0, 0], total: 6, you: { band: 0, score: 10, above: 5 } },
-      chemistry: { counts: [0, 1, 2, 2, 1], total: 6, you: { band: 4, score: 90, above: 0 } },
-    };
-    const loadLeaderboard = vi.fn(async () => ({ tiers }));
-    render(<Dashboard user={user} scores={scores} history={history} loadLeaderboard={loadLeaderboard} onPractice={() => {}} />);
-    expect(screen.getByText("Leaderboard")).toBeTruthy();
-    await waitFor(() => expect(screen.getAllByText(/You're/i).length).toBeGreaterThan(0));
-    expect(loadLeaderboard).toHaveBeenCalled();
-    expect(screen.getAllByText(/ranked/i).length).toBeGreaterThan(0);
-  });
-
-  it("FIX 8: an UNVERIFIED caller sees a PROVISIONAL placement (no rank) with attempts remaining", async () => {
-    // The server marks the caller's own row provisional (a freshly-migrated guest score):
-    // it carries band/score for visibility but NO `above`, plus `needed` graded attempts.
-    const tiers = {
-      overall: { counts: [2, 1, 0, 0, 0], total: 3, you: { band: 3, score: 250, provisional: true, needed: 5 } },
-      math: { counts: [1, 1, 1, 0, 0], total: 3, you: { band: 3, score: 250, provisional: true, needed: 5 } },
-    };
-    const loadLeaderboard = vi.fn(async () => ({ tiers }));
-    render(<Dashboard user={user} scores={scores} history={history} loadLeaderboard={loadLeaderboard} onPractice={() => {}} />);
-    await waitFor(() => expect(screen.getByText(/provisional/i)).toBeTruthy());
-    expect(screen.getByText(/5 more graded attempts/i)).toBeTruthy();
-    // No real rank caption for a provisional user.
-    expect(screen.queryByText(/You're/i)).toBeNull();
-    expect(screen.queryByText(/top \d+%/i)).toBeNull();
-  });
-
+describe("Dashboard — reset, empty state", () => {
   it("does NOT render a duplicate Sign out (it lives once in the global header)", () => {
     render(<Dashboard user={user} scores={scores} history={history} onSignOut={vi.fn()} onPractice={() => {}} />);
     // Sign out is rendered by the app header (Noobtopro), not the Dashboard, so the

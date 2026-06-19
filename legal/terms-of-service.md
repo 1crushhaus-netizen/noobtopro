@@ -1,16 +1,20 @@
 # Terms of Service — noobtopro
 
-> **DRAFT for counsel review — not legal advice.** Fill every `[PLACEHOLDER]`. The EU/UK
-> consumer carve-outs in §§11, 12, 15 are **mandatory** (Directive 93/13/EEC; Rome I Art. 6;
-> Brussels Ibis Arts. 17–19; UK CRA 2015 Sch. 2 + s. 74) — do not delete them. Cross-refs:
-> `refund-and-cancellation-policy.md`, `subscription-and-billing-terms.md`, `privacy-policy.md`.
+> **DRAFT for counsel review — not legal advice.** The EU/UK consumer carve-outs in §§11, 12, 15
+> are **mandatory** (Directive 93/13/EEC; Rome I Art. 6; Brussels Ibis Arts. 17–19; UK CRA 2015
+> Sch. 2 + s. 74) — do not delete them. Cross-refs: `refund-and-cancellation-policy.md`,
+> `subscription-and-billing-terms.md`, `privacy-policy.md`. Entity details resolved from
+> `lib/legal.js`; items still bracketed (registered address, VAT/company number) are pending the
+> operator's German business registration and must be completed before launch.
 
-**Last updated:** [EFFECTIVE DATE] · **Version:** [e.g. 2026-1]
+**Last updated:** 19 June 2026 · **Version:** 2026-1
 
-These Terms of Service ("Terms") are a binding agreement between you and **[Company Legal
-Name]**, established in **[EU/EEA Member State]**, registered office **[Registered Address]**,
-company number **[Reg. No.]** ("noobtopro", "we", "us"). They govern your access to and use of
-the noobtopro website, application, and related services (the "Service").
+These Terms of Service ("Terms") are a binding agreement between you and **noobtopro**, a sole
+proprietorship (Einzelunternehmen) under German law operated by **Russell Rozario**, established
+in **Germany**, registered office **[Registered business address — to be added upon
+registration]**, company/VAT number **[to be added upon registration — Kleinunternehmer per § 19
+UStG, no VAT ID]** ("noobtopro", "we", "us"). They govern your access to and use of the
+noobtopro website, application, and related services (the "Service").
 
 **If you are a consumer in the EU/EEA or the UK, nothing in these Terms removes the protections
 of your local mandatory consumer law or your right to bring proceedings in the courts of the
@@ -36,7 +40,7 @@ suspend or terminate any account we reasonably believe belongs to a person under
 ## 3. Your account and security
 Sign in with **Google** (via our authentication provider, **Supabase**). You are responsible
 for activity under your account and for keeping your details accurate. Notify us at
-**[security@DOMAIN]** of any unauthorised use. You may delete your account at any time (§13;
+**russellrozario@noobto.pro** of any unauthorised use. You may delete your account at any time (§13;
 Privacy Policy), which permanently removes your account and associated personal data, subject
 to records we must retain by law.
 
@@ -82,15 +86,16 @@ permit.
 
 ## 7. Pro subscription, billing, and auto-renewal
 The "Pro" tier is a recurring subscription (currently **€9.99/month**, or the price shown at
-checkout). **Payments are processed by [Polar](https://polar.sh) as our Merchant of Record (the
-seller of record for your transaction)** — see `subscription-and-billing-terms.md`. Subscriptions
-**renew automatically** until you cancel. Full pricing, billing, auto-renewal, withdrawal, and
-refund terms are in the **[Refund & Cancellation Policy](/refunds)**, incorporated here. Manage
-or cancel any time from **Dashboard → Manage subscription**.
+checkout). **Payments are processed by [Polar](https://polar.sh) (Polar Software, Inc.), the
+seller of record for your transaction (Merchant of Record); noobtopro provides the service** —
+see `subscription-and-billing-terms.md`. Subscriptions **renew automatically** until you cancel.
+Full pricing, billing, auto-renewal, your **14-day right of withdrawal**, and refund terms are in
+the **[Refund & Cancellation Policy](/refunds)**, incorporated here. Manage or cancel any time
+from **Dashboard → Manage subscription**.
 
 ## 8. Intellectual property
 The Service (software, curriculum, content, the "noobtopro" name and logos, and the rank
-methodology) is owned by **[Company Legal Name]** or its licensors. We grant you a personal,
+methodology) is owned by **noobtopro (Russell Rozario)** or its licensors. We grant you a personal,
 limited, non-exclusive, non-transferable, revocable licence for your own non-commercial
 educational use. All rights not expressly granted are reserved.
 
@@ -109,12 +114,15 @@ guarantees you have under mandatory consumer law** (see §11).
 
 ## 11. Limitation of liability
 **11.1 Never excluded.** Nothing excludes or limits our liability for (a) death or personal
-injury from our negligence; (b) fraud or fraudulent misrepresentation; (c) gross negligence or
-wilful misconduct; (d) anything that cannot be excluded under the law of your country of
-residence; and (e) for consumers, your mandatory legal rights and remedies.
+injury from our negligence; (b) fraud or fraudulent misrepresentation; (c) gross negligence
+(grobe Fahrlässigkeit) or intent / wilful misconduct (Vorsatz); (d) liability under the German
+Product Liability Act (Produkthaftungsgesetz) or anything else that cannot be excluded under the
+law of your country of residence; and (e) for consumers, your mandatory legal rights and
+remedies. This reflects the mandatory limits of **§ 309 No. 7 BGB** and applies notwithstanding
+any other provision of these Terms.
 **11.2 Cap (where permitted).** Subject to 11.1 and to the maximum extent permitted, our total
 aggregate liability will not exceed the greater of (i) the amounts you paid us in the 12 months
-before the event, or (ii) **[EUR 50]**.
+before the event, or (ii) **EUR 50**.
 **11.3 Excluded losses (where permitted).** Subject to 11.1, we are not liable for indirect,
 incidental, special, consequential, or punitive damages, or loss of profits/revenue/data/
 goodwill — including any decision made in reliance on a rank, grade, or generated content.
@@ -143,27 +151,32 @@ continued use after the effective date is acceptance. You may stop using the Ser
 before a material change takes effect.
 
 ## 15. Governing law and dispute resolution
-**15.1** These Terms are governed by the laws of **[Home Jurisdiction — EU/EEA Member State of
-establishment]**, without regard to conflict-of-laws rules.
+**15.1** These Terms are governed by the laws of the **Federal Republic of Germany**, without
+regard to conflict-of-laws rules.
 **15.2 EU/EEA consumers.** The choice of law does **not** deprive you of the mandatory consumer
-protections of your country of residence (Rome I Art. 6). You may sue us **in [Home
-Jurisdiction] or in the courts of the EU/EEA Member State where you live, and we will sue you
-only in the courts where you live** (Brussels Ibis Arts. 17–19).
+protections of your country of residence (Rome I Art. 6). You may sue us **in Cologne, Germany or
+in the courts of the EU/EEA Member State where you live, and we will sue you only in the courts
+where you live** (Brussels Ibis Arts. 17–19).
 **15.3 UK consumers.** Nothing removes mandatory UK consumer law (CRA 2015, incl. s. 74). You
 may bring proceedings where you live.
 **15.4 US users — arbitration & class-action waiver (US-only).** *[COUNSEL — optional; decide
 given mass-arbitration cost. If included: binding individual arbitration by [AAA/JAMS], jury/
-class waiver, a 30-day opt-out via [legal@DOMAIN], small-claims carve-out. **Does NOT apply to
-EU/EEA or UK consumers.**]*
-**15.5 Everyone else.** Courts of **[Home Jurisdiction]**, without prejudice to your local
-mandatory protections.
+class waiver, a 30-day opt-out via russellrozario@noobto.pro, small-claims carve-out. **Does NOT
+apply to EU/EEA or UK consumers.**]*
+**15.5 Everyone else.** Courts of **Cologne, Germany**, without prejudice to your local mandatory
+protections.
 
 ## 16. Complaints and dispute resolution (ADR)
-Contact us first at **[support@DOMAIN]**. **EU/EEA consumers** may use an alternative dispute
-resolution body via your national consumer authority or the European Consumer Centre (ECC)
-network (**eccnet.eu**). *[COUNSEL: do NOT include the old EU ODR-platform link — it was
-discontinued 20 July 2025 and Reg. 524/2013 repealed; displaying it can be a misleading
-practice. State whether you commit to a named ADR entity per Art. 13 Dir. 2013/11/EU.]*
+Contact us first at **russellrozario@noobto.pro** — we aim to resolve complaints directly. As a
+small business (fewer than 10 employees), under the German Consumer Dispute Resolution Act
+(Verbraucherstreitbeilegungsgesetz, VSBG) we are **not obliged to participate** in proceedings
+before a consumer arbitration board (Verbraucherschlichtungsstelle) and **do not commit** to
+participating in such proceedings. **EU/EEA consumers** in another Member State can get free help
+with a cross-border complaint via the European Consumer Centres Network (ECC-Net) at
+**eccnet.eu**. *[COUNSEL: do NOT add the old EU ODR-platform link — it was discontinued 20 July
+2025 and Reg. 524/2013 repealed; displaying it can be a misleading practice. The VSBG
+non-participation statement above is the disclosure required by §§ 36–37 VSBG / Art. 13 Dir.
+2013/11/EU; confirm wording before launch.]*
 **UK consumers** may use a certified ADR provider (gov.uk/consumer-protection-rights).
 
 ## 17. Miscellaneous
@@ -171,8 +184,10 @@ Severability; no waiver; assignment (you may not assign without consent; we may 
 reducing your consumer rights, with notice); entire agreement (with the AUP, Privacy, and
 Refund policies) — but this excludes neither liability for fraudulent misrepresentation nor your
 mandatory consumer rights; force majeure (without prejudice to consumer rights); language
-(**[English]** prevails except where local law requires the local-language version for consumers).
+(**English** prevails except where local law requires the local-language version for consumers).
 
 ## 18. Contact
-**[Company Legal Name]**, **[Registered Address]** · support: **[support@DOMAIN]** · legal:
-**[legal@DOMAIN]** · security: **[security@DOMAIN]** · **[VAT/Company number]**.
+**noobtopro** (Russell Rozario, sole proprietorship / Einzelunternehmen under German law),
+Cologne (Köln), Germany · **[Registered business address — to be added upon registration]** ·
+support / legal / security: **russellrozario@noobto.pro** · VAT/company number:
+**[to be added upon registration — Kleinunternehmer per § 19 UStG, no VAT ID]**.

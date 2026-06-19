@@ -63,13 +63,19 @@ export default function RefundsPage() {
             <strong>Self-serve, one click:</strong> open{" "}
             <em>Dashboard → &quot;Withdraw from contract here&quot;</em> (shown throughout the
             {" "}{WITHDRAWAL_WINDOW_DAYS}-day window). Confirming immediately ends your subscription
-            and issues your refund automatically through Polar — no email or waiting on us.
+            and issues your refund automatically through Polar — no email or waiting on us. We then{" "}
+            <strong>send you a confirmation of your withdrawal on a durable medium</strong> (and make a
+            downloadable record available), so you have lasting proof that you withdrew.
           </li>
           <li>
             <strong>What you get back:</strong> a <strong>pro-rata refund</strong> of the unused
             portion of your current billing month. You remain liable only for the proportionate part
-            already provided (EU Consumer Rights Directive Art. 14(3)). For example, withdrawing on
-            day 3 of a 30-day month refunds roughly 27/30 of the price; you pay only for the ~3 days used.
+            already provided (EU Consumer Rights Directive Art. 14(3)). The proportion is{" "}
+            <strong>calculated on the total price agreed in the contract</strong>; because Pro has{" "}
+            <strong>no minimum term</strong>, the only price you have committed to is the current
+            month&apos;s &euro;9.99, so we pro-rate against that month — not against any longer or
+            annual figure. For example, withdrawing on day 3 of a 30-day month refunds roughly 27/30 of
+            the &euro;9.99; you pay only for the ~3 days used.
           </li>
           <li>
             <strong>Prefer email?</strong> You can also withdraw by emailing{" "}
@@ -80,8 +86,12 @@ export default function RefundsPage() {
         <p>
           This {WITHDRAWAL_WINDOW_DAYS}-day withdrawal is available to <strong>every</strong> Pro
           subscriber worldwide. For consumers in the <strong>EU/EEA</strong> it is the statutory
-          right of withdrawal; <strong>UK</strong> consumers have equivalent rights under the
-          Consumer Contracts (Information, Cancellation and Additional Charges) Regulations 2013.
+          right of withdrawal. <strong>UK</strong> consumers have equivalent statutory rights under the
+          Consumer Contracts (Information, Cancellation and Additional Charges) Regulations 2013, whose
+          formal route is <strong>cancellation by a clear notice</strong> (for example, by emailing{" "}
+          <strong>{LEGAL.contactEmail}</strong>) within {WITHDRAWAL_WINDOW_DAYS} days; the self-serve{" "}
+          <strong>&quot;Withdraw from contract here&quot;</strong> button is offered to UK consumers as
+          a convenient way to give that notice, and does not replace or limit your statutory route.
           If we ever failed to capture your express consent or to give you the required pre-contract
           information, you bear no cost for the period before withdrawal.
         </p>
@@ -120,15 +130,30 @@ export default function RefundsPage() {
         </p>
       </Section>
 
-      <Section heading="7. Price changes">
+      <Section heading="7. Checkout disclosures and your confirmation">
         <p>
-          We may change the subscription price. Any change applies only to <strong>future</strong>{" "}
-          billing periods, and we will give you notice before it takes effect so you can cancel if
-          you do not agree.
+          The pre-contract information required of a trader — including a clear{" "}
+          <strong>order-button label</strong> that makes plain you are placing an order with an
+          obligation to pay (EU Consumer Rights Directive Art. 8(2)) and a{" "}
+          <strong>confirmation of the contract on a durable medium</strong> after you order
+          (Art. 8(7)) — is presented to you at <strong>Polar&apos;s checkout</strong>, which Polar
+          renders as our Merchant of Record. These remain <strong>{LEGAL.businessName}&apos;s
+          responsibility as the trader</strong>; we verify that Polar&apos;s checkout meets them and,
+          where anything is missing, we provide a <strong>first-party confirmation</strong> (by email
+          and as a downloadable record) so you always receive the required information.
         </p>
       </Section>
 
-      <Section heading="8. Contact">
+      <Section heading="8. Price changes">
+        <p>
+          We may change the subscription price. Any change applies only to <strong>future</strong>{" "}
+          billing periods, and we will give you <strong>at least 7 days&apos; advance notice</strong>{" "}
+          (sent by Polar to your checkout email) before it takes effect, so you can cancel if you do
+          not agree.
+        </p>
+      </Section>
+
+      <Section heading="9. Contact">
         <p>
           Billing &amp; refund questions: <strong>{LEGAL.contactEmail}</strong> —{" "}
           <strong>{LEGAL.businessName}</strong>, {LEGAL.businessForm} (operated by{" "}

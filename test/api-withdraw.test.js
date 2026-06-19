@@ -227,3 +227,18 @@ describe("POST /api/account/withdraw — EU 14-day withdrawal (CRD Art. 11a)", (
     expect(refundCreate).not.toHaveBeenCalled(); // never refund a sub we couldn't terminate
   });
 });
+
+describe("POST /api/account/withdraw — Art 11a acknowledgement", () => {
+  it("returns the durable-medium acknowledgement text in the response", async () => {
+    const now = Date.now();
+    const fx = activeFixtures(now);
+    auth.requireUser.mockResolvedValue({ user: { id: "u1", email: "a@b.com" } });
+    storage.getAdmin.mockReturnValue(fakeAdmin({ subRow: fx.subRow, consentRow: fx.consentRow }, []));
+    polar.getPolar.mockReturnValue(fakePolar({ orders: [fx.order], revoke: vi.fn(async () => ({ id: "sub_1" })), refundCreate: vi.fn(async () => ({ id: "ref_9" })) }));
+    const res = await withdrawPOST(req());
+    const body = await res.json();
+    expect(typeof body.acknowledgement).toBe("string");
+    expect(body.acknowledgement).toContain("Acknowledgement of withdrawal");
+    expect(body.acknowledgement).toMatch(/Art\.?\s*11a/);
+  });
+});

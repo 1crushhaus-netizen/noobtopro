@@ -42,13 +42,15 @@ export default function AcceptableUsePage() {
           </li>
           <li>
             <strong>Submit unlawful or harmful content.</strong> Anything unlawful, infringing,
-            defamatory, harassing, hateful, sexual, violent, self-harm-related, or otherwise
-            harmful; or content containing <strong>personal or sensitive information about another
-            person</strong> (do not photograph other people or their identifying details).
+            defamatory, harassing, hateful, sexual, violent, self-harm-related, or other content of a
+            comparable nature; or content containing <strong>personal or sensitive information about
+            another person</strong> (do not photograph other people or their identifying details).
           </li>
           <li>
-            <strong>Submit others&apos; work as your own</strong> for grading, or use the Service to
-            facilitate academic dishonesty represented as an official assessment.
+            <strong>Misrepresent authorship.</strong> Submit another person&apos;s work as your own
+            in a way that misrepresents who produced it, or otherwise use the Service to commit
+            academic-integrity fraud (for example, passing a {LEGAL.siteName} result off as an
+            official assessment).
           </li>
           <li>
             <strong>Misuse accounts.</strong> Share, sell, or transfer your account; create accounts
@@ -65,11 +67,17 @@ export default function AcceptableUsePage() {
       <Section heading="2. Enforcement">
         <p>
           We may investigate suspected breaches and take proportionate action, including warning,
-          rate-limiting, suspending, or terminating access, removing content (with a statement of
-          reasons where required under Article 17 of the EU Digital Services Act), and reporting
-          serious unlawful activity to the authorities. We operate a notice-and-action channel for
-          illegal content and copyright complaints — see our <a href="/legal/notice">Legal
-          Notice</a> or contact us at <strong>{LEGAL.contactEmail}</strong>.
+          rate-limiting, removing content, or suspending or terminating your access, and reporting
+          serious unlawful activity to the authorities. Where we{" "}
+          <strong>suspend or terminate your account, or remove your content</strong> on the ground
+          that it is illegal or breaches this AUP, we will provide a clear{" "}
+          <strong>statement of reasons</strong> and information about how to challenge the decision,
+          in line with Article&nbsp;17 of the EU Digital Services Act. (The Article&nbsp;19
+          micro-enterprise exemption removes only the additional platform obligations in Section&nbsp;3
+          of the DSA; it does not displace the Article&nbsp;17 statement-of-reasons duty.) We operate
+          a notice-and-action channel for illegal content and copyright complaints — see our{" "}
+          <a href="/legal/notice">Legal Notice</a> or contact us at{" "}
+          <strong>{LEGAL.contactEmail}</strong>.
         </p>
       </Section>
 

@@ -185,11 +185,6 @@ const now = () => new Date().toISOString();
 // so 12px tinted text reaches WCAG AA; the bright accents stay for the rings/glyphs.
 const SUBJECT_TEXT = { math: "var(--math-text)", physics: "var(--phys-text)", chemistry: "var(--chem-text)" };
 
-// Stable identity (audit P2-14): authApi is module-level, so this never changes —
-// the Leaderboard's fetch effect depends on it, and an inline arrow re-created on
-// every Noobtopro render made each drawer toggle refetch (and visibly blank) the
-// leaderboard while burning the shared per-IP rate bucket.
-const loadLeaderboard = () => authApi("/api/leaderboard", {});
 
 // Stable per-question key for the 2-tier diagnostic (each subject has an
 // easy + a hard question), so the answers map can hold all 6 answers.
@@ -1971,7 +1966,6 @@ export default function Noobtopro() {
             isPro={isPro}
             proEnabled={proEnabled}
             upgradeBusy={upgradeBusy}
-            loadLeaderboard={loadLeaderboard}
             loadReviews={loadReviews}
             loadTrends={loadTrends}
             mastery={mastery}
@@ -2460,6 +2454,18 @@ export default function Noobtopro() {
 
           <footer className="np-foot">
             © {new Date().getFullYear()} noobtopro · your reasoning is graded by AI against a nine-axis rubric
+            {/* GDPR Art 7(3): withdrawing analytics consent must be as easy as giving it, and
+                reachable from inside the signed-in app — not only the marketing footer. */}
+            {" · "}
+            <a href="/cookies" style={{ color: "inherit" }}>Cookies</a>
+            {" · "}
+            <button
+              type="button"
+              style={{ color: "inherit", background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit", textDecoration: "underline" }}
+              onClick={() => { if (typeof window !== "undefined") window.dispatchEvent(new Event("noobtopro:open-consent")); }}
+            >
+              Cookie preferences
+            </button>
           </footer>
           </div>
         </div>

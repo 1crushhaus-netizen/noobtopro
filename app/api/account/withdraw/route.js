@@ -29,7 +29,9 @@ import { requireUser } from "@/lib/adminAuth";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { getPolar } from "@/lib/polar";
 import { isActiveSubscription } from "@/lib/proStatus";
-import { isWithinWithdrawalWindow, proRataRefundMinor, WITHDRAWAL_WINDOW_DAYS } from "@/lib/consent";
+import { isWithinWithdrawalWindow, proRataRefundMinor, withdrawalAcknowledgementText, WITHDRAWAL_WINDOW_DAYS } from "@/lib/consent";
+import { sendEmail } from "@/lib/email";
+import { LEGAL } from "@/lib/legal";
 import { checkRateLimit, clientKey } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
 import { reportRateLimit } from "@/lib/abuseDetection";
@@ -211,12 +213,32 @@ export async function POST(req) {
     console.error("[/api/account/withdraw] withdrawal audit write threw", e);
   }
 
-  // On-screen confirmation the client renders + lets the user save/print (the Art. 8(7)
-  // durable-medium confirmation; Polar's Merchant-of-Record emails cover the billing side).
+  // CRD Art. 11a: SEND the consumer a durable-medium acknowledgement of receipt (content of the
+  // withdrawal + date/time). Build it once; email it best-effort (dormant until RESEND_API_KEY is
+  // configured — see lib/email.js) AND return it so the client always offers a downloadable copy.
+  const acknowledgement = withdrawalAcknowledgementText({
+    accountEmail: auth.user && auth.user.email,
+    withdrawnAt,
+    refund,
+  });
+  try {
+    if (auth.user && auth.user.email) {
+      await sendEmail({
+        to: auth.user.email,
+        subject: "Your noobtopro withdrawal — confirmation",
+        text: acknowledgement,
+        replyTo: LEGAL.contactEmail,
+      });
+    }
+  } catch (e) {
+    console.error("[/api/account/withdraw] acknowledgement email failed (continuing)", e);
+  }
+
   return NextResponse.json({
     ok: true,
     withdrawnAt,
     terminated: true,
     refund,
+    acknowledgement, // durable-medium text; the client offers it as a downloadable record
   });
 }

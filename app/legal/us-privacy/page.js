@@ -12,12 +12,21 @@ export default function USPrivacyPage() {
   return (
     <LegalLayout title="U.S. State Privacy Notice">
       <p>
-        This Notice applies to residents of U.S. states with comprehensive privacy laws — including
+        This Notice is for residents of U.S. states with comprehensive privacy laws — including
         California (CCPA/CPRA), Virginia, Colorado, Connecticut, Utah, Oregon, Montana, Texas and
         others. It supplements our <a href="/privacy">Privacy Policy</a> and, for those residents,
         controls where it conflicts. {LEGAL.siteName} ({LEGAL.domainBare}) is operated by{" "}
-        {LEGAL.businessName}, a {LEGAL.businessForm}; this Notice applies because we offer the
-        Service to U.S. consumers.
+        {LEGAL.businessName}, a {LEGAL.businessForm}.
+      </p>
+      <p>
+        We are a small, single-person, pre-revenue business. We do not meet the size or revenue
+        thresholds that make most of these laws apply to us (for example, California&apos;s CCPA
+        applies only above roughly $26.6&nbsp;million in revenue, 100,000 California consumers, or
+        50% of revenue from selling data; other states use 100,000-resident or 25,000-plus-data-sale
+        thresholds), and where a law has no threshold we fall within its small-business exemption.
+        We nonetheless make the good-faith disclosures below and honor these rights{" "}
+        <strong>voluntarily</strong>, even where the law does not strictly require it of an operator
+        of our size.
       </p>
 
       <Section heading="1. Categories of personal information we collect">
@@ -65,12 +74,22 @@ export default function USPrivacyPage() {
         </p>
       </Section>
 
-      <Section heading="2. We do not sell your personal information">
+      <Section heading="2. We do not sell or share your personal information">
         <p>
-          We do <strong>not</strong> sell your personal information for money. Where our use of
-          analytics could be considered &quot;sharing&quot; for cross-context behavioral advertising
-          or targeted advertising under state law, you have the right to opt out, as described below,
-          and we honor browser opt-out preference signals.
+          We do <strong>not</strong> sell or share your personal information, including{" "}
+          <strong>sensitive</strong> personal information, and we will not do so without your
+          consent. We do not sell personal information for money, and we do not share it for
+          cross-context behavioral advertising or targeted advertising. (This consent commitment also
+          satisfies the sensitive-data consent rule that applies to us under the Texas Data Privacy
+          and Security Act, §&nbsp;541.107, even though that Act&apos;s broader obligations exempt a
+          small business of our size.)
+        </p>
+        <p>
+          The service providers we use — such as our hosting provider, analytics, and the AI model
+          provider that grades uploaded work (Groq, in the United States) — process data only on our
+          instructions to operate the Service. That is a service-provider disclosure, not a sale or
+          a share. Before any photo is sent to the AI provider, we strip EXIF metadata{" "}
+          <strong>server-side</strong>, which removes any precise geolocation embedded in the image.
         </p>
       </Section>
 
@@ -88,10 +107,14 @@ export default function USPrivacyPage() {
           </li>
           <li>
             <strong>Opt out</strong> of any &quot;sale&quot; or &quot;sharing&quot; of your personal
-            information and of targeted advertising and certain profiling.
+            information and of targeted advertising and certain profiling. We do none of these, so
+            there is nothing to opt out of; we still honor opt-out signals as a courtesy (see
+            Section 5).
           </li>
           <li>
-            <strong>Limit the use of your sensitive personal information</strong> (see Section 4).
+            <strong>Limit the use of your sensitive personal information</strong> — we already use it
+            only for permitted purposes, so this right is not separately actionable here (see
+            Section 4).
           </li>
           <li>
             <strong>Non-discrimination</strong> for exercising your rights (see Section 6).
@@ -113,15 +136,28 @@ export default function USPrivacyPage() {
           service and for other legally permitted purposes — <strong>not</strong> to infer
           characteristics about you and <strong>not</strong> for advertising.
         </p>
+        <p>
+          Because we already confine this use to permitted purposes (and strip EXIF geolocation from
+          photos before grading), the &quot;limit&quot; right does not give you anything separate to
+          exercise. There is no additional secondary use to restrict.
+        </p>
       </Section>
 
       <Section heading="5. Opt-out preference signals (Global Privacy Control)">
         <p>
-          We honor the <strong>Global Privacy Control (GPC)</strong>. If your browser sends a GPC
-          signal, we treat it as a valid opt-out for that browser or device — and for your account
-          when you are logged in — and we indicate that your opt-out request was honored. You do not
-          need to be a Pro subscriber to exercise this, and we will not ask you to opt back in for at
-          least 12 months.
+          We do <strong>not</strong> sell or share your personal information for cross-context
+          behavioral advertising, so there is no &quot;Do Not Sell or Share My Personal
+          Information&quot; activity to switch off. Our hosting/analytics setup is consistent with
+          this: our hosting provider operates cookieless and as a service provider, and our site
+          analytics are not used for ad targeting.
+        </p>
+        <p>
+          Even so, we honor the <strong>Global Privacy Control (GPC)</strong> as a courtesy. If your
+          browser sends a GPC signal, we treat it as a valid opt-out for that browser or device — and
+          for your account when you are logged in — and, consistent with the California rules in
+          effect from 1&nbsp;January&nbsp;2026 (§&nbsp;7025), we indicate that your opt-out request
+          was honored. You do not need to be a Pro subscriber to exercise this, and we will not ask
+          you to opt back in for at least 12 months.
         </p>
       </Section>
 

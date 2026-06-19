@@ -1,5 +1,6 @@
 import LegalLayout, { Section } from "@/components/LegalLayout";
 import { LEGAL } from "@/lib/legal";
+import { WITHDRAWAL_WINDOW_DAYS } from "@/lib/consent";
 
 export const metadata = {
   title: "Subscription & Billing Terms",
@@ -57,6 +58,13 @@ export default function BillingTermsPage() {
             <strong>charged &euro;9.99 on each renewal date until you cancel</strong>. By subscribing,
             you authorize these recurring monthly charges.
           </li>
+          <li>
+            <strong>Billing currency:</strong> the price is billed in <strong>euros (EUR)</strong>. If
+            you pay with a non-euro card (for example, a US card), your card network converts the
+            &euro;9.99 to your card&apos;s currency at its own <strong>foreign-exchange rate</strong>,
+            and your bank may add its own conversion or foreign-transaction fee; the EUR amount we charge
+            does not change.
+          </li>
         </ul>
       </Section>
 
@@ -83,27 +91,54 @@ export default function BillingTermsPage() {
       <Section heading="6. Taxes (VAT)">
         <p>
           As our Merchant of Record, <strong>{LEGAL.mor} calculates, collects, and remits</strong>{" "}
-          any VAT or other sales tax due based on your location. The &euro;9.99 monthly price is
-          inclusive of applicable tax; we do not separately charge tax on this purchase.
+          any VAT or other sales tax due based on your location (including via the EU One-Stop-Shop).
+          The &euro;9.99 monthly price is <strong>inclusive of applicable tax</strong>; we do not
+          separately add tax to this purchase.
+        </p>
+        <p>
+          {LEGAL.businessName} itself is a small business under the German{" "}
+          <em>Kleinunternehmerregelung</em> (&sect; 19 UStG) and does not charge VAT on its own
+          account. That does not change the price you pay: because {LEGAL.mor} is the seller of record,
+          {" "}{LEGAL.mor} still collects and remits any consumer VAT due, and the &euro;9.99 you see at
+          checkout remains the full tax-inclusive total.
         </p>
       </Section>
 
       <Section heading="7. Right of withdrawal and refunds">
         <p>
-          If you are a consumer in the EU, you generally have a <strong>14-day right of withdrawal</strong>{" "}
-          when you subscribe. How that right applies to a digital service like Pro — including any
-          waiver at checkout and how refunds are handled by {LEGAL.mor} as Merchant of Record — is
-          set out in detail in our <a href="/refunds">Refund &amp; Cancellation Policy</a>. Please
-          refer to that policy for the withdrawal and refund specifics.
+          If you are a consumer in the EU/EEA, you have a{" "}
+          <strong>{WITHDRAWAL_WINDOW_DAYS}-day right of withdrawal</strong> when you subscribe. You can
+          exercise it yourself at any time during that window using the self-serve{" "}
+          <strong>&quot;Withdraw from contract here&quot;</strong> control in your dashboard, which
+          immediately ends your subscription and issues a pro-rata refund. How that right applies to a
+          digital service like Pro — including the immediate-access consent at checkout and how the
+          pro-rata refund is calculated and paid through {LEGAL.mor} as Merchant of Record — is set out
+          in detail in our <a href="/refunds">Refund &amp; Cancellation Policy</a>.
+        </p>
+        <p>
+          Although {LEGAL.mor} runs checkout and billing as Merchant of Record,{" "}
+          <strong>{LEGAL.businessName} remains a co-responsible trader</strong> toward you under
+          consumer law. Using a Merchant of Record does <strong>not</strong> offload our consumer-law
+          duties (including your right of withdrawal and your rights for defective or undelivered
+          service); you can always raise these directly with us at <strong>{LEGAL.contactEmail}</strong>.
         </p>
       </Section>
 
       <Section heading="8. Renewal and price-change notices">
         <p>
-          Where required by law, we or {LEGAL.mor} send advance notices, including renewal reminders
-          and notice of any <strong>material change</strong> (such as a price increase) before it
-          takes effect. Continued use after a disclosed change is acceptance; if you do not agree,
-          you can cancel before the change takes effect.
+          As the <strong>seller of record</strong>, <strong>{LEGAL.mor} emails your receipts and any
+          renewal or price-change notices</strong> (to the address you used at checkout); {LEGAL.businessName}
+          does not operate a separate billing mailer. Your <strong>next renewal date is always visible in
+          the {LEGAL.mor} billing portal</strong> (open it via <strong>&quot;Manage subscription&quot;</strong>
+          in your account), so you can check it at any time without waiting for an email.
+        </p>
+        <p>
+          If we change the price, you will receive <strong>at least 7 days&apos; advance notice</strong>{" "}
+          before the new price takes effect, sent to you by {LEGAL.mor} (the channel you selected at
+          checkout, i.e. {LEGAL.mor} email). Any change applies only to <strong>future</strong> billing
+          periods. You have the <strong>right to cancel before the change takes effect</strong>; continued
+          use after a disclosed change is acceptance, and if you do not agree you can cancel through the
+          {" "}{LEGAL.mor} portal before the next renewal date.
         </p>
       </Section>
 

@@ -11,15 +11,19 @@
 **1. Free and Paid Tiers.** A free tier and an optional paid **"Pro"** subscription. You may use
 the free tier without payment information.
 
-**2. Merchant of Record.** Your purchase of Pro is processed by **Polar** ([Polar legal
-entity]), acting as our **Merchant of Record** — the **seller of record** for the transaction.
-Polar handles checkout, billing, payment processing, applicable taxes (VAT/sales tax), refunds,
-and the subscription management/cancellation portal, under **[Polar's Terms / Privacy Policy:
-LINK]**. noobtopro remains responsible for the Pro service and the accuracy of these disclosures.
+**2. Merchant of Record.** Your purchase of Pro is processed by **Polar** (**Polar Software,
+Inc.**), acting as our **Merchant of Record** — the **seller of record** for the transaction.
+Polar handles checkout, billing, payment processing, applicable taxes (VAT/sales tax), receipts,
+refunds, and the subscription management/cancellation portal, under Polar's own terms and privacy
+policy (**https://polar.sh**). noobtopro remains responsible for the Pro service and the accuracy
+of these disclosures, and **remains a co-responsible trader** under consumer law — using a
+Merchant of Record does **not** offload our consumer-law duties.
 
 **3. Price, billing cycle, and AUTOMATIC RENEWAL.**
-- **Price:** **€9.99/month** (plus applicable taxes, calculated and collected by Polar). [If USD
-  is shown to US customers, state the USD amount / that EUR is the billing currency — confirm.]
+- **Price:** **€9.99/month**, inclusive of applicable taxes (calculated and collected by Polar).
+- **Billing currency:** the price is billed in **euros (EUR)**. A non-euro card (e.g. a US card)
+  is charged the EUR-equivalent at the card network's foreign-exchange rate, plus any bank
+  conversion/foreign-transaction fee; the EUR amount we charge does not change.
 - **Billing cycle:** monthly.
 - **AUTOMATIC RENEWAL:** **your Pro subscription automatically renews each month and your payment
   method will be charged €9.99/month on each renewal date, until you cancel.** By subscribing you
@@ -31,27 +35,41 @@ frequency, that it auto-renews until cancelled, and how to cancel) and obtain yo
 consent**. We and/or Polar retain a record of consent as required by law (California: ≥ 3 years).
 
 **5. How to cancel (easy cancellation).** **Cancel anytime, as easily as you signed up**, via the
-**Polar customer portal** ([LINK] / "Manage subscription"), or by **[support email]**.
+**Polar customer portal** ("Manage subscription"), or by **russellrozario@noobto.pro**.
 Cancellation takes effect at the **end of the current paid billing period**; you keep Pro access
 until then. **No phone calls, retention steps, or extra hurdles.**
 
-**6. Renewal and price-change notices.** Where required (e.g. California, New York), we or Polar
-send advance notices, including renewal reminders and notice of any **material change** (incl. a
-price increase) before it takes effect. Continued use after a disclosed change is acceptance; if
-you disagree, cancel before it takes effect.
+**6. Renewal and price-change notices.** As the **seller of record**, **Polar emails your receipts
+and any renewal or price-change notices** to your checkout email (the channel you selected); there
+is **no first-party noobtopro mailer**. Your **next renewal date is always visible in the Polar
+billing portal**, so you can check it at any time. If we change the price, you receive **at least
+7 days' advance notice** (via Polar email) before it takes effect; any change applies only to
+**future** billing periods, and you have the **right to cancel before the change takes effect**.
+Continued use after a disclosed change is acceptance.
 
-**7. Refunds.** Handled by Polar as MoR, governed by our [Refund & Cancellation Policy](/refunds)
-and Polar's policies. [Summarize: e.g. "Monthly fees are generally non-refundable except where
-required by law" — keep consistent with the Refund Policy.]
+**7. Right of withdrawal & refunds.** EU/EEA consumers have a **14-day right of withdrawal**,
+exercisable yourself at any time during the window via the self-serve **"Withdraw from contract
+here"** control in the dashboard (immediate termination + pro-rata refund through Polar). Details —
+the immediate-access consent, the pro-rata basis, and how refunds are paid — are in the
+[Refund & Cancellation Policy](/refunds). Otherwise, fees for elapsed months are generally
+non-refundable except where the law provides otherwise — kept consistent with the Refund Policy.
 
-**8. Failed payments.** Polar may retry a failed charge and/or suspend/downgrade Pro until
+**8. Taxes (VAT).** noobtopro is a small business under the German **Kleinunternehmerregelung
+(§ 19 UStG)** and has no VAT ID, so it does not charge VAT on its own account. That does not change
+the price: because **Polar is the seller of record**, Polar still **collects and remits any
+consumer VAT** (incl. via the EU One-Stop-Shop), and the **€9.99 stays the full tax-inclusive
+total**.
+
+**9. Failed payments.** Polar may retry a failed charge and/or suspend/downgrade Pro until
 payment succeeds.
 
-**9. Changes.** We may update these terms with notice of material changes as required by law.
+**10. Changes.** We may update these terms with notice of material changes as required by law.
 
-**10. Eligibility.** Pro is offered to adults **18 or older**.
+**11. Eligibility.** Pro is offered to adults **18 or older**.
 
-**11. Contact.** Billing/cancellation: **[support@DOMAIN]** / [Polar support link].
+**12. Contact.** Billing/cancellation: **russellrozario@noobto.pro** — noobtopro, a sole
+proprietorship (Einzelunternehmen) under German law, Cologne (Köln), Germany. Merchant of Record:
+**Polar Software, Inc.** (https://polar.sh).
 
 ---
 
@@ -84,15 +102,19 @@ live checkout & portal against all of the above.**
 ## "How payments work — Merchant of Record (Polar)" disclosure (for ToS/checkout/FAQ)
 When you subscribe to **noobtopro Pro** (€9.99/month), your purchase is sold to you by **Polar
 Software, Inc.** ("Polar"), acting as our **Merchant of Record** and authorized **reseller**.
-The Pro features are provided and licensed to you by **[noobtopro legal entity]**, but the
+The Pro features are provided and licensed to you by **noobtopro** (a sole proprietorship
+(Einzelunternehmen) under German law, operated by Russell Rozario, Cologne, Germany), but the
 **seller of record for the transaction is Polar**, which handles checkout, billing, your billing
 portal, payment charges, **applicable VAT/sales tax**, receipts, refunds, and payment disputes.
-- **Who you buy from:** you purchase from **Polar** (governed by **[Polar Buyer Terms]** and
-  **[Polar Privacy Policy]**); your **right to use** Pro is licensed by us under our
-  **[Terms of Service]**.
+- **Who you buy from:** you purchase from **Polar** (governed by Polar's buyer terms and privacy
+  policy at **https://polar.sh**); your **right to use** Pro is licensed by us under our
+  [Terms of Service](/terms).
 - **Taxes:** as MoR, **Polar calculates, collects, and remits** any VAT/GST/sales tax based on
-  your location; we do not separately charge tax on this purchase.
-- **Disputes/chargebacks:** contact **Polar** (support@polar.sh) or us at **[support@DOMAIN]**.
+  your location; we do not separately charge tax on this purchase. noobtopro is itself a
+  Kleinunternehmer (§ 19 UStG) with no VAT ID, but the consumer price stays tax-inclusive because
+  Polar handles consumer VAT as MoR.
+- **Disputes/chargebacks:** contact **Polar** (support@polar.sh) or us at
+  **russellrozario@noobto.pro**.
 - **Payment data:** Polar (and its processor, Stripe) handle your payment information; for that
   data **Polar acts as an independent controller** under its own policy. We do not store full
   card details.

@@ -15,7 +15,6 @@ import { effectiveScores, subjectRankView } from "@/lib/promotion";
 import { conceptLabel, resolveConceptKey } from "@/lib/curriculum";
 import Icon from "@/components/Icon";
 import { LineChart, BarChart, RadarChart, MiniBar } from "@/components/charts";
-import Leaderboard from "@/components/Leaderboard";
 import ReviewList from "@/components/ReviewList";
 import { useScrollReveal } from "@/components/useReveal";
 import { SubjectGlyph, deltaColor } from "@/components/ui";
@@ -402,7 +401,6 @@ export default function Dashboard({
   isPro = false,
   proEnabled = false,
   upgradeBusy = false,
-  loadLeaderboard,
   loadReviews,
   loadTrends,
   loadMastery,
@@ -555,7 +553,7 @@ export default function Dashboard({
           {/* A11y P1-5: the gate is this view's primary content → a real <h1>. */}
           <h1 id="np-gate-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>Sign in to see your Dashboard</h1>
           <p className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
-            Your scores, reasoning profile, leaderboard rank, and answer history live here. Sign in to unlock your dashboard
+            Your scores, reasoning profile, and answer history live here. Sign in to unlock your dashboard
             {scores ? "; your guest results carry over automatically." : "."}
           </p>
           <button className="np-btn np-primary np-big np-btn--block" onClick={onSignIn}>
@@ -635,7 +633,6 @@ export default function Dashboard({
         <RadarPanel scores={scores} onPractice={onPractice} onLearn={onLearn} />
         <div className="np-dash-mid" data-reveal style={{ "--ri": 1 }}>
           <BySubject scores={scores} mastery={mastery} masteryReady={masteryReady} onPractice={onPractice} />
-          <Leaderboard loadLeaderboard={loadLeaderboard} />
         </div>
         <div className="np-dash-lead" data-reveal style={{ "--ri": 2 }}>
           <RecentMoves history={history} />
@@ -877,6 +874,30 @@ export default function Dashboard({
                     </p>
                   </div>
                   <div className="np-modal-actions">
+                    {/* CRD Art. 11a durable-medium acknowledgement of receipt — saved as a file the
+                        consumer keeps (also emailed where the mailer is configured). */}
+                    {withdrawResult?.acknowledgement && (
+                      <button
+                        className="np-btn np-secondary"
+                        onClick={() => {
+                          try {
+                            const blob = new Blob([withdrawResult.acknowledgement], { type: "text/plain" });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement("a");
+                            a.href = url;
+                            a.download = "noobtopro-withdrawal-confirmation.txt";
+                            document.body.appendChild(a);
+                            a.click();
+                            a.remove();
+                            URL.revokeObjectURL(url);
+                          } catch {
+                            /* download blocked — the on-screen text + email remain */
+                          }
+                        }}
+                      >
+                        Download confirmation
+                      </button>
+                    )}
                     {typeof window !== "undefined" && typeof window.print === "function" && (
                       <button className="np-btn np-secondary" onClick={() => window.print()}>
                         Print / save
