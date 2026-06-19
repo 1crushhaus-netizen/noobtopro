@@ -95,9 +95,13 @@ describe("db/schema.sql — _concept_key parity with lib/supabaseAdmin.js concep
 });
 
 describe("db/schema.sql — server-authoritative scoring (the trust boundary)", () => {
-  it("scores & attempts are SELECT-only for authenticated (no direct client write path)", () => {
+  it("scores stays SELECT-only and attempts is SERVER-ONLY (no client read or write path)", () => {
     expect(schema).toMatch(/create policy "read own scores"\s+on public\.scores for select/);
-    expect(schema).toMatch(/create policy "read own attempts"\s+on public\.attempts for select/);
+    // F-01 (0024): "Progress trends" is a paid Pro feature, so `attempts` is no longer
+    // client-readable. There must be NO client SELECT policy on attempts, and client
+    // SELECT is explicitly revoked — the trend series is served Pro-gated via /api/trends.
+    expect(schema).not.toMatch(/create policy "read own attempts"\s+on public\.attempts for select/);
+    expect(schema).toMatch(/revoke select on public\.attempts from anon, authenticated/);
     // The prior read+write ("for all") policies must be gone, so a signed-in user can
     // no longer PATCH their own scores row to an arbitrary value via PostgREST.
     expect(schema).not.toMatch(/on public\.scores for all/);

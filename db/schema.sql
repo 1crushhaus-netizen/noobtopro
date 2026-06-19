@@ -168,11 +168,11 @@ create policy "read own scores"
   using ((select auth.uid()) = user_id);     -- (select ...) => evaluated once/query
 
 drop policy if exists "own attempts" on public.attempts;
+-- `attempts` is service-role-only (0024): "Progress trends" is a paid Pro feature, so
+-- direct client reads are removed. Reads go through /api/history (FREE: the "problems
+-- graded" count + the "why your reasoning moved" rationale) and /api/trends (PRO: the
+-- trend chart series). RLS stays enabled, deny-by-default — no SELECT policy for clients.
 drop policy if exists "read own attempts" on public.attempts;
-create policy "read own attempts"
-  on public.attempts for select
-  to authenticated
-  using ((select auth.uid()) = user_id);
 
 -- Defense-in-depth: also revoke direct write privileges at the GRANT layer (Supabase
 -- grants anon/authenticated full table DML by default). With these revoked, the
@@ -182,6 +182,8 @@ create policy "read own attempts"
 -- SECURITY DEFINER (owner bypasses RLS and these grants), so it is unaffected.
 revoke insert, update, delete, truncate on public.scores   from anon, authenticated;
 revoke insert, update, delete, truncate on public.attempts from anon, authenticated;
+-- 0024: also revoke client SELECT on attempts — the trend data is Pro-gated via the API.
+revoke select on public.attempts from anon, authenticated;
 
 -- ---- P2-6: bounded, numerically sane guest glicko ------------------------------
 -- A guest-migrated glicko blob must be a small per-axis map of finite, in-range

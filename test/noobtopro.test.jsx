@@ -12,6 +12,7 @@ const store = vi.hoisted(() => ({
   deleteAllUserData: vi.fn(async () => ({ ok: true })),
   loadMastery: vi.fn(async () => ({ mastery: {} })),
   loadReviews: vi.fn(async () => ({ reviews: [] })),
+  loadTrends: vi.fn(async () => ({ trends: [] })),
   loadSubscription: vi.fn(async () => ({ subscription: null })),
   deleteAccount: vi.fn(async () => ({ ok: true })),
 }));

@@ -42,7 +42,11 @@ vi.mock("@/lib/supabase", () => ({
 import { migrateGuestToAccount, deleteAllUserData, loadState, saveProgress, loadReviews, loadMastery } from "@/lib/store";
 
 const KEY = "noobtopro:v1";
-const signedIn = { data: { session: { user: { id: "u1" } } } };
+// The signed-in fixture carries an access_token: loadState/loadTrends fetch the
+// (now server-gated) attempt history from /api/history & /api/trends with the
+// session bearer token — direct client SELECT on `attempts` is revoked because
+// "Progress trends" is a paid Pro feature (db/migrations/0024).
+const signedIn = { data: { session: { user: { id: "u1" }, access_token: "tok-1" } } };
 const guest = { data: { session: null } };
 
 beforeEach(() => {
@@ -51,6 +55,22 @@ beforeEach(() => {
   mocks.session = signedIn;
   mocks.db = {};
   mocks.calls = {};
+  // Default global fetch mock for the server read-routes. Tests set
+  // mocks.db.historyResponse / mocks.db.trendsResponse to drive the payloads;
+  // tests that need an error/402 stub their own fetch (and unstub in a finally).
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url) => {
+      const u = typeof url === "string" ? url : "";
+      if (u.startsWith("/api/history")) {
+        return { ok: true, status: 200, json: async () => ({ history: mocks.db.historyResponse ?? [] }) };
+      }
+      if (u.startsWith("/api/trends")) {
+        return { ok: true, status: 200, json: async () => ({ trends: mocks.db.trendsResponse ?? [] }) };
+      }
+      return { ok: false, status: 404, json: async () => ({}) };
+    })
+  );
 });
 
 describe("migrateGuestToAccount", () => {
@@ -182,46 +202,65 @@ describe("signed-in data layer (Supabase paths)", () => {
     expect(st.scores).toBeUndefined();
   });
 
-  it("loadState maps score rows + attempt rows (rowToEvent) on the happy path", async () => {
+  it("loadState maps score rows directly and passes through the FREE /api/history events (no Pro trend field)", async () => {
     mocks.db = {
       scoresSelect: { data: [{ subject: "math", score: 60, weak_concepts: ["x"], comment: "c", rubric: { conceptual_understanding: 3 } }], error: null },
-      attemptsSelect: {
-        data: [{ type: "attempt", created_at: "t0", subject: "math", reasoning_score: 70, delta: 2, new_score: 62, total_after: 100, phd_after: 33 }],
-        error: null,
-      },
+      // /api/history serves the FREE attempt fields only — crucially NOT the cumulative
+      // total_after (that's the Pro trend-chart series, served by /api/trends).
+      historyResponse: [{ type: "attempt", t: "t0", subject: "math", delta: 2, rationale: "good reasoning" }],
     };
     const st = await loadState();
     expect(st.scores.math).toEqual({ score: 60, weakConcepts: ["x"], comment: "c", rubric: { conceptual_understanding: 3 }, glicko: null });
-    expect(st.history[0]).toMatchObject({ type: "attempt", t: "t0", subject: "math", reasoningScore: 70, newScore: 62, totalAfter: 100, phdAfter: 33 });
+    // History carries the free fields and NOT the paid trend field (totalAfter).
+    expect(st.history[0]).toEqual({ type: "attempt", t: "t0", subject: "math", delta: 2, rationale: "good reasoning" });
+    expect(st.history[0].totalAfter).toBeUndefined();
+    // Signed-in history is fetched from the server route with the session bearer token.
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/history",
+      expect.objectContaining({ method: "POST", headers: expect.objectContaining({ Authorization: "Bearer tok-1" }) })
+    );
   });
 
   it("loadState defaults a missing rubric column to null", async () => {
     mocks.db = {
       scoresSelect: { data: [{ subject: "physics", score: 40, weak_concepts: [], comment: "" }], error: null },
-      attemptsSelect: { data: [], error: null },
+      historyResponse: [],
     };
     const st = await loadState();
     expect(st.scores.physics.rubric).toBe(null);
   });
 
-  it("loadState scopes BOTH reads to the caller's user_id and orders attempts stably", async () => {
-    // Regression guard: every read must filter .eq("user_id", uid) (defense-in-depth
-    // alongside RLS) and the attempts read must order by created_at then id so a
-    // shared-timestamp tie is deterministic.
+  it("loadState scopes the scores read to the caller's user_id and fetches history from the server route (no client attempts read)", async () => {
+    // Regression guard: the scores read still filters .eq("user_id", uid) (defense-in-depth
+    // alongside RLS). The attempt history is NO LONGER a direct client PostgREST read —
+    // client SELECT on `attempts` is revoked (db/migrations/0024) because "Progress trends"
+    // is a paid Pro feature — so it comes from /api/history with the session bearer token.
     mocks.db = {
       scoresSelect: { data: [], error: null },
-      attemptsSelect: { data: [], error: null },
+      historyResponse: [],
     };
     await loadState();
     expect(mocks.calls.scores.eq).toContainEqual(["user_id", "u1"]);
-    expect(mocks.calls.attempts.eq).toContainEqual(["user_id", "u1"]);
-    // NEWEST first + bounded (audit P2-11): ascending-unbounded silently kept the
-    // OLDEST rows past PostgREST's max-rows cap, freezing the dashboard history.
-    expect(mocks.calls.attempts.order).toEqual([
-      ["created_at", { ascending: false }],
-      ["id", { ascending: false }],
-    ]);
-    expect(mocks.calls.attempts.limit).toEqual([500]);
+    // No direct client read of `attempts` happens anymore (the route does it server-side).
+    expect(mocks.calls.attempts).toBeUndefined();
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/history",
+      expect.objectContaining({ method: "POST", headers: expect.objectContaining({ Authorization: "Bearer tok-1" }) })
+    );
+  });
+
+  it("loadState surfaces a history error (route !ok) instead of treating it as a brand-new user", async () => {
+    // A failed /api/history read must NOT look like "no history" — same trust rule as a
+    // scores error: the caller must not bounce a signed-in user to the intro.
+    mocks.db = { scoresSelect: { data: [], error: null } };
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, json: async () => ({ error: "boom" }) })));
+    try {
+      const st = await loadState();
+      expect(st.error).toBeTruthy();
+      expect(st.history).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
@@ -508,7 +547,7 @@ describe("per-concept mastery (guest storage + signed-in reads + migration)", ()
 });
 
 describe("audit-fix round (P1-4 + P2-11)", () => {
-  const signedIn = { data: { session: { user: { id: "u1" } } } };
+  const signedIn = { data: { session: { user: { id: "u1" }, access_token: "tok-1" } } };
 
   it("migrate_guest_data returning FALSE (account not empty) KEEPS the guest blob (no silent data loss)", async () => {
     mocks.session = signedIn;
@@ -531,15 +570,16 @@ describe("audit-fix round (P1-4 + P2-11)", () => {
     expect(JSON.parse(window.localStorage.getItem(KEY))).toEqual({ scores: null, history: [], scale: 350 });
   });
 
-  it("loadState returns the (desc-fetched) history re-reversed to chronological order", async () => {
+  it("loadState passes the server-ordered (chronological) history through unchanged", async () => {
+    // The desc-fetch + re-reverse now lives in /api/history (it returns oldest→newest);
+    // loadState just passes the route's order through, so the dashboard list stays chronological.
     mocks.session = signedIn;
     mocks.db = {
       scoresSelect: { data: [], error: null },
-      // The mock returns rows as the DB would: NEWEST first.
-      attemptsSelect: { data: [
-        { type: "attempt", created_at: "t2", subject: "math", reasoning_score: 80, delta: 2, new_score: 52, total_after: 52, phd_after: 17 },
-        { type: "attempt", created_at: "t1", subject: "math", reasoning_score: 70, delta: 1, new_score: 50, total_after: 50, phd_after: 16 },
-      ], error: null },
+      historyResponse: [
+        { type: "attempt", t: "t1", subject: "math", delta: 1, rationale: null },
+        { type: "attempt", t: "t2", subject: "math", delta: 2, rationale: null },
+      ],
     };
     const st = await loadState();
     expect(st.history.map((h) => h.t)).toEqual(["t1", "t2"]); // chronological for the charts
