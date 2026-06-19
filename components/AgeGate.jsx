@@ -66,10 +66,10 @@ export default function AgeGate({ onConfirm, onUnderage, guest = false }) {
       <div style={wrap}>
         <div className="np-surface-elevated np-modal" role="dialog" aria-modal="true" aria-labelledby="np-age-blk-title">
           <div className="np-modal-spark" aria-hidden="true"><Icon name="lock" size={22} /></div>
-          <h1 id="np-age-blk-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+          <h1 id="np-age-blk-title" className="np-h2 np-modal-title">
             For ages {MIN_AGE} and over
           </h1>
-          <p className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
+          <p className="np-lede np-modal-subtitle">
             noobtopro is an adults-only service for ages {MIN_AGE} and over. Please come back
             once you&rsquo;re {MIN_AGE}.
           </p>
@@ -85,13 +85,13 @@ export default function AgeGate({ onConfirm, onUnderage, guest = false }) {
     <div style={wrap}>
       <form className="np-surface-elevated np-modal" onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="np-age-title">
         <div className="np-modal-spark" aria-hidden="true"><Icon name="spark" size={22} /></div>
-        <h1 id="np-age-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+        <h1 id="np-age-title" className="np-h2 np-modal-title">
           One quick thing
         </h1>
-        <p className="np-lede" style={{ textAlign: "center", margin: "0 auto 20px" }}>
+        <p className="np-lede np-modal-subtitle">
           Enter your date of birth to continue. We use this only to confirm your age.
         </p>
-        <label htmlFor="np-age-dob" className="np-eyebrow np-eyebrow--xs" style={{ display: "block", marginBottom: 6 }}>
+        <label htmlFor="np-age-dob" className="np-eyebrow np-eyebrow--xs np-field-label">
           Date of birth
         </label>
         <input
@@ -101,11 +101,10 @@ export default function AgeGate({ onConfirm, onUnderage, guest = false }) {
           value={dob}
           onChange={(e) => setDob(e.target.value)}
           required
-          className="np-input"
-          style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--line-strong)", background: "var(--bg)", color: "var(--text)", fontSize: 16 }}
+          className="np-field"
         />
         {err && (
-          <p role="alert" style={{ color: "var(--danger)", fontSize: 13.5, margin: "10px 0 0" }}>{err}</p>
+          <p role="alert" className="np-field-error">{err}</p>
         )}
         <button type="submit" className="np-btn np-primary np-btn--block" style={{ marginTop: 18 }} disabled={submitting || !dob}>
           {submitting ? "Saving…" : "Continue"}

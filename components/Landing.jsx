@@ -426,10 +426,10 @@ export default function Landing({
                 </button>
               )}
               {!isPro && (
-                <p className="np-lp-plan-legal" style={{ fontSize: 12, color: "var(--muted)", marginTop: 10, marginBottom: 0 }}>
+                <p className="np-lp-plan-legal">
                   Recurring billing, cancel anytime. By upgrading you agree to our{" "}
-                  <a href="/terms" style={{ color: "inherit", textDecoration: "underline" }}>Terms</a> and{" "}
-                  <a href="/refunds" style={{ color: "inherit", textDecoration: "underline" }}>Refund Policy</a>.
+                  <a href="/terms">Terms</a> and{" "}
+                  <a href="/refunds">Refund Policy</a>.
                 </p>
               )}
             </div>
@@ -504,27 +504,27 @@ export default function Landing({
             noob<span className="np-arrow">→</span>topro
           </a>
           <span className="np-lp-foot-tag">Prove what you know. Climb from noob to pro.</span>
-          <nav className="np-lp-foot-legal" aria-label="Learn library" style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-            <a href="/learn" style={{ color: "var(--muted)", textDecoration: "none" }}>Learn library</a>
-            <a href="/learn/math" style={{ color: "var(--muted)", textDecoration: "none" }}>Math</a>
-            <a href="/learn/physics" style={{ color: "var(--muted)", textDecoration: "none" }}>Physics</a>
-            <a href="/learn/chemistry" style={{ color: "var(--muted)", textDecoration: "none" }}>Chemistry</a>
+          <nav className="np-lp-foot-legal" aria-label="Learn library">
+            <a href="/learn">Learn library</a>
+            <a href="/learn/math">Math</a>
+            <a href="/learn/physics">Physics</a>
+            <a href="/learn/chemistry">Chemistry</a>
           </nav>
-          <nav className="np-lp-foot-legal" aria-label="Legal" style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-            <a href="/privacy" style={{ color: "var(--muted)", textDecoration: "none" }}>Privacy</a>
-            <a href="/terms" style={{ color: "var(--muted)", textDecoration: "none" }}>Terms</a>
-            <a href="/refunds" style={{ color: "var(--muted)", textDecoration: "none" }}>Refunds</a>
-            <a href="/cookies" style={{ color: "var(--muted)", textDecoration: "none" }}>Cookies</a>
-            <a href="/aup" style={{ color: "var(--muted)", textDecoration: "none" }}>Acceptable use</a>
-            <a href="/accessibility" style={{ color: "var(--muted)", textDecoration: "none" }}>Accessibility</a>
+          <nav className="np-lp-foot-legal" aria-label="Legal">
+            <a href="/privacy">Privacy</a>
+            <a href="/terms">Terms</a>
+            <a href="/refunds">Refunds</a>
+            <a href="/cookies">Cookies</a>
+            <a href="/aup">Acceptable use</a>
+            <a href="/accessibility">Accessibility</a>
             {/* German "two-click" expectation: the Impressum/Legal Notice must be directly reachable. */}
-            <a href="/legal/notice" style={{ color: "var(--muted)", textDecoration: "none" }}>Legal Notice</a>
-            <a href="/legal" style={{ color: "var(--muted)", textDecoration: "none" }}>Legal hub</a>
+            <a href="/legal/notice">Legal Notice</a>
+            <a href="/legal">Legal hub</a>
             {/* Reopen the consent banner so a prior choice can be changed as easily as it was
                 given (GDPR/ePrivacy withdrawal of consent). ConsentManager listens for this event. */}
             <button
               type="button"
-              style={{ color: "var(--muted)", background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit" }}
+              className="np-lp-foot-link-btn"
               onClick={() => { if (typeof window !== "undefined") window.dispatchEvent(new Event("noobtopro:open-consent")); }}
             >
               Cookie preferences

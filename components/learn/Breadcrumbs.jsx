@@ -32,7 +32,7 @@ export default function Breadcrumbs({ items }) {
                 </span>
               ) : (
                 <>
-                  <Link href={it.path} style={{ color: "var(--muted)", textDecoration: "none" }}>
+                  <Link href={it.path} className="np-link">
                     {it.name}
                   </Link>
                   <span aria-hidden="true" style={{ color: "var(--faint)" }}>
