@@ -20,22 +20,27 @@ export default function NotFound() {
         color: "var(--text)",
       }}
     >
+      {/* On-brand greyscale mark: the wordmark arrow on a neutral surface (no chromatic
+          accent — the page is strictly greyscale like the rest of the app). */}
       <div
+        aria-hidden="true"
         style={{
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           width: 64,
           height: 64,
-          borderRadius: 16,
-          backgroundColor: "#56897e",
+          borderRadius: "var(--radius-elevated)",
+          background: "var(--tint-2)",
+          border: "1px solid var(--line-strong)",
+          color: "var(--text)",
         }}
       >
-        <svg width="40" height="40" viewBox="0 0 64 64" aria-hidden="true">
+        <svg width="36" height="36" viewBox="0 0 64 64" aria-hidden="true">
           <path
             d="M15 32h31M34 19l13 13-13 13"
             fill="none"
-            stroke="#ffffff"
+            stroke="currentColor"
             strokeWidth="6"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -43,28 +48,12 @@ export default function NotFound() {
         </svg>
       </div>
 
-      <h1 style={{ fontSize: 28, fontWeight: 600, letterSpacing: "-0.02em", margin: 0 }}>
-        404 — page not found
-      </h1>
-      <p style={{ fontSize: 15, lineHeight: 1.6, color: "var(--muted)", maxWidth: "44ch", margin: 0 }}>
+      <h1 className="np-h1" style={{ margin: 0 }}>404 — page not found</h1>
+      <p className="np-lede" style={{ margin: 0, maxWidth: "44ch" }}>
         This page took a wrong turn on the way from noob to pro. The link may be broken or the page may have moved.
       </p>
 
-      <Link
-        href="/"
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          marginTop: 4,
-          padding: "10px 20px",
-          borderRadius: 999,
-          fontSize: 14,
-          fontWeight: 600,
-          textDecoration: "none",
-          background: "var(--text)",
-          color: "var(--text-inverse)",
-        }}
-      >
+      <Link href="/" className="np-btn np-primary" style={{ marginTop: 4 }}>
         Back to noobtopro
       </Link>
     </main>

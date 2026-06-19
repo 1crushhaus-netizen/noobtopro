@@ -228,10 +228,10 @@ export default function AdminDashboard({ adminApi }) {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="np-modal-spark" aria-hidden="true"><Icon name="x" size={22} /></div>
-              <h2 id="np-admindelete-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+              <h2 id="np-admindelete-title" className="np-h2 np-modal-title">
                 Delete this guide?
               </h2>
-              <p id="np-admindelete-desc" className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
+              <p id="np-admindelete-desc" className="np-lede np-modal-subtitle">
                 This permanently deletes the guide for “{confirmDelete.concept}”. This can&apos;t be undone.
               </p>
               <div className="np-modal-actions">

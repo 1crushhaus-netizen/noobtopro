@@ -24,10 +24,10 @@ export default function LegalLayout({ title, lastUpdated = LEGAL.lastUpdated, no
           padding: "22px 24px",
         }}
       >
-        <Link href="/" className="np-brand" style={{ fontWeight: 800, fontSize: 20, textDecoration: "none", color: "var(--text)" }}>
+        <Link href="/" className="np-brand">
           noob<span className="np-arrow">→</span>topro
         </Link>
-        <Link href="/" style={{ color: "var(--muted)", textDecoration: "none", fontSize: 14 }}>
+        <Link href="/" className="np-link" style={{ fontSize: 14 }}>
           ← Back to noobtopro
         </Link>
       </header>
@@ -50,8 +50,10 @@ export default function LegalLayout({ title, lastUpdated = LEGAL.lastUpdated, no
           </div>
         )}
 
-        <h1 style={{ fontSize: 32, lineHeight: 1.15, margin: "0 0 6px", letterSpacing: "-0.02em" }}>{title}</h1>
-        <p style={{ color: "var(--muted)", fontSize: 14, margin: "0 0 32px" }}>Last updated: {lastUpdated}</p>
+        <div className="np-pagehead">
+          <h1 className="np-h1">{title}</h1>
+          <p style={{ color: "var(--muted)", fontSize: 13.5, margin: "6px 0 0" }}>Last updated: {lastUpdated}</p>
+        </div>
 
         <article className="np-legal" style={{ fontSize: 15.5, lineHeight: 1.7 }}>
           {children}
@@ -59,14 +61,14 @@ export default function LegalLayout({ title, lastUpdated = LEGAL.lastUpdated, no
 
         <hr style={{ border: 0, borderTop: "1px solid var(--line)", margin: "48px 0 20px" }} />
         <nav style={{ display: "flex", gap: 18, flexWrap: "wrap", fontSize: 14 }} aria-label="Legal pages">
-          <Link href="/legal" style={{ color: "var(--muted)", textDecoration: "none" }}>All policies</Link>
-          <Link href="/privacy" style={{ color: "var(--muted)", textDecoration: "none" }}>Privacy</Link>
-          <Link href="/terms" style={{ color: "var(--muted)", textDecoration: "none" }}>Terms</Link>
-          <Link href="/refunds" style={{ color: "var(--muted)", textDecoration: "none" }}>Refunds</Link>
-          <Link href="/cookies" style={{ color: "var(--muted)", textDecoration: "none" }}>Cookies</Link>
-          <Link href="/aup" style={{ color: "var(--muted)", textDecoration: "none" }}>Acceptable Use</Link>
-          <Link href="/accessibility" style={{ color: "var(--muted)", textDecoration: "none" }}>Accessibility</Link>
-          <Link href="/legal/notice" style={{ color: "var(--muted)", textDecoration: "none" }}>Legal Notice</Link>
+          <Link href="/legal" className="np-link">All policies</Link>
+          <Link href="/privacy" className="np-link">Privacy</Link>
+          <Link href="/terms" className="np-link">Terms</Link>
+          <Link href="/refunds" className="np-link">Refunds</Link>
+          <Link href="/cookies" className="np-link">Cookies</Link>
+          <Link href="/aup" className="np-link">Acceptable Use</Link>
+          <Link href="/accessibility" className="np-link">Accessibility</Link>
+          <Link href="/legal/notice" className="np-link">Legal Notice</Link>
         </nav>
       </main>
     </div>
@@ -77,7 +79,7 @@ export default function LegalLayout({ title, lastUpdated = LEGAL.lastUpdated, no
 export function Section({ heading, children }) {
   return (
     <section style={{ marginBottom: 28 }}>
-      <h2 style={{ fontSize: 20, margin: "0 0 10px", letterSpacing: "-0.01em" }}>{heading}</h2>
+      <h2 className="np-sectiontitle" style={{ marginBottom: 10 }}>{heading}</h2>
       {children}
     </section>
   );

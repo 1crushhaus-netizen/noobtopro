@@ -551,8 +551,8 @@ export default function Dashboard({
         <div className="np-surface-elevated np-dash-gatecard" role="dialog" aria-modal="false" aria-labelledby="np-gate-title">
           <div className="np-modal-spark" aria-hidden="true"><Icon name="lock" size={22} /></div>
           {/* A11y P1-5: the gate is this view's primary content → a real <h1>. */}
-          <h1 id="np-gate-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>Sign in to see your Dashboard</h1>
-          <p className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
+          <h1 id="np-gate-title" className="np-h2 np-modal-title">Sign in to see your Dashboard</h1>
+          <p className="np-lede np-modal-subtitle">
             Your scores, reasoning profile, and answer history live here. Sign in to unlock your dashboard
             {scores ? "; your guest results carry over automatically." : "."}
           </p>
@@ -747,10 +747,10 @@ export default function Dashboard({
               onClick={(e) => e.stopPropagation()}
             >
               <div className="np-modal-spark" aria-hidden="true"><Icon name={confirmAction === "delete" ? "x" : "refresh"} size={22} /></div>
-              <h2 id="np-resetconfirm-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+              <h2 id="np-resetconfirm-title" className="np-h2 np-modal-title">
                 {confirmAction === "delete" ? "Delete your account?" : "Are you sure?"}
               </h2>
-              <p id="np-resetconfirm-desc" className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
+              <p id="np-resetconfirm-desc" className="np-lede np-modal-subtitle">
                 {confirmAction === "delete"
                   ? "This permanently deletes your account and all your data, and cancels any Pro subscription. This can't be undone."
                   : "This permanently deletes all your scores and history."}
@@ -803,10 +803,10 @@ export default function Dashboard({
               {withdrawPhase === "confirm" && (
                 <>
                   <div className="np-modal-spark" aria-hidden="true"><Icon name="refresh" size={22} /></div>
-                  <h2 id="np-withdraw-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+                  <h2 id="np-withdraw-title" className="np-h2 np-modal-title">
                     Withdraw from your subscription?
                   </h2>
-                  <p id="np-withdraw-desc" className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
+                  <p id="np-withdraw-desc" className="np-lede np-modal-subtitle">
                     This exercises your EU 14-day right of withdrawal: your Pro subscription ends{" "}
                     <strong>immediately</strong> and we refund the part of this month you haven&rsquo;t used (a
                     proportionate amount is kept for the time already provided). This is different from
@@ -842,7 +842,7 @@ export default function Dashboard({
 
               {withdrawPhase === "busy" && (
                 <>
-                  <h2 id="np-withdraw-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+                  <h2 id="np-withdraw-title" className="np-h2 np-modal-title">
                     Processing your withdrawal…
                   </h2>
                   <p id="np-withdraw-desc" className="np-statsub" style={{ textAlign: "center", margin: 0 }}>
@@ -854,7 +854,7 @@ export default function Dashboard({
               {withdrawPhase === "done" && (
                 <>
                   <div className="np-modal-spark" aria-hidden="true"><Icon name="shield" size={22} /></div>
-                  <h2 id="np-withdraw-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+                  <h2 id="np-withdraw-title" className="np-h2 np-modal-title">
                     Withdrawal confirmed
                   </h2>
                   <div id="np-withdraw-desc" className="np-fineprint" style={{ textAlign: "left", margin: "0 0 18px", lineHeight: 1.6 }}>
@@ -913,10 +913,10 @@ export default function Dashboard({
               {withdrawPhase === "error" && (
                 <>
                   <div className="np-modal-spark" aria-hidden="true"><Icon name="x" size={22} /></div>
-                  <h2 id="np-withdraw-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+                  <h2 id="np-withdraw-title" className="np-h2 np-modal-title">
                     Withdrawal didn&rsquo;t go through
                   </h2>
-                  <p id="np-withdraw-desc" className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
+                  <p id="np-withdraw-desc" className="np-lede np-modal-subtitle">
                     {withdrawError || "Could not complete your withdrawal. Please try again."}
                   </p>
                   <div className="np-modal-actions">

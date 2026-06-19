@@ -63,8 +63,10 @@ export const viewport = {
   initialScale: 1,
   viewportFit: "cover",
   // Tints the link-embed accent bar (e.g. Discord's left rail) and the mobile
-  // browser chrome. Uses the physics-teal subject accent for a calm, on-brand pop.
-  themeColor: "#56897e",
+  // browser chrome. Matches the true-black brand surface (--bg #000000), keeping
+  // the chrome greyscale and in lockstep with app/manifest.js + app/apple-icon.js
+  // (the teal subject accent is reserved for meaning, never page chrome).
+  themeColor: "#000000",
 };
 
 // Resolve the saved theme BEFORE first paint so there is never a flash of the

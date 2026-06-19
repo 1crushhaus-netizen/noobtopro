@@ -366,6 +366,26 @@ body {
 .np-signinbtn { display: inline-flex; align-items: center; gap: 8px; background: var(--tint-1); border: 1px solid var(--line); border-radius: var(--radius-btn); color: var(--text); font-family: var(--ui); font-size: 13.5px; font-weight: 500; padding: 8px 14px; min-height: 44px; cursor: pointer; transition: background .15s ease, border-color .15s ease; }
 .np-signinbtn:hover { background: var(--tint-2); border-color: var(--line-strong); }
 
+/* ---- canonical inline text link (muted → text on hover) ----
+   The ONE recipe for plain navigational/footer/legal links, replacing the many
+   ad-hoc `color: var(--muted); text-decoration: none` inline pairs that shipped
+   without a focus ring. Gives every text link the same hover and keyboard focus. */
+.np-link {
+  color: var(--muted); text-decoration: none;
+  transition: color .15s ease; border-radius: var(--radius-inset);
+}
+.np-link:hover { color: var(--text); }
+.np-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+/* A <button> that reads as an inline text link, inheriting the surrounding color —
+   for in-flow actions inside footers/prose (e.g. "Cookie preferences"). */
+.np-linkbtn {
+  background: none; border: none; padding: 0; margin: 0;
+  font: inherit; color: inherit; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.np-linkbtn:hover { color: var(--text); }
+.np-linkbtn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
+
 /* Theme switcher — 3-way segmented control (light / system / dark) */
 .np-theme { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: var(--radius-pill); padding: 3px; background: var(--tint-1); }
 .np-theme-btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border: none; border-radius: var(--radius-pill); background: none; color: var(--faint); cursor: pointer; transition: color .15s ease, background .15s ease; }
@@ -392,6 +412,47 @@ body {
 .np-input:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 4px; }
 .np-input::placeholder { color: var(--faint); }
 .np-input-card { padding: 0; overflow: hidden; }
+
+/* ---- canonical single-line form field (text · email · date · number) ----
+   The ONE input recipe shared by the age gate, sign-in, and any settings form,
+   so every field sits on the same surface as the secondary button (tint-1 fill,
+   line-strong hairline, btn radius). 16px text keeps iOS Safari from zooming on
+   focus; the monochrome focus ring matches every other control. */
+.np-field {
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 14px;
+  background: var(--tint-1);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-btn);
+  color: var(--text);
+  font-family: var(--ui);
+  font-size: 16px;
+  line-height: 1.4;
+  transition: border-color .15s ease, background .15s ease;
+}
+.np-field::placeholder { color: var(--faint); }
+.np-field:hover:not(:disabled) { background: var(--tint-2); }
+.np-field:focus, .np-field:focus-visible {
+  outline: 2px solid var(--focus); outline-offset: 2px;
+  background: var(--tint-2); border-color: var(--line-strong);
+}
+.np-field:disabled { opacity: var(--disabled-opacity); cursor: not-allowed; }
+/* Native date/time controls inherit color-scheme from the theme, so the picker
+   indicator is already light-on-dark / dark-on-light; just make it a pointer and
+   lift it on hover so it reads as interactive in the greyscale system. */
+.np-field[type="date"]::-webkit-calendar-picker-indicator,
+.np-field[type="time"]::-webkit-calendar-picker-indicator {
+  cursor: pointer; opacity: .6; transition: opacity .15s ease;
+}
+.np-field[type="date"]::-webkit-calendar-picker-indicator:hover,
+.np-field[type="time"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
+/* An empty (required) date reads as a placeholder: faint until a real date lands. */
+.np-field[type="date"]:invalid { color: var(--faint); }
+
+/* Field label + inline validation message — the shared pair every form field uses. */
+.np-field-label { display: block; margin-bottom: 7px; }
+.np-field-error { color: var(--danger); font-size: 13.5px; line-height: 1.45; margin: 10px 0 0; }
 
 .np-hint { font-size: 13px; color: var(--muted); margin: 12px 2px 0; }
 .np-hint em { color: var(--text); font-style: normal; font-weight: 600; }
@@ -561,6 +622,27 @@ body {
   background: var(--tint-2); border: 1px solid var(--line-strong);
 }
 .np-modal-later { display: block; margin: 12px auto 0; }
+/* Centered modal heading + subheading — the shared pair every dialog uses, so the
+   "title + one-line explainer" stack reads identically across the save, upgrade,
+   consent, re-baseline, reset, withdraw, delete and age-gate modals (previously
+   each repeated the same centering inline, with the sub-margin drifting 18–22px). */
+.np-modal-title { text-align: center; margin: 0 0 8px; }
+.np-modal-subtitle { text-align: center; margin: 0 auto 20px; max-width: 42ch; }
+
+/* Fine print (legal/consent micro-copy) + the consent checkbox row. */
+.np-fineprint { font-size: 12.5px; line-height: 1.55; color: var(--muted); }
+.np-fineprint a { color: var(--text); text-underline-offset: 2px; }
+.np-consent-check {
+  display: flex; gap: 10px; align-items: flex-start;
+  margin: 0 0 18px; text-align: left;
+}
+.np-consent-check input[type="checkbox"] {
+  margin-top: 2px; flex: 0 0 auto; width: 18px; height: 18px;
+  accent-color: var(--text); cursor: pointer;
+}
+.np-consent-check input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px;
+}
 /* Side-by-side modal actions (e.g. the reset-progress confirm: No / Yes). */
 .np-modal-actions { display: flex; gap: 12px; justify-content: center; margin-top: 4px; }
 .np-modal-actions .np-btn { min-width: 116px; justify-content: center; }
@@ -1029,7 +1111,7 @@ summary.np-cardicon { min-height: 44px; }
 .np-lp-faq { max-width: 760px; margin: 0 auto; border-top: 1px solid var(--line); }
 .np-lp-faq-item { border-bottom: 1px solid var(--line); }
 .np-lp-faq-q { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 16px; text-align: left; background: none; border: none; cursor: pointer; color: var(--text); font-family: var(--ui); font-size: 15px; font-weight: 500; padding: 18px 0; }
-.np-lp-faq-q svg { color: var(--faint); flex-shrink: 0; transition: transform .2s ease; }
+.np-lp-faq-q svg { color: var(--faint); flex-shrink: 0; transition: transform .2s var(--ease); }
 .np-lp-faq-item.open .np-lp-faq-q svg { transform: rotate(180deg); }
 .np-lp-faq-a { font-size: 13.5px; color: var(--muted); line-height: 1.62; padding: 0 0 18px; max-width: 62ch; }
 .np-lp-faqcat { font-family: var(--mono); font-size: 12px; letter-spacing: var(--eyebrow-ls); text-transform: uppercase; color: var(--faint); margin: 30px 0 4px; }
@@ -1048,6 +1130,24 @@ summary.np-cardicon { min-height: 44px; }
 .np-lp-foot-tech { font-family: var(--mono); font-size: 12px; color: var(--faint); }
 .np-lp-foot-copy { margin-left: auto; font-size: 12px; color: var(--faint); }
 @media (max-width: 640px) { .np-lp-foot-copy { margin-left: 0; } }
+
+/* Footer link rows (learn library + legal) and the inline cookie-prefs button —
+   one muted→text recipe so every footer link matches and is keyboard-focusable. */
+.np-lp-foot-legal { display: flex; gap: 16px; flex-wrap: wrap; }
+.np-lp-foot-legal a,
+.np-lp-foot-link-btn {
+  color: var(--muted); font-size: 13px; text-decoration: none;
+  transition: color .15s ease;
+}
+.np-lp-foot-link-btn { background: none; border: none; padding: 0; font-family: var(--ui); cursor: pointer; }
+.np-lp-foot-legal a:hover,
+.np-lp-foot-link-btn:hover { color: var(--text); }
+.np-lp-foot-legal a:focus-visible,
+.np-lp-foot-link-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--radius-inset); }
+
+/* Pricing-plan fine print (the per-plan "taxes included / see terms" line). */
+.np-lp-plan-legal { font-size: 13px; color: var(--muted); margin: 10px 0 0; }
+.np-lp-plan-legal a { color: inherit; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
 
 /* =============================================================================
    Landing motion layer (the "Dynamic" preset, dependency-free). transform/
@@ -1107,10 +1207,10 @@ summary.np-cardicon { min-height: 44px; }
 /* (Nav condense lives on the shared .np-topnav in the app-shell section.) */
 
 /* Card hover lift (uses `translate`, independent of the reveal `transform`). */
-.np-lp-feat, .np-lp-subj, .np-lp-plan { transition: translate .2s var(--ease), border-color .2s ease, background .2s ease; }
+.np-lp-feat, .np-lp-subj, .np-lp-plan { transition: translate .2s var(--ease), border-color .2s var(--ease), background .2s var(--ease); }
 .np-lp-feat:hover, .np-lp-subj:hover { translate: 0 -3px; border-color: var(--line-strong); }
 .np-lp-plan:hover { border-color: var(--line-strong); }
-.np-lp-feat-ic { transition: background .2s ease; }
+.np-lp-feat-ic { transition: background .2s var(--ease); }
 .np-lp-feat:hover .np-lp-feat-ic { background: var(--tint-2); }
 
 /* Primary-button arrow nudges on hover. */

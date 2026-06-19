@@ -1755,10 +1755,10 @@ export default function Noobtopro() {
               <Icon name="x" size={16} />
             </button>
             <div className="np-modal-spark" aria-hidden="true"><Icon name="spark" size={22} /></div>
-            <h2 id="np-save-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+            <h2 id="np-save-title" className="np-h2 np-modal-title">
               Save your progress
             </h2>
-            <p id="np-save-desc" className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
+            <p id="np-save-desc" className="np-lede np-modal-subtitle">
               Nice work. You've got your starting scores. Sign in to keep them across devices; your guest
               results carry over automatically.
             </p>
@@ -1792,10 +1792,10 @@ export default function Noobtopro() {
               <Icon name="x" size={16} />
             </button>
             <div className="np-modal-spark" aria-hidden="true"><Icon name="spark" size={22} /></div>
-            <h2 id="np-upgrade-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+            <h2 id="np-upgrade-title" className="np-h2 np-modal-title">
               Upgrade to Pro
             </h2>
-            <p id="np-upgrade-desc" className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
+            <p id="np-upgrade-desc" className="np-lede np-modal-subtitle">
               {upgradeNudge}
             </p>
             <button
@@ -1828,18 +1828,17 @@ export default function Noobtopro() {
             <button className="np-iconbtn np-modal-close" aria-label="Dismiss" onClick={() => setShowConsent(false)}>
               <Icon name="x" size={16} />
             </button>
-            <h2 id="np-consent-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+            <h2 id="np-consent-title" className="np-h2 np-modal-title">
               Start your Pro subscription
             </h2>
-            <p id="np-consent-desc" className="np-lede" style={{ textAlign: "center", margin: "0 auto 18px" }}>
+            <p id="np-consent-desc" className="np-lede np-modal-subtitle">
               <strong>€9.99/month</strong>, taxes included. Renews monthly until you cancel — cancel anytime.
             </p>
-            <label className="np-consent-check" style={{ display: "flex", gap: 10, alignItems: "flex-start", margin: "0 0 18px", textAlign: "left" }}>
+            <label className="np-consent-check">
               <input
                 type="checkbox"
                 checked={consentChecked}
                 onChange={(e) => setConsentChecked(e.target.checked)}
-                style={{ marginTop: 3, flex: "0 0 auto" }}
               />
               <span className="np-fineprint">{IMMEDIATE_ACCESS_CONSENT_TEXT}</span>
             </label>
@@ -1874,10 +1873,10 @@ export default function Noobtopro() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="np-modal-spark" aria-hidden="true"><Icon name="refresh" size={22} /></div>
-            <h2 id="np-rebaseline-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+            <h2 id="np-rebaseline-title" className="np-h2 np-modal-title">
               Re-take the diagnostic?
             </h2>
-            <p id="np-rebaseline-desc" className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
+            <p id="np-rebaseline-desc" className="np-lede np-modal-subtitle">
               Re-taking the diagnostic will replace your current scores with a fresh baseline.
               Your accumulated progress will be lost. This can't be undone.
             </p>
@@ -2473,7 +2472,7 @@ export default function Noobtopro() {
             {" · "}
             <button
               type="button"
-              style={{ color: "inherit", background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit", textDecoration: "underline" }}
+              className="np-linkbtn"
               onClick={() => { if (typeof window !== "undefined") window.dispatchEvent(new Event("noobtopro:open-consent")); }}
             >
               Cookie preferences
