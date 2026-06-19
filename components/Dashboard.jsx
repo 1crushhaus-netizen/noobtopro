@@ -422,6 +422,11 @@ export default function Dashboard({
   onSignIn,
   onUpgrade,
   onManageSubscription,
+  // EU "Withdraw from contract here" (CRD Art. 11a): onWithdraw() terminates immediately +
+  // refunds pro-rata and resolves to the on-screen confirmation; withdrawalUntil is the ISO
+  // end of the 14-day window (the control shows only while a Pro user is inside it).
+  onWithdraw,
+  withdrawalUntil,
   onClose,
   onOverlayActiveChange,
 }) {
@@ -442,6 +447,20 @@ export default function Dashboard({
   const resetPrevFocus = useRef(null); // focus to restore when the dialog closes
   const resettingRef = useRef(false);
   useEffect(() => { resettingRef.current = resetting; }, [resetting]);
+  // EU withdrawal flow (CRD Art. 11a). withdrawPhase: idle | confirm | busy | done | error.
+  // The control is offered only to a Pro user still inside the 14-day window.
+  const [withdrawPhase, setWithdrawPhase] = useState("idle");
+  const [withdrawResult, setWithdrawResult] = useState(null);
+  const [withdrawError, setWithdrawError] = useState("");
+  const withdrawCancelRef = useRef(null); // default focus = the safe "Keep my subscription"
+  const withdrawalOpen =
+    isPro && typeof onWithdraw === "function" && withdrawalUntil != null && new Date() <= new Date(withdrawalUntil);
+  // Minor units (cents) + ISO currency code -> a human "9.71 EUR".
+  const fmtMoney = (minor, currency) => {
+    const amt = (Math.max(0, Math.round(Number(minor) || 0)) / 100).toFixed(2);
+    const cur = (currency || "").toUpperCase();
+    return cur ? `${amt} ${cur}` : amt;
+  };
   // Tasteful staggered scroll-reveal for the bento's main panels (shared hook).
   const { ref: revealRef, armed } = useScrollReveal();
   // Per-concept mastery map for the §7 breadth gate. Prefer the LIFTED prop (fetched
@@ -476,9 +495,20 @@ export default function Dashboard({
   // containment). The guest gate does NOT inert the page — it's scoped to the
   // dashboard body so the nav stays usable for a guest who'd rather keep exploring.
   useEffect(() => {
-    onOverlayActiveChange?.(drawer !== null || confirmAction !== null);
-  }, [drawer, confirmAction, onOverlayActiveChange]);
+    onOverlayActiveChange?.(drawer !== null || confirmAction !== null || withdrawPhase !== "idle");
+  }, [drawer, confirmAction, withdrawPhase, onOverlayActiveChange]);
   useEffect(() => () => onOverlayActiveChange?.(false), [onOverlayActiveChange]);
+
+  // Withdrawal dialog: focus the safe "Keep my subscription" on open; let Escape close it
+  // unless a withdrawal is mid-flight (busy). On the "done"/"error" panels the close
+  // button is the safe action.
+  useEffect(() => {
+    if (withdrawPhase === "idle") return;
+    if (withdrawPhase === "confirm") withdrawCancelRef.current?.focus();
+    const onKey = (e) => { if (e.key === "Escape" && withdrawPhase !== "busy") setWithdrawPhase("idle"); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [withdrawPhase]);
 
   // Reset dialog: focus the safe "No" button on open; restore focus on close; let
   // Escape cancel (unless a reset is already in flight). The dimmed backdrop +
@@ -638,12 +668,26 @@ export default function Dashboard({
             </button>
           )}
           {/* Pro status / upgrade. Only shown once the paid tier is live; Pro subscribers
-              get "Manage subscription", free users get the upgrade CTA. */}
-          {isPro ? (
+              get "Manage subscription" (+ the withdrawal control below while in-window),
+              free users get the upgrade CTA. */}
+          {isPro && (
             <button className="np-btn np-secondary np-dash-actbtn" style={{ marginLeft: "auto" }} onClick={onManageSubscription} disabled={upgradeBusy}>
               <Icon name="spark" size={14} /> {upgradeBusy ? "Opening…" : "Manage subscription"}
             </button>
-          ) : proEnabled ? (
+          )}
+          {/* EU 14-day withdrawal (CRD Art. 11a) — distinct from "Manage subscription"
+              (which cancels at period end). Shown only to a Pro user still inside the
+              window; terminates immediately + refunds the pro-rata remainder. */}
+          {withdrawalOpen && (
+            <button
+              className="np-btn np-secondary np-dash-actbtn"
+              onClick={() => { withdrawCancelRef.current = null; setWithdrawError(""); setWithdrawResult(null); setWithdrawPhase("confirm"); }}
+              title="EU 14-day right of withdrawal — cancel immediately with a pro-rata refund"
+            >
+              <Icon name="refresh" size={14} /> Withdraw from contract here
+            </button>
+          )}
+          {!isPro && proEnabled ? (
             <button className="np-btn np-primary np-dash-actbtn" style={{ marginLeft: "auto" }} onClick={onUpgrade} disabled={upgradeBusy}>
               <Icon name="spark" size={14} /> {upgradeBusy ? "Starting…" : "Upgrade to Pro"}
             </button>
@@ -722,6 +766,132 @@ export default function Dashboard({
                   {resetting ? (confirmAction === "delete" ? "Deleting…" : "Resetting…") : "Yes"}
                 </button>
               </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {/* EU withdrawal (CRD Art. 11a): confirm → terminate immediately + pro-rata refund →
+          on-screen durable confirmation. Distinct from "cancel" (period-end). */}
+      {withdrawPhase !== "idle" &&
+        createPortal(
+          <div
+            className="np-modal-backdrop"
+            onClick={() => { if (withdrawPhase !== "busy") setWithdrawPhase("idle"); }}
+          >
+            <div
+              className="np-surface-elevated np-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="np-withdraw-title"
+              aria-describedby="np-withdraw-desc"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {withdrawPhase === "confirm" && (
+                <>
+                  <div className="np-modal-spark" aria-hidden="true"><Icon name="refresh" size={22} /></div>
+                  <h2 id="np-withdraw-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+                    Withdraw from your subscription?
+                  </h2>
+                  <p id="np-withdraw-desc" className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
+                    This exercises your EU 14-day right of withdrawal: your Pro subscription ends{" "}
+                    <strong>immediately</strong> and we refund the part of this month you haven&rsquo;t used (a
+                    proportionate amount is kept for the time already provided). This is different from
+                    cancelling, which keeps Pro until the period ends.
+                  </p>
+                  <div className="np-modal-actions">
+                    <button
+                      ref={withdrawCancelRef}
+                      className="np-btn np-secondary"
+                      onClick={() => setWithdrawPhase("idle")}
+                    >
+                      Keep my subscription
+                    </button>
+                    <button
+                      className="np-btn np-danger"
+                      onClick={async () => {
+                        setWithdrawPhase("busy");
+                        try {
+                          const res = await onWithdraw?.();
+                          setWithdrawResult(res || {});
+                          setWithdrawPhase("done");
+                        } catch (e) {
+                          setWithdrawError((e && e.message) || "Could not complete your withdrawal. Please try again.");
+                          setWithdrawPhase("error");
+                        }
+                      }}
+                    >
+                      Confirm withdrawal
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {withdrawPhase === "busy" && (
+                <>
+                  <h2 id="np-withdraw-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+                    Processing your withdrawal…
+                  </h2>
+                  <p id="np-withdraw-desc" className="np-statsub" style={{ textAlign: "center", margin: 0 }}>
+                    Cancelling your subscription and issuing your refund.
+                  </p>
+                </>
+              )}
+
+              {withdrawPhase === "done" && (
+                <>
+                  <div className="np-modal-spark" aria-hidden="true"><Icon name="shield" size={22} /></div>
+                  <h2 id="np-withdraw-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+                    Withdrawal confirmed
+                  </h2>
+                  <div id="np-withdraw-desc" className="np-fineprint" style={{ textAlign: "left", margin: "0 0 18px", lineHeight: 1.6 }}>
+                    <p style={{ margin: "0 0 8px" }}>
+                      You withdrew from your noobtopro Pro subscription on{" "}
+                      <strong>
+                        {withdrawResult?.withdrawnAt ? new Date(withdrawResult.withdrawnAt).toLocaleString() : new Date().toLocaleString()}
+                      </strong>
+                      . Your Pro access has ended and you won&rsquo;t be charged again.
+                    </p>
+                    <p style={{ margin: 0 }}>
+                      {withdrawResult?.refund?.status === "issued"
+                        ? `A pro-rata refund of ${fmtMoney(withdrawResult.refund.amountMinor, withdrawResult.refund.currency)} is being returned to your original payment method via Polar.`
+                        : withdrawResult?.refund?.status === "pending_manual"
+                        ? "Your pro-rata refund is being processed and will be returned to your original payment method shortly."
+                        : "No refund is due (the current period was already fully used)."}
+                    </p>
+                  </div>
+                  <div className="np-modal-actions">
+                    {typeof window !== "undefined" && typeof window.print === "function" && (
+                      <button className="np-btn np-secondary" onClick={() => window.print()}>
+                        Print / save
+                      </button>
+                    )}
+                    <button className="np-btn np-primary" onClick={() => setWithdrawPhase("idle")}>
+                      Done
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {withdrawPhase === "error" && (
+                <>
+                  <div className="np-modal-spark" aria-hidden="true"><Icon name="x" size={22} /></div>
+                  <h2 id="np-withdraw-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+                    Withdrawal didn&rsquo;t go through
+                  </h2>
+                  <p id="np-withdraw-desc" className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
+                    {withdrawError || "Could not complete your withdrawal. Please try again."}
+                  </p>
+                  <div className="np-modal-actions">
+                    <button className="np-btn np-secondary" onClick={() => setWithdrawPhase("idle")}>
+                      Close
+                    </button>
+                    <button className="np-btn np-primary" onClick={() => setWithdrawPhase("confirm")}>
+                      Try again
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>,
           document.body

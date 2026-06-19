@@ -15,7 +15,8 @@ import {
   defaultDifficultyForBand,
   explainRankMove,
 } from "@/lib/scoring";
-import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData, deleteAccount as requestAccountDeletion, submitAgeVerification, loadReviews, loadTrends, loadMastery, loadSubscription } from "@/lib/store";
+import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData, deleteAccount as requestAccountDeletion, submitAgeVerification, loadReviews, loadTrends, loadMastery, loadSubscription, withdrawFromContract } from "@/lib/store";
+import { IMMEDIATE_ACCESS_CONSENT_TEXT, IMMEDIATE_ACCESS_CONSENT_VERSION } from "@/lib/consent";
 import { getSupabase, isSupabaseConfigured, signInWithProvider, signOutUser, PROVIDERS } from "@/lib/supabase";
 import { track } from "@vercel/analytics";
 import { isActiveSubscription } from "@/lib/proStatus";
@@ -402,6 +403,13 @@ export default function Noobtopro() {
   const [upgradeBusy, setUpgradeBusy] = useState(false);
   const [checkoutDone, setCheckoutDone] = useState(false);
   const isPro = isActiveSubscription(subscription);
+  // CRD Art. 16(a) checkout-consent gate: the immediate-access dialog (shown before the
+  // Polar redirect) and whether its required checkbox is ticked. `withdrawalUntil` is the
+  // end of the EU 14-day withdrawal window (ISO | null) that gates the Dashboard's
+  // "Withdraw from contract here" control.
+  const [showConsent, setShowConsent] = useState(false);
+  const [consentChecked, setConsentChecked] = useState(false);
+  const [withdrawalUntil, setWithdrawalUntil] = useState(null);
   // Is the paid Pro tier live in this deployment? (mirrors NEXT_PUBLIC_ENABLE_GITHUB etc.)
   // When off, NO Pro UI shows and nothing is gated client-side — exactly today's behavior;
   // the server mirrors this via lib/polar.js#proIsAvailable. The owner flips both on
@@ -597,6 +605,7 @@ export default function Noobtopro() {
       if (typeof loadSubscription !== "function") return; // tolerate a partial store mock
       const res = await loadSubscription();
       setSubscription((res && res.subscription) || null);
+      setWithdrawalUntil((res && res.withdrawalUntil) || null);
     } catch {
       /* leave entitlement as-is — deny-by-default */
     }
@@ -624,13 +633,18 @@ export default function Noobtopro() {
   // hosted checkout URL. Identity is bound server-side to the verified uid, so the client
   // sends no identity. Used after we KNOW the caller is signed in (the pending-upgrade
   // resume + startCheckout's signed-in branch).
+  // POST /api/checkout with the recorded Art. 16(a) consent and redirect to Polar. Only
+  // reachable AFTER the consent dialog's required checkbox is ticked (the server also
+  // refuses a checkout without consent:true), so the express immediate-access request is
+  // captured + audited before the sale.
   async function beginCheckout() {
+    setShowConsent(false);
     setUpgradeBusy(true);
     // Funnel analytics: the checkout POST is firing (covers both the signed-in path and
     // the resume-after-sign-in path). track() is a no-op when analytics isn't enabled.
     track("checkout_started");
     try {
-      const data = await authApi("/api/checkout", {});
+      const data = await authApi("/api/checkout", { consent: true, consentVersion: IMMEDIATE_ACCESS_CONSENT_VERSION });
       if (data && data.url && typeof window !== "undefined") {
         window.location.href = data.url; // full-page redirect to Polar
         return;
@@ -642,9 +656,19 @@ export default function Noobtopro() {
     }
   }
 
+  // Open the immediate-access consent dialog (CRD Art. 16(a)) for a signed-in user; the
+  // dialog's confirm calls beginCheckout. Resets the checkbox so each checkout requires a
+  // fresh, deliberate tick.
+  function openConsent() {
+    setUpgradeNudge(null);
+    setConsentChecked(false);
+    setShowConsent(true);
+  }
+
   // Upgrade entry point (landing CTA, dashboard CTA, the 402 nudge). A guest must sign in
   // first so the purchase attaches to an account — remember the intent in sessionStorage
-  // and resume checkout automatically after sign-in (the SIGNED_IN handler).
+  // and resume checkout automatically after sign-in (the SIGNED_IN handler). A signed-in
+  // user goes to the consent dialog, not straight to Polar.
   function startCheckout() {
     setUpgradeNudge(null);
     if (!user) {
@@ -655,7 +679,17 @@ export default function Noobtopro() {
       else setShowAuthNote(true);
       return;
     }
-    beginCheckout();
+    openConsent();
+  }
+
+  // EU "Withdraw from contract here" (CRD Art. 11a): terminate immediately + pro-rata
+  // refund within the 14-day window. Returns the on-screen confirmation to the Dashboard
+  // (which owns the confirm dialog + the durable confirmation display); throws on error so
+  // it can surface why. Refresh the entitlement/window afterward (the webhook also lands).
+  async function handleWithdraw() {
+    const res = await withdrawFromContract();
+    refreshPro();
+    return res;
   }
 
   // Open the Polar customer portal (manage payment / cancel / invoices) for a subscriber.
@@ -702,7 +736,7 @@ export default function Noobtopro() {
         try {
           if (typeof window !== "undefined" && window.sessionStorage.getItem("noobtopro:pendingUpgrade")) {
             window.sessionStorage.removeItem("noobtopro:pendingUpgrade");
-            beginCheckout();
+            openConsent(); // capture the Art. 16(a) consent before redirecting to Polar
           }
         } catch {}
       } else if (event === "SIGNED_OUT") {
@@ -1696,6 +1730,56 @@ export default function Noobtopro() {
         </div>
       )}
 
+      {/* Immediate-access consent (CRD Art. 16(a)): shown before redirecting to Polar. The
+          consumer must EXPRESSLY request immediate access and acknowledge they lose the
+          14-day withdrawal right once the service is fully performed. The checkbox starts
+          unticked; the pay button is disabled until it's ticked, and the server records the
+          consent (db/migrations/0025) before creating the checkout session. */}
+      {showConsent && (
+        <div className="np-modal-backdrop" onClick={() => setShowConsent(false)}>
+          <div
+            className="np-surface-elevated np-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="np-consent-title"
+            aria-describedby="np-consent-desc"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button className="np-iconbtn np-modal-close" aria-label="Dismiss" onClick={() => setShowConsent(false)}>
+              <Icon name="x" size={16} />
+            </button>
+            <h2 id="np-consent-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+              Start your Pro subscription
+            </h2>
+            <p id="np-consent-desc" className="np-lede" style={{ textAlign: "center", margin: "0 auto 18px" }}>
+              <strong>€9.99/month</strong>, taxes included. Renews monthly until you cancel — cancel anytime.
+            </p>
+            <label className="np-consent-check" style={{ display: "flex", gap: 10, alignItems: "flex-start", margin: "0 0 18px", textAlign: "left" }}>
+              <input
+                type="checkbox"
+                checked={consentChecked}
+                onChange={(e) => setConsentChecked(e.target.checked)}
+                style={{ marginTop: 3, flex: "0 0 auto" }}
+              />
+              <span className="np-fineprint">{IMMEDIATE_ACCESS_CONSENT_TEXT}</span>
+            </label>
+            <button
+              className="np-btn np-primary np-big np-btn--block"
+              onClick={beginCheckout}
+              disabled={!consentChecked || upgradeBusy}
+            >
+              <Icon name="spark" size={16} /> {upgradeBusy ? "Starting checkout…" : "Subscribe & pay €9.99/month"}
+            </button>
+            <p className="np-fineprint" style={{ textAlign: "center", margin: "12px 0 0" }}>
+              By subscribing you agree to our <a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a> and{" "}
+              <a href="/refunds" target="_blank" rel="noopener noreferrer">Refund &amp; Cancellation Policy</a>. Payments are
+              processed by Polar (Merchant of Record).
+            </p>
+            <button className="np-ghost np-modal-later" onClick={() => setShowConsent(false)}>Not now</button>
+          </div>
+        </div>
+      )}
+
       {/* Re-baseline confirm (FRONTEND P1-5): a styled, focus-managed, Escape-closable
           dialog replacing the blocking window.confirm. The safe default ("Keep my
           scores") is focused on open; "Re-take" discards the accumulated baseline. */}
@@ -1829,6 +1913,8 @@ export default function Noobtopro() {
             onSignIn={() => (isSupabaseConfigured ? openSignIn() : setShowAuthNote(true))}
             onUpgrade={startCheckout}
             onManageSubscription={openPortal}
+            onWithdraw={handleWithdraw}
+            withdrawalUntil={withdrawalUntil}
             onClose={onCloseDashboard}
             onOverlayActiveChange={setOverlayActive}
           />

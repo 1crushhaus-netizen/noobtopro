@@ -1370,6 +1370,33 @@ create policy subscriptions_select_own on public.subscriptions
 revoke all on public.subscriptions from public, anon, authenticated;
 grant select on public.subscriptions to authenticated;
 
+-- ---------------------------------------------------------------------------
+-- billing_audit (migration 0025): EU Consumer Rights Directive durable audit trail
+-- for the Pro subscription. One append-only table keyed by user with a `kind`:
+--   'immediate_access_consent' — the Art. 16(a) express-immediate-access consent +
+--      acknowledgement, recorded at checkout BEFORE the Polar session is created.
+--   'withdrawal' — an Art. 11a withdrawal within the 14-day window (immediate cancel +
+--      pro-rata refund), recorded by /api/account/withdraw.
+-- SELECT-own under RLS so the dashboard can show the "Withdraw from contract here"
+-- control while the window is open (anchored on the latest consent row); all writes
+-- revoked — only the service-role routes write it (same pattern as subscriptions).
+-- ---------------------------------------------------------------------------
+create table if not exists public.billing_audit (
+  id bigint generated always as identity primary key,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  kind text not null check (char_length(kind) between 1 and 60),
+  detail jsonb,
+  created_at timestamptz not null default now()
+);
+create index if not exists billing_audit_user_kind_idx
+  on public.billing_audit (user_id, kind, created_at desc);
+alter table public.billing_audit enable row level security;
+drop policy if exists billing_audit_select_own on public.billing_audit;
+create policy billing_audit_select_own on public.billing_audit
+  for select to authenticated using ((select auth.uid()) = user_id);
+revoke all on public.billing_audit from public, anon, authenticated;
+grant select on public.billing_audit to authenticated;
+
 -- Service-role-ONLY entitlement upsert the Polar webhook calls. SECURITY DEFINER; a
 -- signed-in user can never self-grant Pro (table is SELECT-only; not granted to
 -- authenticated). COALESCE on the optional ids keeps a stored id when a later event
