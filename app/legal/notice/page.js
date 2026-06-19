@@ -48,7 +48,7 @@ export default function LegalNoticePage() {
 
       <Section heading="Register and VAT">
         <p>{LEGAL.registrationNote}</p>
-        <p>VAT: {LEGAL.vatId}</p>
+        <p>{LEGAL.vatNote}</p>
       </Section>
 
       <Section heading="Responsible for content">

@@ -19,8 +19,8 @@ import {
 // verifiably accurate, so this is a fixed constant bumped only when the library
 // content genuinely changes — NOT `new Date()` on every build (which trains
 // crawlers to ignore the field).
-const LAST_UPDATED = new Date("2026-06-16T00:00:00Z");
-const LEGAL_UPDATED = new Date("2026-06-16T00:00:00Z");
+const LAST_UPDATED = new Date("2026-06-19T00:00:00Z");
+const LEGAL_UPDATED = new Date("2026-06-19T00:00:00Z");
 
 export default function sitemap() {
   const entries = [

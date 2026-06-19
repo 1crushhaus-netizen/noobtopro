@@ -515,7 +515,11 @@ export default function Landing({
             <a href="/terms" style={{ color: "var(--muted)", textDecoration: "none" }}>Terms</a>
             <a href="/refunds" style={{ color: "var(--muted)", textDecoration: "none" }}>Refunds</a>
             <a href="/cookies" style={{ color: "var(--muted)", textDecoration: "none" }}>Cookies</a>
-            <a href="/legal" style={{ color: "var(--muted)", textDecoration: "none" }}>Legal</a>
+            <a href="/aup" style={{ color: "var(--muted)", textDecoration: "none" }}>Acceptable use</a>
+            <a href="/accessibility" style={{ color: "var(--muted)", textDecoration: "none" }}>Accessibility</a>
+            {/* German "two-click" expectation: the Impressum/Legal Notice must be directly reachable. */}
+            <a href="/legal/notice" style={{ color: "var(--muted)", textDecoration: "none" }}>Legal Notice</a>
+            <a href="/legal" style={{ color: "var(--muted)", textDecoration: "none" }}>Legal hub</a>
             {/* Reopen the consent banner so a prior choice can be changed as easily as it was
                 given (GDPR/ePrivacy withdrawal of consent). ConsentManager listens for this event. */}
             <button
