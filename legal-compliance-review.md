@@ -8,9 +8,34 @@
 
 ## Executive summary
 
-_(completed once all 13 agents report — see per-document sections below.)_
+**Overall verdict:** the *engineering* of consumer-law compliance is genuinely strong and, in places, ahead of the field — the Art 16(a) immediate-access consent is captured and version-stamped before checkout, the **Art 11a withdrawal button is implemented** (live today, 19 Jun 2026), the **Art 8(2)** pay-button label complies, the **age gate is server-authoritative**, the pro-rata refund logic is correct, the EU-US **DPF is still valid** (verified), and the published **sub-processor stack matches the real code**. The problems are almost all **content and registration**, not architecture — and they cluster into a handful of root causes.
 
-Cross-cutting theme emerging: **rendered pages can diverge from the protective markdown drafts** — the rendered artifact is what binds users, so every finding checks the page, not just the `.md`.
+**Severity tally across 13 documents:** ~5 BLOCKER · ~20 HIGH · ~22 MEDIUM · ~15 LOW. No finding requires re-architecting the product.
+
+### The 5 root-cause fixes (each clears many findings)
+
+1. **BLOCKER — Fill the real registered address (+ VAT status) in `lib/legal.js`.** A placeholder renders verbatim on the Impressum → §5 DDG breach + German *Abmahnung* risk. This single field also unblocks Terms, Privacy, Accessibility, US-privacy and Sub-processor identity gaps. *(Needs the actual business registration — your real-world input.)* [§5.1, §13.1, and every "[address]" finding]
+
+2. **BLOCKER/HIGH — Port the protective `legal/*.md` drafts into the thinner rendered `app/*/page.js` pages.** The rendered pages are what bind users, and several silently drop mandatory content the drafts already contain: **Terms** loses the BGB §309 never-excluded-liability list + the Brussels Ia home-forum right (two BLOCKERs); **Privacy** loses Art 6 legal bases, retention periods, transfer mechanisms, and the **Art 22 automated-grading section** (also fixing a *broken cross-reference* from the AI page); **Data-Retention** loses concrete retention periods; **Sub-processors** loses DPA links + change-notice. [§1, §2, §6, §9, §13.4]
+
+3. **HIGH — Standardize the Merchant-of-Record story and *verify the Polar contract*.** Stop calling Polar a "payment provider/processor" in Privacy/Terms/Data-Retention (it's the **seller of record / independent controller**). And because "Polar handles it" does **not** discharge your trader duties (FTC v. Paddle), confirm in the Polar MSA + live checkout that Polar actually delivers: the Art 8(7) durable-medium confirmation, EU VAT/OSS, statutory/pro-rata refund disbursement, and ARL consent-record retention. [§4.1-4.3, §8.4, §13.2-13.3]
+
+4. **HIGH — Close the "no first-party mailer" gaps.** (a) Stop claiming "**we** send" renewal/price/confirmation emails — re-attribute to Polar and verify. (b) **Send the Art 11a durable-medium *acknowledgement of receipt*** after a withdrawal — currently the flow only shows an on-screen "print it yourself" panel, which does **not** satisfy the mandatory send. This is the one *new functional* legal gap. [§4.1, §8.1]
+
+5. **HIGH/MED — Correct the over- and under-claims of applicability.** You currently **over-state** two obligations you likely don't have: the **EAA** accessibility duty (micro-enterprise *exempt* — frame as voluntary) and **US state privacy** laws (you meet *no* threshold; Texas exempts SBA small businesses — reframe as voluntary, but DO add the "no sale/share of sensitive data without consent" line). And resolve the **AI high-risk/Art 22 assessment** — likely out of scope, but the **leaderboard/relative-rank may be "profiling,"** which is the one thing that could flip it. [§7.1, §10.1-10.2, §11.1-11.2]
+
+### Things you got right (don't touch / good news)
+- Impressum cites the **current §5 DDG** (not the repealed TMG) — the most common post-2024 defect, avoided.
+- **DPF valid in June 2026** (Latombe dismissed Sept 2025, appeal pending) — your US-transfer basis holds; keep SCCs as documented fallback.
+- **You are likely EAA-exempt and outside all US state privacy laws** — relax those, don't add work.
+- Age gate, Art 11a button, Art 8(2) label, pro-rata math, consent capture, anonymous leaderboard, sub-processor accuracy: all sound.
+
+### Important caveats
+- **Not legal advice.** Have German consumer/IT counsel confirm before launch, especially the Polar MoR allocation, the AI profiling/high-risk call, and the Impressum.
+- **Source access:** the research agents' `WebSearch` worked, but direct `WebFetch` of several primary sources (EUR-Lex, EDPB PDFs, some vendor pages) returned HTTP 403, so a number of statutory quotes rest on search-result extracts. Counsel should confirm verbatim statutory text against the official sources before relying on it.
+- **Date context:** today, **19 June 2026**, is the day Art 11a CRD becomes applicable — relevant to launch timing.
+
+Cross-cutting theme: **rendered pages diverge from the protective markdown drafts** — the rendered artifact is what binds users, so every finding checks the page, not just the `.md`.
 
 ---
 
@@ -183,4 +208,52 @@ Cross-cutting theme emerging: **rendered pages can diverge from the protective m
 
 ---
 
-_(Sections 11–13 — US State Privacy · Acceptable Use · Cross-cutting consistency/MoR/age-gate — appended when those agents report.)_
+## 11. US State Privacy Notice — `legal/us-state-privacy-notice.md` + `app/legal/us-privacy/page.js`
+
+**Key finding — the notice OVER-claims applicability.** A pre-revenue, one-person operator meets **no** US state comprehensive-privacy threshold: CCPA needs >$26.625M rev / 100k CA consumers / 50% data-sale revenue; VA/CO/CT/OR/etc. need 100k (or 25k+sale) volumes; Utah also needs $25M. **Texas (TDPSA) has no threshold but exempts SBA "small businesses"** (<500 staff) — so still out. Publishing **voluntarily** is fine and prudent; the fixes are about *accuracy*, not statutory breach.
+
+**Strengths:** covers CCPA elements (categories/purposes/rights/appeal); **GPC honored and the new 1 Jan 2026 §7025 "opt-out honored" indicator is correctly reflected and implemented**; sale/share framed conservatively (opt-in analytics, no money sale); online-only contact carve-out used correctly.
+
+| # | Sev | Finding | Fix |
+|---|-----|---------|-----|
+| 11.1 | HIGH | Page says the laws "**apply because we offer the Service to U.S. consumers**" — false (every law needs a threshold; offering alone isn't enough). Risks conceding covered-"business" status + its SLAs. | Reframe as **voluntary** good-faith disclosures. |
+| 11.2 | HIGH | Omits the **one live US-state hook**: TDPSA §541.107 requires even an exempt small business to get **consent before selling *sensitive* data** — and EXIF geolocation in photos goes to Groq. | Add "we do not sell/share sensitive PI without consent"; confirm EXIF stripped before Groq (it is, server-side). |
+| 11.3 | MED | "Could be considered sharing" hedge + a "Do Not Sell/Share" link implied — but Vercel (cookieless, service-provider, 24h) + Ahrefs aren't cross-context ad "sharing"; link not required. | State plainly "we do not sell or share for CCBA"; GPC as courtesy. |
+| 11.4 | MED | GPC logic internally inconsistent ("we don't share" yet "GPC opts you out of sharing"). | Reconcile to one position. |
+| 11.5 | MED | `lib/legal.js` address placeholder renders a bracket to users on a rights-request page. | Populate address. |
+| 11.6 | LOW | Lists "limit Sensitive PI" right with no mechanism (likely exempt — use is permitted-purpose only). | Clarify no separate limit needed. |
+
+**Key sources:** [CCPA thresholds — IAPP](https://iapp.org/news/a/does-the-ccpa-as-modified-by-the-cpra-apply-to-your-business) · [§7025 "opt-out honored" 2026 — Nelson Mullins](https://www.nelsonmullins.com/insights/alerts/fcc-download/all/show-me-that-you-ve-opted-me-out-new-ccpa-rules-require-businesses-to-prove-compliance) · [TDPSA (small-biz exemption + sensitive-data consent) — Usercentrics](https://usercentrics.com/knowledge-hub/texas-data-privacy-and-security-act-tdpsa/) · [US state laws overview — IAPP](https://iapp.org/resources/article/us-state-privacy-laws-overview)
+
+---
+
+## 12. Acceptable Use Policy — `legal/acceptable-use-policy.md` + `app/aup/page.js`
+
+**Low-risk — no BLOCKER.** Short, plain-language, proportionate, and **properly incorporated** into the Terms (BGB §305(2)); no "surprising" clauses (§305c); graduated enforcement ladder matches DSA Art 14(4); consistent with the content-safety blocklist + anonymous leaderboard. Correctly **not** an "online platform" (no public dissemination) → no Art 20-24 platform duties.
+
+| # | Sev | Finding | Fix |
+|---|-----|---------|-----|
+| 12.1 | HIGH | DSA **Art 17 statement-of-reasons** is scoped only to "removing content" — it must also cover **account suspension/termination**. The Art 19 micro-exemption excludes only Section 3 (platform) duties, **not** Art 17 (Section 2 hosting). | Attach the Art 17 statement-of-reasons + redress info to the whole enforcement sentence; include reasons in suspension/termination notices. |
+| 12.2 | MED | Draft↔live divergence: `.md` links `/legal` + `abuse@/security@` addresses; live uses `/legal/notice` + single `russellrozario@noobto.pro`; `.md` has `[DATE]`/`[DOMAIN]`. | Reconcile `.md` to the live page; confirm the inbox is monitored. |
+| 12.3 | LOW | "or otherwise harmful" catch-all is open-textured (§307 transparency) when used to terminate a paying consumer. | Narrow, or rely on the proportionality ladder + statement of reasons. |
+| 12.4 | LOW | "Submit others' work" prohibition self-contradicts a practice grader; tie to misrepresentation. | Anchor to academic-integrity fraud only. |
+
+**Key sources:** [DSA Art 17 (covers suspension/termination)](https://www.eu-digital-services-act.com/Digital_Services_Act_Article_17.html) · [Art 19 micro-exemption is Section 3 only — CMS](https://www.cms-digitallaws.com/en/dsa/article-19/) · [Art 3 "online platform"/dissemination — DSA Library](https://dsa-library.com/article/3/) · [BGB §305c/§307](https://www.gesetze-im-internet.de/englisch_bgb/englisch_bgb.html)
+
+---
+
+## 13. Cross-cutting — consistency · Merchant-of-Record · 18+ age-gate
+
+**Strengths:** single source of entity facts (`lib/legal.js`) keeps name/email/price/window mechanically consistent; **Art 8(2) order-button label complies** ("Subscribe & pay €9.99/month"); **age gate is server-authoritative** for account holders (`app_metadata.age_verified`, recomputed server-side, birth-year only — far stronger than a localStorage checkbox); sitemap lists all 13 legal routes, no orphan pages.
+
+| # | Sev | Finding | Fix |
+|---|-----|---------|-----|
+| 13.1 | **BLOCKER** | `lib/legal.js` placeholder **address** (+VAT) renders verbatim on `/legal/notice` → §5 DDG non-compliant, Abmahnung risk. | Populate a real Cologne address before EU launch. |
+| 13.2 | HIGH | **MoR mislabeled**: `/privacy`, `/terms`, `/legal/data-retention` call Polar a "payment provider"/processor, contradicting `/legal/sub-processors` + `/refunds`/`/billing-terms` ("seller of record / independent controller"). | Standardize: Polar = MoR / seller of record / independent controller for payment+tax. |
+| 13.3 | HIGH | "**Polar handles it" doesn't discharge trader duties** (FTC v. Paddle). Art 8(2) label, Art 8(7) confirmation, VAT/OSS, statutory refunds, ARL consent-record retention must be **verified in the Polar contract**, not assumed. | Confirm each against live Polar checkout + MSA; first-party fallback where Polar's email is short. |
+| 13.4 | HIGH | **Broken cross-reference**: `/legal/ai-transparency` points to "the automated-processing section of our Privacy Policy" — which **doesn't exist** on the rendered `/privacy`. | Port the Art 22 section into `/privacy` (ties to 2.1/2.5). |
+| 13.5 | HIGH | **"Last updated" drift**: `lib/legal.js` 18 Jun · `sitemap.js` 16 Jun · refund `.md` 19 Jun. | Reconcile to one date (19 Jun 2026). |
+| 13.6 | MED | 18+ self-attestation is **defensible** (EDPB/ICO: ok for low-risk; account holders are server-verified) — but `/privacy` §7 says "date of birth" while only birth-year is stored, and the guest path stores nothing server-side. Don't call it "verification." | Reword to "age self-declaration with a server-recorded verdict for account holders"; note the risk-based choice in the DPIA. |
+| 13.7 | MED | Footer omits direct `/aup`, `/accessibility`, **`/legal/notice` (Impressum)** links (reachable via hub, but German "two-click" Impressum expectation). | Add a footer Legal-Notice (+ Accessibility) link. |
+
+**Key sources:** [FTC v. Paddle $5M (MoR)](https://www.ftc.gov/news-events/news/press-releases/2025/06/paddle-will-pay-5-million-settle-ftc-allegations-unfair-payment-processing-practices-facilitation) · [Polar MoR docs](https://polar.sh/docs/merchant-of-record/introduction) · [EDPB age-assurance statement (Feb 2025)](https://www.edpb.europa.eu/news/news/2025/edpb-adopts-statement-age-assurance-creates-task-force-ai-enforcement-and-gives_en) · [Age assurance 2026 — Lewis Silkin](https://www.lewissilkin.com/en/insights/2026/04/17/age-assurance-in-2026-what-do-digital-businesses-operating-in-the-uk-and-eu-need-to-know) · [CRD Art 8 — EUR-Lex](https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=CELEX:02011L0083-20220528)
