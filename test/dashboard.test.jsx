@@ -110,17 +110,16 @@ describe("Dashboard — mastery-blended score (by-subject, display-layer)", () =
     return { math: subj };
   }
 
-  it("with no mastery, a high-depth subject is BLENDED down to its coverage (0), surfacing the reasoning depth", () => {
+  it("with no mastery, a high-depth subject is FLOORED at its earned band (keeps University, not Elementary)", () => {
     render(<Dashboard user={user} scores={scores} history={history} onPractice={() => {}} />);
-    // math depth 210, but 0 concepts mastered → blended score 0 → Elementary, not University.
-    expect(screen.getAllByText("Elementary").length).toBeGreaterThan(0);
-    // The depth is surfaced (the learner's reasoning is recognized; it converts via mastery),
-    // and the row tells them what's left to master to raise the number.
+    // math depth 210 (University band floor), 0 concepts mastered → the blend is floored at
+    // 210 so the learner KEEPS University rather than cratering to Elementary (the rollout fix).
+    expect(screen.getAllByText("University").length).toBeGreaterThan(0);
+    // The floored headline (210) is shown, and the row still tells them what's left to master.
     expect(
       screen.getByText(/Reasoning depth 210.*0\/\d+ mastered.*master \d+ more concepts in Learn to raise your score/)
     ).toBeTruthy();
-    // The raw depth 210 is NOT shown as the headline anymore — coverage zeroes it.
-    expect(screen.queryAllByText("210").length).toBe(0);
+    expect(screen.getAllByText("210").length).toBeGreaterThan(0);
   });
 
   it("loads mastery via the injected loader and the blended score reflects the new coverage", async () => {
@@ -179,38 +178,7 @@ describe("Dashboard — reasoning radar + what-to-work-on", () => {
   });
 });
 
-describe("Dashboard — leaderboard, reset, empty state", () => {
-  it("renders the anonymous-tiers leaderboard (distribution + own position, NO identities)", async () => {
-    const tiers = {
-      overall: { counts: [3, 2, 1, 0, 0], total: 6, you: { band: 1, score: 30, above: 3 } },
-      math: { counts: [1, 1, 2, 1, 1], total: 6, you: { band: 3, score: 60, above: 2 } },
-      physics: { counts: [4, 1, 1, 0, 0], total: 6, you: { band: 0, score: 10, above: 5 } },
-      chemistry: { counts: [0, 1, 2, 2, 1], total: 6, you: { band: 4, score: 90, above: 0 } },
-    };
-    const loadLeaderboard = vi.fn(async () => ({ tiers }));
-    render(<Dashboard user={user} scores={scores} history={history} loadLeaderboard={loadLeaderboard} onPractice={() => {}} />);
-    expect(screen.getByText("Leaderboard")).toBeTruthy();
-    await waitFor(() => expect(screen.getAllByText(/You're/i).length).toBeGreaterThan(0));
-    expect(loadLeaderboard).toHaveBeenCalled();
-    expect(screen.getAllByText(/ranked/i).length).toBeGreaterThan(0);
-  });
-
-  it("FIX 8: an UNVERIFIED caller sees a PROVISIONAL placement (no rank) with attempts remaining", async () => {
-    // The server marks the caller's own row provisional (a freshly-migrated guest score):
-    // it carries band/score for visibility but NO `above`, plus `needed` graded attempts.
-    const tiers = {
-      overall: { counts: [2, 1, 0, 0, 0], total: 3, you: { band: 3, score: 250, provisional: true, needed: 5 } },
-      math: { counts: [1, 1, 1, 0, 0], total: 3, you: { band: 3, score: 250, provisional: true, needed: 5 } },
-    };
-    const loadLeaderboard = vi.fn(async () => ({ tiers }));
-    render(<Dashboard user={user} scores={scores} history={history} loadLeaderboard={loadLeaderboard} onPractice={() => {}} />);
-    await waitFor(() => expect(screen.getByText(/provisional/i)).toBeTruthy());
-    expect(screen.getByText(/5 more graded attempts/i)).toBeTruthy();
-    // No real rank caption for a provisional user.
-    expect(screen.queryByText(/You're/i)).toBeNull();
-    expect(screen.queryByText(/top \d+%/i)).toBeNull();
-  });
-
+describe("Dashboard — reset, empty state", () => {
   it("does NOT render a duplicate Sign out (it lives once in the global header)", () => {
     render(<Dashboard user={user} scores={scores} history={history} onSignOut={vi.fn()} onPractice={() => {}} />);
     // Sign out is rendered by the app header (Noobtopro), not the Dashboard, so the
@@ -247,17 +215,29 @@ describe("Dashboard — leaderboard, reset, empty state", () => {
 });
 
 describe("Dashboard — drawers (trends + answer review)", () => {
-  it("keeps trend charts in a drawer: hidden until 'See trends' opens it, Escape closes", async () => {
-    render(<Dashboard user={user} scores={scores} history={history} isPro onPractice={() => {}} />);
-    // Closed by default — the line/bar charts are not in the tree.
+  it("keeps trend charts in a drawer: hidden until 'See trends' opens it, fetched lazily, Escape closes", async () => {
+    // "Progress trends" is Pro: the chart series is fetched on open via loadTrends() ->
+    // /api/trends (db/migrations/0024), NOT from the free in-memory history. The trend
+    // events carry the cumulative totalAfter the line chart plots.
+    const trends = [
+      { type: "baseline", subject: null, delta: 0, totalAfter: 40 },
+      { type: "attempt", subject: "math", delta: 5, totalAfter: 70 },
+      { type: "attempt", subject: "physics", delta: -2, totalAfter: 90 },
+    ];
+    const loadTrends = vi.fn(async () => ({ trends }));
+    render(<Dashboard user={user} scores={scores} history={history} isPro loadTrends={loadTrends} onPractice={() => {}} />);
+    // Closed by default — the line/bar charts are not in the tree, and the fetch is lazy.
     expect(screen.queryByRole("img", { name: /total points over time/i })).toBe(null);
     expect(screen.queryByRole("img", { name: /across 2 graded attempts/i })).toBe(null);
+    expect(loadTrends).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: /see trends/i }));
     const dialog = await screen.findByRole("dialog", { name: /trends over time/i });
     expect(dialog).toBeTruthy();
-    expect(screen.getByRole("img", { name: /total points over time.*ending at 90 of 1050/i })).toBeTruthy();
+    // Charts appear only after the Pro-gated fetch resolves.
+    expect(await screen.findByRole("img", { name: /total points over time.*ending at 90 of 1050/i })).toBeTruthy();
     expect(screen.getByRole("img", { name: /across 2 graded attempts/i })).toBeTruthy();
+    expect(loadTrends).toHaveBeenCalled();
 
     fireEvent.keyDown(window, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog", { name: /trends over time/i })).toBe(null));
@@ -392,5 +372,92 @@ describe("Dashboard — guest gate", () => {
     expect(screen.queryByText("Leaderboard")).toBe(null);
     expect(loadLeaderboard).not.toHaveBeenCalled();
     expect(loadReviews).not.toHaveBeenCalled();
+  });
+});
+
+describe("Dashboard — EU withdrawal control (CRD Art. 11a)", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+
+  it("offers 'Withdraw from contract here' to an in-window Pro user; confirming calls onWithdraw and shows the durable confirmation", async () => {
+    const onWithdraw = vi.fn(async () => ({
+      ok: true,
+      withdrawnAt: "2026-06-18T10:00:00Z",
+      refund: { status: "issued", amountMinor: 933, currency: "eur" },
+    }));
+    const withdrawalUntil = new Date(Date.now() + 5 * DAY).toISOString();
+    render(
+      <Dashboard
+        user={user}
+        scores={scores}
+        history={history}
+        isPro
+        proEnabled
+        onWithdraw={onWithdraw}
+        withdrawalUntil={withdrawalUntil}
+        onManageSubscription={() => {}}
+        onPractice={() => {}}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /withdraw from contract here/i }));
+    // The confirm dialog explains withdraw ≠ cancel; confirming runs the withdrawal.
+    await screen.findByRole("dialog", { name: /withdraw from your subscription/i });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /confirm withdrawal/i }));
+    });
+    await waitFor(() => expect(onWithdraw).toHaveBeenCalledTimes(1));
+    // On-screen durable confirmation with the pro-rata refund amount.
+    expect(await screen.findByText(/withdrawal confirmed/i)).toBeTruthy();
+    expect(screen.getByText(/9\.33 EUR/i)).toBeTruthy();
+  });
+
+  it("hides the withdrawal control once the 14-day window has closed", () => {
+    const withdrawalUntil = new Date(Date.now() - 1000).toISOString();
+    render(
+      <Dashboard
+        user={user}
+        scores={scores}
+        history={history}
+        isPro
+        proEnabled
+        onWithdraw={vi.fn()}
+        withdrawalUntil={withdrawalUntil}
+        onManageSubscription={() => {}}
+        onPractice={() => {}}
+      />
+    );
+    expect(screen.queryByRole("button", { name: /withdraw from contract here/i })).toBe(null);
+  });
+
+  it("does not offer withdrawal to a non-Pro user even if a stale window is passed", () => {
+    render(
+      <Dashboard
+        user={user}
+        scores={scores}
+        history={history}
+        proEnabled
+        onWithdraw={vi.fn()}
+        withdrawalUntil={new Date(Date.now() + 5 * DAY).toISOString()}
+        onPractice={() => {}}
+      />
+    );
+    expect(screen.queryByRole("button", { name: /withdraw from contract here/i })).toBe(null);
+  });
+});
+
+describe("Dashboard — Download my data (GDPR access/portability)", () => {
+  it("renders the button, calls onExport, and shows a busy state until it resolves", async () => {
+    let resolve;
+    const onExport = vi.fn(() => new Promise((r) => { resolve = r; }));
+    render(<Dashboard user={user} scores={scores} history={history} onExport={onExport} onPractice={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /download my data/i }));
+    expect(onExport).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("button", { name: /preparing/i })).toBeTruthy();
+    await act(async () => { resolve(true); });
+    await waitFor(() => expect(screen.getByRole("button", { name: /download my data/i })).toBeTruthy());
+  });
+
+  it("omits the button when onExport is not provided", () => {
+    render(<Dashboard user={user} scores={scores} history={history} onPractice={() => {}} />);
+    expect(screen.queryByRole("button", { name: /download my data/i })).toBe(null);
   });
 });

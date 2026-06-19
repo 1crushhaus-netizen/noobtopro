@@ -8,6 +8,7 @@ import {
   WEBSITE_ID,
   subjectLabel,
   subjectColor,
+  subjectTextColor,
   subjectUrl,
   rankUrl,
   rankSeoLabel,
@@ -111,7 +112,7 @@ export default async function LearnHub() {
                 borderTop: `3px solid ${subjectColor(s)}`,
               }}
             >
-              <span className="np-eyebrow" style={{ color: subjectColor(s) }}>
+              <span className="np-eyebrow" style={{ color: subjectTextColor(s) }}>
                 {subjectConceptCount(s)} concepts
               </span>
               <span style={{ fontFamily: "var(--display)", fontSize: 20, fontWeight: 600 }}>

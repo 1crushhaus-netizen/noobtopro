@@ -92,6 +92,9 @@ export default function LearnLayout({ children }) {
             <Link href="/terms" style={{ color: "var(--muted)", textDecoration: "none" }}>
               Terms
             </Link>
+            <Link href="/legal" style={{ color: "var(--muted)", textDecoration: "none" }}>
+              Legal
+            </Link>
           </nav>
         </div>
       </footer>

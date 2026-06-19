@@ -15,8 +15,10 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/adminAuth";
 import { getPolar, proProductId, successUrl } from "@/lib/polar";
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { checkRateLimit, clientKey } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
+import { IMMEDIATE_ACCESS_CONSENT_TEXT, IMMEDIATE_ACCESS_CONSENT_VERSION } from "@/lib/consent";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +45,25 @@ export async function POST(req) {
   const uid = auth.user.id;
   const email = typeof auth.user.email === "string" ? auth.user.email : undefined;
 
+  // CRD Art. 16(a): Pro is a digital SERVICE supplied immediately, so the consumer must
+  // EXPRESSLY request that performance begin now and acknowledge they lose the right of
+  // withdrawal once fully performed. The checkout dialog captures that as a required,
+  // unticked checkbox; refuse to start a sale without it. (body.consentVersion lets the
+  // client report exactly which wording it showed; we record our canonical text either way.)
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    body = {};
+  }
+  if (!body || body.consent !== true) {
+    return NextResponse.json(
+      { error: "Please confirm you want immediate access to start your subscription." },
+      { status: 400 }
+    );
+  }
+  const consentVersion = typeof body.consentVersion === "string" ? body.consentVersion : IMMEDIATE_ACCESS_CONSENT_VERSION;
+
   // Durable PER-ACCOUNT cap (audit 02 P1-3): the per-IP limiter + Sec-Fetch-Site guard are
   // bypassable by a non-browser client, so bound Polar checkout-session creation per account
   // too (identity is JWT-bound, so this can't start a checkout for someone else — just rate it).
@@ -66,6 +87,27 @@ export async function POST(req) {
     origin = new URL(req.url).origin;
   } catch {
     origin = undefined;
+  }
+
+  // Record the Art. 16(a) consent BEFORE creating the session — this row is the durable
+  // audit AND the anchor for the 14-day withdrawal window the dashboard offers later. The
+  // service-role client bypasses RLS (the table is SELECT-own for the owner, write-revoked).
+  // Best-effort: a paying customer must not be blocked by an audit-write hiccup (the consent
+  // flag itself already gates the sale), but we log loudly so a failure is followed up.
+  const admin = getSupabaseAdmin();
+  if (admin) {
+    try {
+      const { error: auditErr } = await admin
+        .from("billing_audit")
+        .insert({
+          user_id: uid,
+          kind: "immediate_access_consent",
+          detail: { version: consentVersion, text: IMMEDIATE_ACCESS_CONSENT_TEXT },
+        });
+      if (auditErr) console.error("[/api/checkout] consent audit write failed", auditErr);
+    } catch (e) {
+      console.error("[/api/checkout] consent audit write threw", e);
+    }
   }
 
   try {

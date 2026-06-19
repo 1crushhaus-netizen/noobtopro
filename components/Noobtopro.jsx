@@ -15,9 +15,10 @@ import {
   defaultDifficultyForBand,
   explainRankMove,
 } from "@/lib/scoring";
-import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData, deleteAccount as requestAccountDeletion, loadReviews, loadMastery, loadSubscription } from "@/lib/store";
+import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData, deleteAccount as requestAccountDeletion, submitAgeVerification, hasGuestAgeAck, recordGuestAgeAck, clearGuestAgeAck, exportMyData, loadReviews, loadTrends, loadMastery, loadSubscription, withdrawFromContract } from "@/lib/store";
+import { IMMEDIATE_ACCESS_CONSENT_TEXT, IMMEDIATE_ACCESS_CONSENT_VERSION } from "@/lib/consent";
 import { getSupabase, isSupabaseConfigured, signInWithProvider, signOutUser, PROVIDERS } from "@/lib/supabase";
-import { track } from "@vercel/analytics";
+import { track } from "@/lib/analytics";
 import { isActiveSubscription } from "@/lib/proStatus";
 import { resolveConceptKey, conceptByKey, conceptLabel } from "@/lib/curriculum";
 import { effectiveScores, effectiveSubjectScore, pickPracticeConcept } from "@/lib/promotion";
@@ -185,11 +186,6 @@ const now = () => new Date().toISOString();
 // so 12px tinted text reaches WCAG AA; the bright accents stay for the rings/glyphs.
 const SUBJECT_TEXT = { math: "var(--math-text)", physics: "var(--phys-text)", chemistry: "var(--chem-text)" };
 
-// Stable identity (audit P2-14): authApi is module-level, so this never changes —
-// the Leaderboard's fetch effect depends on it, and an inline arrow re-created on
-// every Noobtopro render made each drawer toggle refetch (and visibly blank) the
-// leaderboard while burning the shared per-IP rate bucket.
-const loadLeaderboard = () => authApi("/api/leaderboard", {});
 
 // Stable per-question key for the 2-tier diagnostic (each subject has an
 // easy + a hard question), so the answers map can hold all 6 answers.
@@ -403,6 +399,13 @@ export default function Noobtopro() {
   const [upgradeBusy, setUpgradeBusy] = useState(false);
   const [checkoutDone, setCheckoutDone] = useState(false);
   const isPro = isActiveSubscription(subscription);
+  // CRD Art. 16(a) checkout-consent gate: the immediate-access dialog (shown before the
+  // Polar redirect) and whether its required checkbox is ticked. `withdrawalUntil` is the
+  // end of the EU 14-day withdrawal window (ISO | null) that gates the Dashboard's
+  // "Withdraw from contract here" control.
+  const [showConsent, setShowConsent] = useState(false);
+  const [consentChecked, setConsentChecked] = useState(false);
+  const [withdrawalUntil, setWithdrawalUntil] = useState(null);
   // Is the paid Pro tier live in this deployment? (mirrors NEXT_PUBLIC_ENABLE_GITHUB etc.)
   // When off, NO Pro UI shows and nothing is gated client-side — exactly today's behavior;
   // the server mirrors this via lib/polar.js#proIsAvailable. The owner flips both on
@@ -480,6 +483,16 @@ export default function Noobtopro() {
   const [showRebaselineConfirm, setShowRebaselineConfirm] = useState(false);
   const rebaselineCancelRef = useRef(null); // default focus = the safe "Keep my scores"
   const rebaselinePrevFocus = useRef(null); // focus to restore on close
+
+  // GUEST 18+ gate. Signed-in age verification is server-authoritative (app_metadata); a guest
+  // has no account, so their one-time 18+ confirmation is a CLIENT-side ack (localStorage,
+  // read on mount). `guestAgePrompt` proactively shows the gate when a guest tries to ENTER the
+  // service (e.g. "Prove it"), so we never fire a generation request before they confirm;
+  // `afterAgeRef` resumes that deferred action once they do.
+  const [guestAgeAck, setGuestAgeAck] = useState(false);
+  const [guestAgePrompt, setGuestAgePrompt] = useState(false);
+  const afterAgeRef = useRef(null);
+  useEffect(() => { setGuestAgeAck(hasGuestAgeAck()); }, []);
 
   // Monotonic token so a slow in-flight startPractice generation can't land its
   // question after the user has moved to a different practice question/subject —
@@ -598,6 +611,7 @@ export default function Noobtopro() {
       if (typeof loadSubscription !== "function") return; // tolerate a partial store mock
       const res = await loadSubscription();
       setSubscription((res && res.subscription) || null);
+      setWithdrawalUntil((res && res.withdrawalUntil) || null);
     } catch {
       /* leave entitlement as-is — deny-by-default */
     }
@@ -625,13 +639,18 @@ export default function Noobtopro() {
   // hosted checkout URL. Identity is bound server-side to the verified uid, so the client
   // sends no identity. Used after we KNOW the caller is signed in (the pending-upgrade
   // resume + startCheckout's signed-in branch).
+  // POST /api/checkout with the recorded Art. 16(a) consent and redirect to Polar. Only
+  // reachable AFTER the consent dialog's required checkbox is ticked (the server also
+  // refuses a checkout without consent:true), so the express immediate-access request is
+  // captured + audited before the sale.
   async function beginCheckout() {
+    setShowConsent(false);
     setUpgradeBusy(true);
     // Funnel analytics: the checkout POST is firing (covers both the signed-in path and
     // the resume-after-sign-in path). track() is a no-op when analytics isn't enabled.
     track("checkout_started");
     try {
-      const data = await authApi("/api/checkout", {});
+      const data = await authApi("/api/checkout", { consent: true, consentVersion: IMMEDIATE_ACCESS_CONSENT_VERSION });
       if (data && data.url && typeof window !== "undefined") {
         window.location.href = data.url; // full-page redirect to Polar
         return;
@@ -643,9 +662,19 @@ export default function Noobtopro() {
     }
   }
 
+  // Open the immediate-access consent dialog (CRD Art. 16(a)) for a signed-in user; the
+  // dialog's confirm calls beginCheckout. Resets the checkbox so each checkout requires a
+  // fresh, deliberate tick.
+  function openConsent() {
+    setUpgradeNudge(null);
+    setConsentChecked(false);
+    setShowConsent(true);
+  }
+
   // Upgrade entry point (landing CTA, dashboard CTA, the 402 nudge). A guest must sign in
   // first so the purchase attaches to an account — remember the intent in sessionStorage
-  // and resume checkout automatically after sign-in (the SIGNED_IN handler).
+  // and resume checkout automatically after sign-in (the SIGNED_IN handler). A signed-in
+  // user goes to the consent dialog, not straight to Polar.
   function startCheckout() {
     setUpgradeNudge(null);
     if (!user) {
@@ -656,7 +685,17 @@ export default function Noobtopro() {
       else setShowAuthNote(true);
       return;
     }
-    beginCheckout();
+    openConsent();
+  }
+
+  // EU "Withdraw from contract here" (CRD Art. 11a): terminate immediately + pro-rata
+  // refund within the 14-day window. Returns the on-screen confirmation to the Dashboard
+  // (which owns the confirm dialog + the durable confirmation display); throws on error so
+  // it can surface why. Refresh the entitlement/window afterward (the webhook also lands).
+  async function handleWithdraw() {
+    const res = await withdrawFromContract();
+    refreshPro();
+    return res;
   }
 
   // Open the Polar customer portal (manage payment / cancel / invoices) for a subscriber.
@@ -703,7 +742,7 @@ export default function Noobtopro() {
         try {
           if (typeof window !== "undefined" && window.sessionStorage.getItem("noobtopro:pendingUpgrade")) {
             window.sessionStorage.removeItem("noobtopro:pendingUpgrade");
-            beginCheckout();
+            openConsent(); // capture the Art. 16(a) consent before redirecting to Polar
           }
         } catch {}
       } else if (event === "SIGNED_OUT") {
@@ -867,27 +906,52 @@ export default function Noobtopro() {
     }
   }
 
-  // P0-10 age gate. A signed-in account that hasn't recorded a one-time age acknowledgement
-  // is blocked from the app by AgeGate until it does. Self-declared (stored in the account's
-  // user_metadata); guests aren't gated (their data is local-only).
+  // Adults-only (18+) age gate. A signed-in account that hasn't been age-verified is blocked
+  // from the app by AgeGate until it is. The verdict is SERVER-AUTHORITATIVE: it lives in
+  // app_metadata (set only by /api/account/age after a server-side age check), which the user
+  // cannot edit. Guests aren't gated here (their data is local-only). Note: the old
+  // user_metadata.age_ack_year flag is intentionally NOT honored, so every existing account
+  // re-attests under the 18+ regime.
   function hasAgeAck(u) {
-    return !!(u && u.user_metadata && (u.user_metadata.age_ack_year || u.user_metadata.birthdate));
+    return !!(u && u.app_metadata && u.app_metadata.age_verified === true);
   }
-  // 13+ path: record the acknowledgement on the account, then refresh `user` so the gate
-  // (derived from user metadata) clears. Throws so AgeGate can surface a save failure.
-  async function confirmAge({ birthYear }) {
-    const sb = getSupabase();
-    if (!sb) throw new Error("Sign-in is not configured.");
-    const { error } = await sb.auth.updateUser({ data: { age_ack_year: birthYear } });
-    if (error) throw new Error(error.message || "Couldn't save that. Please try again.");
-    const { data } = await sb.auth.getUser();
-    setUser((data && data.user) || user);
+  // 18+ path. Signed-in: POST the DOB to the server, which verifies the age and records the
+  // verdict in app_metadata; then refresh `user` so the gate (derived from app_metadata)
+  // clears (throws so AgeGate can surface a save/verification failure). Guest: record the
+  // client-side ack and resume any action that was deferred behind the gate.
+  async function confirmAge({ dob }) {
+    if (user) {
+      await submitAgeVerification(dob);
+      const sb = getSupabase();
+      if (sb) {
+        const { data } = await sb.auth.getUser();
+        setUser((data && data.user) || user);
+      }
+      return;
+    }
+    recordGuestAgeAck();
+    setGuestAgeAck(true);
+    setGuestAgePrompt(false);
+    const next = afterAgeRef.current;
+    afterAgeRef.current = null;
+    if (typeof next === "function") next();
   }
-  // Under-13 path: sign out (no learning data was collected — they never reached the app)
-  // and surface why on the landing.
+  // Under-18 path. Signed-in: sign out (no learning data was collected — they never reached
+  // the app). Guest: clear the local ack + any guest progress and return to the public intro.
+  // Either way, surface why on the landing.
   async function handleUnderage() {
-    try { await signOutUser(); } catch {}
-    setError("noobtopro is for ages 13 and up. Please ask a parent or guardian to set it up with you.");
+    setGuestAgePrompt(false);
+    afterAgeRef.current = null;
+    if (user) {
+      try { await signOutUser(); } catch {}
+    } else {
+      clearGuestAgeAck();
+      setGuestAgeAck(false);
+      try { await resetAll(); } catch {}
+      setScores(null);
+      setStage("intro");
+    }
+    setError("noobtopro is an adults-only service for ages 18 and over.");
   }
 
   // Dashboard → "Delete account": permanent erasure (cancels any Pro subscription, deletes
@@ -903,6 +967,31 @@ export default function Noobtopro() {
       return true;
     } catch (e) {
       setError(e.message || "Could not delete your account.");
+      return false;
+    }
+  }
+
+  // Dashboard → "Download my data": GDPR access/portability. Fetch the JSON bundle and save
+  // it as a file. Returns true on success / false on error (the Dashboard button clears its
+  // own busy state on false); errors surface in the global banner.
+  async function exportData() {
+    try {
+      const data = await exportMyData();
+      if (typeof window !== "undefined") {
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "noobtopro-data-export.json";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
+      setError("");
+      return true;
+    } catch (e) {
+      setError(e.message || "Could not export your data.");
       return false;
     }
   }
@@ -926,6 +1015,14 @@ export default function Noobtopro() {
     if (user && scores) {
       if (typeof document !== "undefined") rebaselinePrevFocus.current = document.activeElement;
       setShowRebaselineConfirm(true);
+      return;
+    }
+    // Guest 18+ gate: a guest entering the adults-only service must confirm they're 18+ once
+    // (client-side). Defer the diagnostic behind the gate so we never call /api/generate for
+    // an unconfirmed guest; confirmAge resumes it.
+    if (!user && !guestAgeAck) {
+      afterAgeRef.current = startDiagnostic;
+      setGuestAgePrompt(true);
       return;
     }
     return startDiagnostic();
@@ -1568,15 +1665,22 @@ export default function Noobtopro() {
   ) : null;
 
   /* ----------------------------- render ----------------------------- */
-  // P0-10: block a freshly signed-in account that hasn't completed the one-time age check.
-  // Derived from `user` metadata so it clears as soon as confirmAge refreshes the user (or
-  // an under-13 sign-out nulls it). Guests (no user) and the sign-in screen are exempt.
-  const needsAgeGate = !!user && stage !== "signin" && !hasAgeAck(user);
+  // 18+ adults-only gate (P0-10). Signed-in: block any account that hasn't completed the
+  // server-authoritative age check (app_metadata) — clears as soon as confirmAge refreshes the
+  // user. Guest: block once they ENTER the service without the client-side 18+ ack — either
+  // because they explicitly tried to start (guestAgePrompt) or because they returned to a
+  // non-intro view (e.g. a saved-progress dashboard). A guest on the public landing is exempt,
+  // so the marketing page stays open/crawlable. The sign-in screen is always exempt.
+  const guestOnPublicLanding =
+    !user && stage === "intro" && view !== "dashboard" && view !== "learn" && view !== "admin";
+  const ageVerified = user ? hasAgeAck(user) : guestAgeAck;
+  const needsAgeGate =
+    stage !== "signin" && !ageVerified && (!!user || guestAgePrompt || !guestOnPublicLanding);
   if (needsAgeGate) {
     return (
       <>
         {resetToast}
-        <AgeGate onConfirm={confirmAge} onUnderage={handleUnderage} />
+        <AgeGate onConfirm={confirmAge} onUnderage={handleUnderage} guest={!user} />
       </>
     );
   }
@@ -1706,6 +1810,56 @@ export default function Noobtopro() {
         </div>
       )}
 
+      {/* Immediate-access consent (CRD Art. 16(a)): shown before redirecting to Polar. The
+          consumer must EXPRESSLY request immediate access and acknowledge they lose the
+          14-day withdrawal right once the service is fully performed. The checkbox starts
+          unticked; the pay button is disabled until it's ticked, and the server records the
+          consent (db/migrations/0025) before creating the checkout session. */}
+      {showConsent && (
+        <div className="np-modal-backdrop" onClick={() => setShowConsent(false)}>
+          <div
+            className="np-surface-elevated np-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="np-consent-title"
+            aria-describedby="np-consent-desc"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button className="np-iconbtn np-modal-close" aria-label="Dismiss" onClick={() => setShowConsent(false)}>
+              <Icon name="x" size={16} />
+            </button>
+            <h2 id="np-consent-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+              Start your Pro subscription
+            </h2>
+            <p id="np-consent-desc" className="np-lede" style={{ textAlign: "center", margin: "0 auto 18px" }}>
+              <strong>€9.99/month</strong>, taxes included. Renews monthly until you cancel — cancel anytime.
+            </p>
+            <label className="np-consent-check" style={{ display: "flex", gap: 10, alignItems: "flex-start", margin: "0 0 18px", textAlign: "left" }}>
+              <input
+                type="checkbox"
+                checked={consentChecked}
+                onChange={(e) => setConsentChecked(e.target.checked)}
+                style={{ marginTop: 3, flex: "0 0 auto" }}
+              />
+              <span className="np-fineprint">{IMMEDIATE_ACCESS_CONSENT_TEXT}</span>
+            </label>
+            <button
+              className="np-btn np-primary np-big np-btn--block"
+              onClick={beginCheckout}
+              disabled={!consentChecked || upgradeBusy}
+            >
+              <Icon name="spark" size={16} /> {upgradeBusy ? "Starting checkout…" : "Subscribe & pay €9.99/month"}
+            </button>
+            <p className="np-fineprint" style={{ textAlign: "center", margin: "12px 0 0" }}>
+              By subscribing you agree to our <a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a> and{" "}
+              <a href="/refunds" target="_blank" rel="noopener noreferrer">Refund &amp; Cancellation Policy</a>. Payments are
+              processed by Polar (Merchant of Record).
+            </p>
+            <button className="np-ghost np-modal-later" onClick={() => setShowConsent(false)}>Not now</button>
+          </div>
+        </div>
+      )}
+
       {/* Re-baseline confirm (FRONTEND P1-5): a styled, focus-managed, Escape-closable
           dialog replacing the blocking window.confirm. The safe default ("Keep my
           scores") is focused on open; "Re-take" discards the accumulated baseline. */}
@@ -1824,8 +1978,8 @@ export default function Noobtopro() {
             isPro={isPro}
             proEnabled={proEnabled}
             upgradeBusy={upgradeBusy}
-            loadLeaderboard={loadLeaderboard}
             loadReviews={loadReviews}
+            loadTrends={loadTrends}
             mastery={mastery}
             masteryReady={masteryLoaded}
             onStartDiagnostic={() => { setView("practice"); beginDiagnostic(); }}
@@ -1833,9 +1987,12 @@ export default function Noobtopro() {
             onLearn={openLearn}
             onReset={resetProgress}
             onDeleteAccount={deleteAccount}
+            onExport={user ? exportData : undefined}
             onSignIn={() => (isSupabaseConfigured ? openSignIn() : setShowAuthNote(true))}
             onUpgrade={startCheckout}
             onManageSubscription={openPortal}
+            onWithdraw={handleWithdraw}
+            withdrawalUntil={withdrawalUntil}
             onClose={onCloseDashboard}
             onOverlayActiveChange={setOverlayActive}
           />
@@ -2191,11 +2348,11 @@ export default function Noobtopro() {
                     )}
 
                     {feedback && (
-                      // A11y P1-3: the grading result lands asynchronously (replacing
-                      // the composer), so wrap it in a polite live region — screen
-                      // readers announce the reasoning score + delta + feedback when
-                      // they appear, instead of going silent after "Working…".
-                      <div className="fade-up" role="status" aria-live="polite">
+                      // A11y: the concise score + delta is announced by the dedicated
+                      // `.np-livescore` polite region below; this large result block is
+                      // NOT itself a live region (wrapping the whole breakdown + lists in
+                      // aria-live made SR read a verbose wall of text on every grade).
+                      <div className="fade-up">
                         <div className="np-card np-feedhead">
                           <div>
                             <div className="np-eyebrow">Reasoning quality this attempt</div>
@@ -2309,6 +2466,18 @@ export default function Noobtopro() {
 
           <footer className="np-foot">
             © {new Date().getFullYear()} noobtopro · your reasoning is graded by AI against a nine-axis rubric
+            {/* GDPR Art 7(3): withdrawing analytics consent must be as easy as giving it, and
+                reachable from inside the signed-in app — not only the marketing footer. */}
+            {" · "}
+            <a href="/cookies" style={{ color: "inherit" }}>Cookies</a>
+            {" · "}
+            <button
+              type="button"
+              style={{ color: "inherit", background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit", textDecoration: "underline" }}
+              onClick={() => { if (typeof window !== "undefined") window.dispatchEvent(new Event("noobtopro:open-consent")); }}
+            >
+              Cookie preferences
+            </button>
           </footer>
           </div>
         </div>

@@ -15,7 +15,6 @@ import { effectiveScores, subjectRankView } from "@/lib/promotion";
 import { conceptLabel, resolveConceptKey } from "@/lib/curriculum";
 import Icon from "@/components/Icon";
 import { LineChart, BarChart, RadarChart, MiniBar } from "@/components/charts";
-import Leaderboard from "@/components/Leaderboard";
 import ReviewList from "@/components/ReviewList";
 import { useScrollReveal } from "@/components/useReveal";
 import { SubjectGlyph, deltaColor } from "@/components/ui";
@@ -329,6 +328,72 @@ function RecentMoves({ history }) {
   );
 }
 
+// "Progress trends" charts (Pro). The trend series lives in `attempts`, whose direct client
+// SELECT is revoked (db/migrations/0024), so this fetches it through the Pro-gated /api/trends
+// (loadTrends) on open — not from the free in-memory history. Mirrors how ReviewList loads
+// answer history. A non-Pro user never reaches here (the "See trends" button shows the lock +
+// upgrade); the route itself returns 402 as the server backstop.
+function TrendCharts({ loadTrends }) {
+  const [state, setState] = useState({ status: "loading", trends: [] });
+  useEffect(() => {
+    if (typeof loadTrends !== "function") {
+      setState({ status: "ready", trends: [] });
+      return;
+    }
+    let alive = true;
+    loadTrends()
+      .then((res) => {
+        if (!alive) return;
+        if (res && res.error) setState({ status: "error", trends: [] });
+        else setState({ status: "ready", trends: (res && res.trends) || [] });
+      })
+      .catch(() => {
+        if (alive) setState({ status: "error", trends: [] });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [loadTrends]);
+
+  const linePoints = useMemo(
+    () => state.trends.filter((h) => typeof h.totalAfter === "number").map((h) => h.totalAfter),
+    [state.trends]
+  );
+  const barItems = useMemo(
+    () =>
+      state.trends
+        .filter((h) => h.type === "attempt")
+        .map((a) => ({ value: Math.round(a.delta || 0), glyph: SUBJECTS[a.subject]?.glyph || "·" })),
+    [state.trends]
+  );
+
+  if (state.status === "loading") return <p className="np-statsub">Loading your trends…</p>;
+  if (state.status === "error")
+    return <p className="np-statsub">Couldn&rsquo;t load your trends. Please try again.</p>;
+  return (
+    <>
+      <div className="np-card np-chartcard">
+        <div className="np-charttitle">Total points over time</div>
+        <div className="np-chartsub">From your starting scores through every graded attempt.</div>
+        {linePoints.length >= 2 ? (
+          <LineChart values={linePoints} yMax={1050} />
+        ) : (
+          <p className="np-statsub">Answer a practice problem to start the trend line.</p>
+        )}
+      </div>
+      <div className="np-card np-chartcard">
+        <div className="np-charttitle">Points gained and lost</div>
+        <div className="np-chartsub">Each bar is one graded attempt: above the line when your reasoning earned points, below it when it cost them.</div>
+        {barItems.length >= 1 ? (
+          <BarChart items={barItems} />
+        ) : (
+          <p className="np-statsub">No graded attempts yet.</p>
+        )}
+      </div>
+    </>
+  );
+}
+
 export default function Dashboard({
   user,
   scores,
@@ -336,8 +401,8 @@ export default function Dashboard({
   isPro = false,
   proEnabled = false,
   upgradeBusy = false,
-  loadLeaderboard,
   loadReviews,
+  loadTrends,
   loadMastery,
   // FRONTEND P1-2: mastery is now LIFTED into the shell and passed in (fetched once
   // for both Dashboard + LearnTab). When provided, we use it directly and skip the
@@ -352,9 +417,15 @@ export default function Dashboard({
   onLearn,
   onReset,
   onDeleteAccount,
+  onExport,
   onSignIn,
   onUpgrade,
   onManageSubscription,
+  // EU "Withdraw from contract here" (CRD Art. 11a): onWithdraw() terminates immediately +
+  // refunds pro-rata and resolves to the on-screen confirmation; withdrawalUntil is the ISO
+  // end of the 14-day window (the control shows only while a Pro user is inside it).
+  onWithdraw,
+  withdrawalUntil,
   onClose,
   onOverlayActiveChange,
 }) {
@@ -375,6 +446,22 @@ export default function Dashboard({
   const resetPrevFocus = useRef(null); // focus to restore when the dialog closes
   const resettingRef = useRef(false);
   useEffect(() => { resettingRef.current = resetting; }, [resetting]);
+  // EU withdrawal flow (CRD Art. 11a). withdrawPhase: idle | confirm | busy | done | error.
+  // The control is offered only to a Pro user still inside the 14-day window.
+  const [withdrawPhase, setWithdrawPhase] = useState("idle");
+  const [withdrawResult, setWithdrawResult] = useState(null);
+  const [withdrawError, setWithdrawError] = useState("");
+  const withdrawCancelRef = useRef(null); // default focus = the safe "Keep my subscription"
+  const withdrawalOpen =
+    isPro && typeof onWithdraw === "function" && withdrawalUntil != null && new Date() <= new Date(withdrawalUntil);
+  // Minor units (cents) + ISO currency code -> a human "9.71 EUR".
+  const fmtMoney = (minor, currency) => {
+    const amt = (Math.max(0, Math.round(Number(minor) || 0)) / 100).toFixed(2);
+    const cur = (currency || "").toUpperCase();
+    return cur ? `${amt} ${cur}` : amt;
+  };
+  // "Download my data" (GDPR access/portability) in-flight flag.
+  const [exporting, setExporting] = useState(false);
   // Tasteful staggered scroll-reveal for the bento's main panels (shared hook).
   const { ref: revealRef, armed } = useScrollReveal();
   // Per-concept mastery map for the §7 breadth gate. Prefer the LIFTED prop (fetched
@@ -409,9 +496,20 @@ export default function Dashboard({
   // containment). The guest gate does NOT inert the page — it's scoped to the
   // dashboard body so the nav stays usable for a guest who'd rather keep exploring.
   useEffect(() => {
-    onOverlayActiveChange?.(drawer !== null || confirmAction !== null);
-  }, [drawer, confirmAction, onOverlayActiveChange]);
+    onOverlayActiveChange?.(drawer !== null || confirmAction !== null || withdrawPhase !== "idle");
+  }, [drawer, confirmAction, withdrawPhase, onOverlayActiveChange]);
   useEffect(() => () => onOverlayActiveChange?.(false), [onOverlayActiveChange]);
+
+  // Withdrawal dialog: focus the safe "Keep my subscription" on open; let Escape close it
+  // unless a withdrawal is mid-flight (busy). On the "done"/"error" panels the close
+  // button is the safe action.
+  useEffect(() => {
+    if (withdrawPhase === "idle") return;
+    if (withdrawPhase === "confirm") withdrawCancelRef.current?.focus();
+    const onKey = (e) => { if (e.key === "Escape" && withdrawPhase !== "busy") setWithdrawPhase("idle"); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [withdrawPhase]);
 
   // Reset dialog: focus the safe "No" button on open; restore focus on close; let
   // Escape cancel (unless a reset is already in flight). The dimmed backdrop +
@@ -433,22 +531,10 @@ export default function Dashboard({
   const email = user && user.email;
   const showAvatar = avatar && !imgFailed;
 
-  // PERF (P2-3): the history-derived chart arrays change only with `history`; memoize
-  // them so a drawer/confirm-modal toggle (the things that actually re-render this
-  // component) doesn't redo the reduction every time. Declared HERE — before the
-  // `!user` / `!scores` early returns — so these hooks run unconditionally on every
-  // render (React Rules of Hooks; enforced by eslint react-hooks/rules-of-hooks).
-  const linePoints = useMemo(
-    () => history.filter((h) => typeof h.totalAfter === "number").map((h) => h.totalAfter),
-    [history]
-  );
-  const barItems = useMemo(
-    () =>
-      history
-        .filter((h) => h.type === "attempt")
-        .map((a) => ({ value: Math.round(a.delta || 0), glyph: SUBJECTS[a.subject]?.glyph || "·" })),
-    [history]
-  );
+  // The "Progress trends" chart arrays are no longer derived from the free in-memory
+  // history — the trend series is Pro-gated and fetched on demand by <TrendCharts> via
+  // loadTrends() -> /api/trends (db/migrations/0024). The free history still drives the
+  // KPI "problems graded" count + the "why your reasoning moved" list.
 
   // ---- Guest gate: blurred preview + sign-in prompt (no data, no auth fetches) ----
   if (!user) {
@@ -467,7 +553,7 @@ export default function Dashboard({
           {/* A11y P1-5: the gate is this view's primary content → a real <h1>. */}
           <h1 id="np-gate-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>Sign in to see your Dashboard</h1>
           <p className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
-            Your scores, reasoning profile, leaderboard rank, and answer history live here. Sign in to unlock your dashboard
+            Your scores, reasoning profile, and answer history live here. Sign in to unlock your dashboard
             {scores ? "; your guest results carry over automatically." : "."}
           </p>
           <button className="np-btn np-primary np-big np-btn--block" onClick={onSignIn}>
@@ -547,7 +633,6 @@ export default function Dashboard({
         <RadarPanel scores={scores} onPractice={onPractice} onLearn={onLearn} />
         <div className="np-dash-mid" data-reveal style={{ "--ri": 1 }}>
           <BySubject scores={scores} mastery={mastery} masteryReady={masteryReady} onPractice={onPractice} />
-          <Leaderboard loadLeaderboard={loadLeaderboard} />
         </div>
         <div className="np-dash-lead" data-reveal style={{ "--ri": 2 }}>
           <RecentMoves history={history} />
@@ -583,19 +668,46 @@ export default function Dashboard({
             </button>
           )}
           {/* Pro status / upgrade. Only shown once the paid tier is live; Pro subscribers
-              get "Manage subscription", free users get the upgrade CTA. */}
-          {isPro ? (
+              get "Manage subscription" (+ the withdrawal control below while in-window),
+              free users get the upgrade CTA. */}
+          {isPro && (
             <button className="np-btn np-secondary np-dash-actbtn" style={{ marginLeft: "auto" }} onClick={onManageSubscription} disabled={upgradeBusy}>
               <Icon name="spark" size={14} /> {upgradeBusy ? "Opening…" : "Manage subscription"}
             </button>
-          ) : proEnabled ? (
+          )}
+          {/* EU 14-day withdrawal (CRD Art. 11a) — distinct from "Manage subscription"
+              (which cancels at period end). Shown only to a Pro user still inside the
+              window; terminates immediately + refunds the pro-rata remainder. */}
+          {withdrawalOpen && (
+            <button
+              className="np-btn np-secondary np-dash-actbtn"
+              onClick={() => { withdrawCancelRef.current = null; setWithdrawError(""); setWithdrawResult(null); setWithdrawPhase("confirm"); }}
+              title="EU 14-day right of withdrawal — cancel immediately with a pro-rata refund"
+            >
+              <Icon name="refresh" size={14} /> Withdraw from contract here
+            </button>
+          )}
+          {!isPro && proEnabled ? (
             <button className="np-btn np-primary np-dash-actbtn" style={{ marginLeft: "auto" }} onClick={onUpgrade} disabled={upgradeBusy}>
               <Icon name="spark" size={14} /> {upgradeBusy ? "Starting…" : "Upgrade to Pro"}
             </button>
           ) : null}
+          {/* GDPR access/portability — a non-destructive "save a copy of my data". Sits at
+              the head of the account-actions group (takes the right-push when no Pro/upgrade
+              button precedes it). */}
+          {onExport && (
+            <button
+              className="np-btn np-secondary np-dash-actbtn"
+              style={!isPro && !proEnabled ? { marginLeft: "auto" } : undefined}
+              disabled={exporting}
+              onClick={async () => { setExporting(true); try { await onExport(); } finally { setExporting(false); } }}
+            >
+              {exporting ? "Preparing…" : "Download my data"}
+            </button>
+          )}
           <button
             className="np-btn np-danger np-dash-actbtn"
-            style={isPro || proEnabled ? undefined : { marginLeft: "auto" }}
+            style={!isPro && !proEnabled && !onExport ? { marginLeft: "auto" } : undefined}
             onClick={() => { resetPrevFocus.current = document.activeElement; setConfirmAction("reset"); }}
           >
             Reset my progress
@@ -612,24 +724,8 @@ export default function Dashboard({
       </div>
 
       <Drawer open={drawer === "charts"} title="Your trends over time" titleId="np-drawer-charts" onClose={() => setDrawer(null)}>
-        <div className="np-card np-chartcard">
-          <div className="np-charttitle">Total points over time</div>
-          <div className="np-chartsub">From your starting scores through every graded attempt.</div>
-          {linePoints.length >= 2 ? (
-            <LineChart values={linePoints} yMax={1050} />
-          ) : (
-            <p className="np-statsub">Answer a practice problem to start the trend line.</p>
-          )}
-        </div>
-        <div className="np-card np-chartcard">
-          <div className="np-charttitle">Points gained and lost</div>
-          <div className="np-chartsub">Each bar is one graded attempt: above the line when your reasoning earned points, below it when it cost them.</div>
-          {barItems.length >= 1 ? (
-            <BarChart items={barItems} />
-          ) : (
-            <p className="np-statsub">No graded attempts yet.</p>
-          )}
-        </div>
+        {/* Mount (and fetch) only when the drawer is open — the trend series is Pro-gated. */}
+        {drawer === "charts" && <TrendCharts loadTrends={loadTrends} />}
       </Drawer>
 
       <Drawer open={drawer === "reviews"} title="Review your answers" titleId="np-drawer-reviews" onClose={() => setDrawer(null)}>
@@ -683,6 +779,156 @@ export default function Dashboard({
                   {resetting ? (confirmAction === "delete" ? "Deleting…" : "Resetting…") : "Yes"}
                 </button>
               </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {/* EU withdrawal (CRD Art. 11a): confirm → terminate immediately + pro-rata refund →
+          on-screen durable confirmation. Distinct from "cancel" (period-end). */}
+      {withdrawPhase !== "idle" &&
+        createPortal(
+          <div
+            className="np-modal-backdrop"
+            onClick={() => { if (withdrawPhase !== "busy") setWithdrawPhase("idle"); }}
+          >
+            <div
+              className="np-surface-elevated np-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="np-withdraw-title"
+              aria-describedby="np-withdraw-desc"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {withdrawPhase === "confirm" && (
+                <>
+                  <div className="np-modal-spark" aria-hidden="true"><Icon name="refresh" size={22} /></div>
+                  <h2 id="np-withdraw-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+                    Withdraw from your subscription?
+                  </h2>
+                  <p id="np-withdraw-desc" className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
+                    This exercises your EU 14-day right of withdrawal: your Pro subscription ends{" "}
+                    <strong>immediately</strong> and we refund the part of this month you haven&rsquo;t used (a
+                    proportionate amount is kept for the time already provided). This is different from
+                    cancelling, which keeps Pro until the period ends.
+                  </p>
+                  <div className="np-modal-actions">
+                    <button
+                      ref={withdrawCancelRef}
+                      className="np-btn np-secondary"
+                      onClick={() => setWithdrawPhase("idle")}
+                    >
+                      Keep my subscription
+                    </button>
+                    <button
+                      className="np-btn np-danger"
+                      onClick={async () => {
+                        setWithdrawPhase("busy");
+                        try {
+                          const res = await onWithdraw?.();
+                          setWithdrawResult(res || {});
+                          setWithdrawPhase("done");
+                        } catch (e) {
+                          setWithdrawError((e && e.message) || "Could not complete your withdrawal. Please try again.");
+                          setWithdrawPhase("error");
+                        }
+                      }}
+                    >
+                      Confirm withdrawal
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {withdrawPhase === "busy" && (
+                <>
+                  <h2 id="np-withdraw-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+                    Processing your withdrawal…
+                  </h2>
+                  <p id="np-withdraw-desc" className="np-statsub" style={{ textAlign: "center", margin: 0 }}>
+                    Cancelling your subscription and issuing your refund.
+                  </p>
+                </>
+              )}
+
+              {withdrawPhase === "done" && (
+                <>
+                  <div className="np-modal-spark" aria-hidden="true"><Icon name="shield" size={22} /></div>
+                  <h2 id="np-withdraw-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+                    Withdrawal confirmed
+                  </h2>
+                  <div id="np-withdraw-desc" className="np-fineprint" style={{ textAlign: "left", margin: "0 0 18px", lineHeight: 1.6 }}>
+                    <p style={{ margin: "0 0 8px" }}>
+                      You withdrew from your noobtopro Pro subscription on{" "}
+                      <strong>
+                        {withdrawResult?.withdrawnAt ? new Date(withdrawResult.withdrawnAt).toLocaleString() : new Date().toLocaleString()}
+                      </strong>
+                      . Your Pro access has ended and you won&rsquo;t be charged again.
+                    </p>
+                    <p style={{ margin: 0 }}>
+                      {withdrawResult?.refund?.status === "issued"
+                        ? `A pro-rata refund of ${fmtMoney(withdrawResult.refund.amountMinor, withdrawResult.refund.currency)} is being returned to your original payment method via Polar.`
+                        : withdrawResult?.refund?.status === "pending_manual"
+                        ? "Your pro-rata refund is being processed and will be returned to your original payment method shortly."
+                        : "No refund is due (the current period was already fully used)."}
+                    </p>
+                  </div>
+                  <div className="np-modal-actions">
+                    {/* CRD Art. 11a durable-medium acknowledgement of receipt — saved as a file the
+                        consumer keeps (also emailed where the mailer is configured). */}
+                    {withdrawResult?.acknowledgement && (
+                      <button
+                        className="np-btn np-secondary"
+                        onClick={() => {
+                          try {
+                            const blob = new Blob([withdrawResult.acknowledgement], { type: "text/plain" });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement("a");
+                            a.href = url;
+                            a.download = "noobtopro-withdrawal-confirmation.txt";
+                            document.body.appendChild(a);
+                            a.click();
+                            a.remove();
+                            URL.revokeObjectURL(url);
+                          } catch {
+                            /* download blocked — the on-screen text + email remain */
+                          }
+                        }}
+                      >
+                        Download confirmation
+                      </button>
+                    )}
+                    {typeof window !== "undefined" && typeof window.print === "function" && (
+                      <button className="np-btn np-secondary" onClick={() => window.print()}>
+                        Print / save
+                      </button>
+                    )}
+                    <button className="np-btn np-primary" onClick={() => setWithdrawPhase("idle")}>
+                      Done
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {withdrawPhase === "error" && (
+                <>
+                  <div className="np-modal-spark" aria-hidden="true"><Icon name="x" size={22} /></div>
+                  <h2 id="np-withdraw-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+                    Withdrawal didn&rsquo;t go through
+                  </h2>
+                  <p id="np-withdraw-desc" className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
+                    {withdrawError || "Could not complete your withdrawal. Please try again."}
+                  </p>
+                  <div className="np-modal-actions">
+                    <button className="np-btn np-secondary" onClick={() => setWithdrawPhase("idle")}>
+                      Close
+                    </button>
+                    <button className="np-btn np-primary" onClick={() => setWithdrawPhase("confirm")}>
+                      Try again
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>,
           document.body

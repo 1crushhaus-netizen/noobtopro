@@ -661,3 +661,18 @@ describe("POST /api/grade — global Groq budget (audit P2-3)", () => {
     }
   });
 });
+
+describe("POST /api/grade — content-safety: subject comment redaction", () => {
+  it("redacts an unsafe model comment in the diagnostic grade response (the feedback fields already are)", async () => {
+    mockGroqReturning({ subject: "math", score: 50, rubric: RUBRIC_50, weakConcepts: [], comment: "your work here is a blowjob" });
+    const res = await POST(req({ kind: "diagnostic", subject: "math", question: "Q", reasoning: REASONING }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).comment).toBe("(removed for safety)");
+  });
+
+  it("passes a normal STEM comment through unchanged", async () => {
+    mockGroqReturning({ subject: "math", score: 50, rubric: RUBRIC_50, weakConcepts: [], comment: "Sound setup; the chain rule was applied correctly." });
+    const res = await POST(req({ kind: "diagnostic", subject: "math", question: "Q", reasoning: REASONING }));
+    expect((await res.json()).comment).toBe("Sound setup; the chain rule was applied correctly.");
+  });
+});

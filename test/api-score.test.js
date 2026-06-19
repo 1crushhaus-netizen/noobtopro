@@ -13,8 +13,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 // lib/scoring, so the expected values are computed with the same functions the
 // route uses (robust to constant tuning).
 // ---------------------------------------------------------------------------
-const auth = vi.hoisted(() => ({ requireUser: vi.fn() }));
-vi.mock("@/lib/adminAuth", () => ({ requireUser: (...a) => auth.requireUser(...a) }));
+const auth = vi.hoisted(() => ({ requireUser: vi.fn(), isAgeVerified: vi.fn(() => true) }));
+vi.mock("@/lib/adminAuth", () => ({
+  requireUser: (...a) => auth.requireUser(...a),
+  isAgeVerified: (...a) => auth.isAgeVerified(...a),
+}));
 
 const storage = vi.hoisted(() => ({ getAdmin: vi.fn(() => null) }));
 vi.mock("@/lib/supabaseAdmin", () => ({ getSupabaseAdmin: () => storage.getAdmin() }));
@@ -200,6 +203,8 @@ beforeEach(() => {
   delete process.env.GLOBAL_GROQ_BUDGET_AUTH_PER_MIN; // Finding 3: practice charges the AUTH pool
   _resetRateLimits();
   auth.requireUser.mockReset();
+  auth.isAgeVerified.mockReset();
+  auth.isAgeVerified.mockReturnValue(true);
   inject.reportInjection.mockReset();
   inject.reportInjection.mockReturnValue({ flagged: false, severity: null, matches: [] });
   storage.getAdmin.mockReset();
@@ -248,6 +253,17 @@ describe("POST /api/score practice — authentication", () => {
     vi.stubGlobal("fetch", failFetch);
     const res = await POST(req({ kind: "practice", token: tok(), reasoning: REASONING }, { authHeader: true }));
     expect(res.status).toBe(401);
+    expect(failFetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects an age-UNVERIFIED account with 403 before any Groq call (adults-only 18+ gate)", async () => {
+    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
+    auth.isAgeVerified.mockReturnValue(false);
+    const failFetch = vi.fn(() => { throw new Error("must not call Groq"); });
+    vi.stubGlobal("fetch", failFetch);
+    const res = await POST(req({ kind: "practice", token: tok(), reasoning: REASONING }, { authHeader: true }));
+    expect(res.status).toBe(403);
+    expect((await res.json()).ageRequired).toBe(true);
     expect(failFetch).not.toHaveBeenCalled();
   });
 

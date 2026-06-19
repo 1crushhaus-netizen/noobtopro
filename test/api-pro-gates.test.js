@@ -7,8 +7,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 // Both only bite when Pro is actually SELLABLE (lib/polar#proIsAvailable) — we mock that
 // flag here. requireUser / getSupabaseAdmin / abuseDetection are mocked at the boundary.
 // ---------------------------------------------------------------------------
-const auth = vi.hoisted(() => ({ requireUser: vi.fn() }));
-vi.mock("@/lib/adminAuth", () => ({ requireUser: (...a) => auth.requireUser(...a) }));
+const auth = vi.hoisted(() => ({ requireUser: vi.fn(), isAgeVerified: vi.fn(() => true) }));
+vi.mock("@/lib/adminAuth", () => ({
+  requireUser: (...a) => auth.requireUser(...a),
+  isAgeVerified: (...a) => auth.isAgeVerified(...a),
+}));
 
 const storage = vi.hoisted(() => ({ getAdmin: vi.fn(() => null) }));
 vi.mock("@/lib/supabaseAdmin", () => ({ getSupabaseAdmin: () => storage.getAdmin() }));
@@ -81,6 +84,8 @@ const OLD_SECRET = process.env.QUESTION_TOKEN_SECRET;
 beforeEach(() => {
   _resetRateLimits();
   auth.requireUser.mockReset();
+  auth.isAgeVerified.mockReset();
+  auth.isAgeVerified.mockReturnValue(true);
   storage.getAdmin.mockReset().mockReturnValue(null);
   polarMock.proIsAvailable.mockReset().mockReturnValue(true);
   process.env.QUESTION_TOKEN_SECRET = "pro-gate-test-secret";

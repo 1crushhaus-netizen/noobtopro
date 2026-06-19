@@ -3,13 +3,15 @@
 import React, { useState } from "react";
 import Icon from "@/components/Icon";
 
-// P0-10: a neutral, one-time age screen shown right after sign-up (account creation),
-// before the signed-in app is usable. Self-declared date of birth (the standard COPPA
-// "neutral age screen"): a user below MIN_AGE is blocked with parental-consent messaging
-// and signed out; at/above it, the parent records the acknowledgement on the account so
-// it's never asked again. Guests (local-only data) are not gated — this fires only once a
-// real account exists.
-const MIN_AGE = 13;
+// A neutral, one-time age screen. noobtopro is an adults-only service: a user must
+// self-declare a date of birth of MIN_AGE or older to continue. Anyone below MIN_AGE is
+// blocked; at/above it the acknowledgement is recorded so it's never asked again.
+//   * Signed-in users: shown right after sign-up; the verdict is recorded SERVER-side
+//     (app_metadata.age_verified) and the underage action signs them out.
+//   * Guests: shown the first time they enter the service; the ack is recorded CLIENT-side
+//     (localStorage) and the underage action just returns them home. Pass `guest` so the
+//     copy reads correctly (no "Sign out" for someone who never signed in).
+const MIN_AGE = 18;
 
 function ageFromISO(iso) {
   if (!iso) return null;
@@ -30,7 +32,7 @@ const wrap = {
   padding: "24px",
 };
 
-export default function AgeGate({ onConfirm, onUnderage }) {
+export default function AgeGate({ onConfirm, onUnderage, guest = false }) {
   const [dob, setDob] = useState("");
   const [err, setErr] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -51,7 +53,7 @@ export default function AgeGate({ onConfirm, onUnderage }) {
     }
     setSubmitting(true);
     try {
-      await onConfirm?.({ birthYear: new Date(dob + "T00:00:00Z").getUTCFullYear() });
+      await onConfirm?.({ dob, birthYear: new Date(dob + "T00:00:00Z").getUTCFullYear() });
       // On success the parent records the ack and unmounts this gate.
     } catch (e2) {
       setErr((e2 && e2.message) || "Couldn't save that. Please try again.");
@@ -64,15 +66,15 @@ export default function AgeGate({ onConfirm, onUnderage }) {
       <div style={wrap}>
         <div className="np-surface-elevated np-modal" role="dialog" aria-modal="true" aria-labelledby="np-age-blk-title">
           <div className="np-modal-spark" aria-hidden="true"><Icon name="lock" size={22} /></div>
-          <h2 id="np-age-blk-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
-            Ask a parent or guardian
-          </h2>
+          <h1 id="np-age-blk-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+            For ages {MIN_AGE} and over
+          </h1>
           <p className="np-lede" style={{ textAlign: "center", margin: "0 auto 22px" }}>
-            noobtopro is for ages {MIN_AGE} and up. Please ask a parent or guardian to set it up
-            together with you.
+            noobtopro is an adults-only service for ages {MIN_AGE} and over. Please come back
+            once you&rsquo;re {MIN_AGE}.
           </p>
           <button className="np-btn np-secondary np-btn--block" onClick={() => onUnderage?.()}>
-            <Icon name="login" size={16} /> Sign out
+            <Icon name={guest ? "back" : "login"} size={16} /> {guest ? "Back to home" : "Sign out"}
           </button>
         </div>
       </div>
@@ -81,11 +83,11 @@ export default function AgeGate({ onConfirm, onUnderage }) {
 
   return (
     <div style={wrap}>
-      <form className="np-surface-elevated np-modal" onSubmit={submit} aria-labelledby="np-age-title">
+      <form className="np-surface-elevated np-modal" onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="np-age-title">
         <div className="np-modal-spark" aria-hidden="true"><Icon name="spark" size={22} /></div>
-        <h2 id="np-age-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
+        <h1 id="np-age-title" className="np-h2" style={{ textAlign: "center", margin: "0 0 8px" }}>
           One quick thing
-        </h2>
+        </h1>
         <p className="np-lede" style={{ textAlign: "center", margin: "0 auto 20px" }}>
           Enter your date of birth to continue. We use this only to confirm your age.
         </p>

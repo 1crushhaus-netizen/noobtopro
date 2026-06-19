@@ -41,7 +41,7 @@ public spaces.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the project maintainer at **1crushhaus@gmail.com**. All complaints
+reported to the project maintainer at **russellrozario@noobto.pro**. All complaints
 will be reviewed and investigated promptly and fairly, and the maintainer will
 respect the privacy and security of the reporter. Maintainers may remove, edit,
 or reject contributions that do not align with this Code, and may temporarily or

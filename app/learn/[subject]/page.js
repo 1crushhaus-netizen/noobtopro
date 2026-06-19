@@ -9,7 +9,7 @@ import {
   WEBSITE_ID,
   isPublicSubject,
   subjectLabel,
-  subjectColor,
+  subjectTextColor,
   subjectUrl,
   rankUrl,
   conceptUrl,
@@ -47,7 +47,7 @@ export default async function SubjectHub({ params }) {
 
   const nonce = (await headers()).get("x-nonce") || undefined;
   const label = subjectLabel(subject);
-  const color = subjectColor(subject);
+  const color = subjectTextColor(subject);
   const ranks = subjectRanks(subject);
   const count = subjectConceptCount(subject);
 

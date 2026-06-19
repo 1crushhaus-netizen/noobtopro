@@ -6,7 +6,7 @@ import Breadcrumbs from "@/components/learn/Breadcrumbs";
 import {
   isPublicCell,
   subjectLabel,
-  subjectColor,
+  subjectTextColor,
   subjectUrl,
   rankUrl,
   conceptUrl,
@@ -48,7 +48,7 @@ export default async function RankCell({ params }) {
 
   const nonce = (await headers()).get("x-nonce") || undefined;
   const label = subjectLabel(subject);
-  const color = subjectColor(subject);
+  const color = subjectTextColor(subject);
   const concepts = conceptsFor(subject, rank);
   const strands = conceptsByStrand(subject, rank);
   const count = concepts.length;

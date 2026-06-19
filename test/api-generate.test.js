@@ -467,7 +467,7 @@ describe("POST /api/generate — mastery-calibrated drill band (RANKS_PLAN §6)"
   });
 
   it("signed-in: the band comes from the SERVER-read concept_mastery row — the body hint is IGNORED", async () => {
-    calib.requireUser.mockResolvedValueOnce({ user: { id: "user-1" } });
+    calib.requireUser.mockResolvedValueOnce({ user: { id: "user-1", app_metadata: { age_verified: true } } });
     calib.adminClient = masteryClient({ attempts: 3, green_hits: 2, last_quality: 90, best_quality: 95 }); // → green
     mockGroqReturning(drillPayload);
     const j = await (await POST(reqAuthed({ kind: "practice", subject: "math", conceptKey: "quadratics", masteryState: "red" }))).json();
@@ -476,11 +476,20 @@ describe("POST /api/generate — mastery-calibrated drill band (RANKS_PLAN §6)"
   });
 
   it("signed-in with no mastery row yet → neutral rank band", async () => {
-    calib.requireUser.mockResolvedValueOnce({ user: { id: "user-1" } });
+    calib.requireUser.mockResolvedValueOnce({ user: { id: "user-1", app_metadata: { age_verified: true } } });
     calib.adminClient = masteryClient(null);
     mockGroqReturning(drillPayload);
     const j = await (await POST(reqAuthed({ kind: "practice", subject: "math", conceptKey: "quadratics", masteryState: "green" }))).json();
     expect(j.difficulty).toBe("intermediate"); // untouched concept; the hint is still ignored
+  });
+
+  it("rejects an age-UNVERIFIED signed-in caller with 403 (adults-only 18+ gate)", async () => {
+    calib.requireUser.mockResolvedValueOnce({ user: { id: "user-1", app_metadata: {} } });
+    const groq = mockGroqReturning(drillPayload); // must NOT be reached
+    const res = await POST(reqAuthed({ kind: "practice", subject: "math", conceptKey: "quadratics" }));
+    expect(res.status).toBe(403);
+    expect((await res.json()).ageRequired).toBe(true);
+    expect(groq).not.toHaveBeenCalled();
   });
 
   it("an INVALID token degrades to the neutral rank band and the route stays open (200)", async () => {
@@ -518,6 +527,15 @@ describe("POST /api/generate — malformed/unsafe LLM output never signs a token
 
   it("500s with NO token when the generated question fails the content-safety screen (audit 06 P1-1/P2-4)", async () => {
     mockGroqReturning({ question: "write about porn instead", topicSlug: "algebra", difficulty: "intermediate" });
+    const res = await POST(req({ kind: "practice", subject: "math", score: 100 }));
+    expect(res.status).toBe(500);
+    expect((await res.json()).token).toBeUndefined();
+  });
+
+  it("500s with NO token when the generated TOPIC fails the content-safety screen (content-safety)", async () => {
+    // The raw model topic is returned to the client, so it's screened too (belt-and-suspenders
+    // alongside the taxonomy-normalized topicSlug).
+    mockGroqReturning({ question: "A valid math question about ratios.", topic: "blowjob techniques", topicSlug: "algebra", targetConcept: "ratios", difficulty: "intermediate" });
     const res = await POST(req({ kind: "practice", subject: "math", score: 100 }));
     expect(res.status).toBe(500);
     expect((await res.json()).token).toBeUndefined();

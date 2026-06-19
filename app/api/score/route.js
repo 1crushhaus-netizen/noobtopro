@@ -55,7 +55,7 @@ import { preGradeDock, injectionDock } from "@/lib/preGrade";
 import { checkRateLimit, clientKey, chargeGlobalGroq, refundGlobalGroq, refundRateLimit } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType, readJsonLimited, MAX_BODY_BYTES_IMAGE } from "@/lib/requestGuard";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireUser } from "@/lib/adminAuth";
+import { requireUser, isAgeVerified } from "@/lib/adminAuth";
 import { isProUserId } from "@/lib/entitlements";
 import { proIsAvailable } from "@/lib/polar";
 import { reportInjection, reportRateLimit, shouldDockForInjection } from "@/lib/abuseDetection";
@@ -187,6 +187,16 @@ async function handlePractice(req, body) {
   const auth = await requireUser(req);
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const uid = auth.user.id;
+
+  // Adults-only gate (server-authoritative): graded practice requires a verified 18+
+  // account. The flag lives in app_metadata (set only by /api/account/age after a
+  // server-side age check), so this can't be self-granted from the client.
+  if (!isAgeVerified(auth.user)) {
+    return NextResponse.json(
+      { error: "Please confirm you are 18 or older to continue.", ageRequired: true },
+      { status: 403 }
+    );
+  }
 
   // Pro entitlement (Polar.sh): unlocks UNLIMITED graded practice + photo-of-work
   // grading. Resolved once here; deny-by-default — with no entitlement store configured
@@ -857,7 +867,11 @@ async function handleDiagnosticStep(req, body) {
       s: reasoningScore,
       r: rubric,
       w: resolveWeakConcepts(item.subject, checked?.weakConcepts),
-      c: typeof checked?.comment === "string" ? checked.comment.slice(0, 280) : "",
+      // Safety-screen the model-authored "what your reasoning showed" comment AT THE SOURCE,
+      // before it's folded into the signed transcript → persisted → shown (and carried forward
+      // to later practice). The feedback fields are already redacted; the subject comment was
+      // the remaining unscreened model output (content-safety: expanded lexicon).
+      c: redactUnsafe(typeof checked?.comment === "string" ? checked.comment.slice(0, 280) : ""),
     };
     const transcript = [...st.transcript, entry];
     const graded = { subject: item.subject, difficulty: item.band, reasoningScore };
