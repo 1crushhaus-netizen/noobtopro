@@ -44,7 +44,7 @@ const ENGINE = [
   ["shield", "Built to resist gaming",
     "Jargon-salad scores single digits. Farming one topic damps your gains. Scoring is server-authoritative over a tamper-proof, signed step chain, so you can’t forge a grade or skip a step."],
   ["clip", "Photo-of-work grading",
-    "Snap a photo of your handwritten solution. A vision model reads your steps and grades the reasoning, with a graceful text fallback. One free photo grade on your diagnostic; unlimited with Pro for practice."],
+    "Snap a photo of your handwritten solution. A vision model reads your steps and grades the reasoning, with a graceful text fallback. Available with Pro."],
   ["bulb", "Learn, don’t leak",
     "Stuck? It won’t hand you the answer; it asks the right question and teaches the one concept you’re missing, with the proof or derivation behind it."],
 ];
@@ -147,7 +147,7 @@ const FAQ = [
       ["Is using noobtopro cheating?",
         "It is the opposite of a cheat tool. It grades and teaches your reasoning, will not reveal answers before you try, and rewards understanding over recall. It is built for learning the material, not getting around it."],
       ["Can I submit a photo of my work?",
-        "Yes — once on your free diagnostic, and unlimited with Pro for practice. Snap a photo of your handwritten solution and a vision model reads and grades your steps, with a text fallback if the photo does not come through."],
+        "Yes, with Pro. Photo-of-work grading is a Pro feature — snap a photo of your handwritten solution and a vision model reads and grades your steps. Free and guest answers are graded from your typed reasoning, with the same nine-axis rubric."],
     ],
   },
   {

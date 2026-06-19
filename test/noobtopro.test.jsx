@@ -53,6 +53,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   vi.clearAllMocks();
 });
 
@@ -326,6 +327,27 @@ describe("Noobtopro — skip-lock is immune to keystrokes (audit P2-15)", () => 
     expect(skip().disabled).toBe(false);
 
     vi.useRealTimers();
+  });
+});
+
+describe("Noobtopro — photo-of-work attach is gated to Pro (guests + free can't attach)", () => {
+  it("a non-Pro user (Pro sellable) gets a Pro upgrade nudge instead of the file picker", async () => {
+    // With Pro sellable, the server 402s a non-Pro image; the client must not even let
+    // a non-Pro photo be selected (it otherwise dead-ended the diagnostic on a loop).
+    vi.stubEnv("NEXT_PUBLIC_PRO_ENABLED", "true");
+    mockAdaptiveServer({ scoresPayload: {} });
+    const { container } = render(<Noobtopro />);
+    fireEvent.click(await screen.findByRole("button", { name: /prove it/i }));
+    await screen.findByText(DIAGNOSTIC_ORDER[0]);
+
+    // No file input is rendered, so a non-Pro photo can never be selected or sent.
+    expect(container.querySelector('input[type="file"]')).toBeNull();
+
+    // The control is a clear, Pro-gated upgrade affordance — clicking it nudges to
+    // upgrade rather than opening a picker.
+    const attach = screen.getByRole("button", { name: /attach your work.*pro/i });
+    fireEvent.click(attach);
+    expect(await screen.findByText(/photo-of-work grading is a pro feature/i)).toBeTruthy();
   });
 });
 
