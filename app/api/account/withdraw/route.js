@@ -36,21 +36,20 @@ import { reportRateLimit } from "@/lib/abuseDetection";
 
 export const dynamic = "force-dynamic";
 
-// The newest PAID order for a subscription (the current paid period we pro-rate against).
-// Reads just the first page of orders.list (newest-first); returns null if none/unavailable.
-async function latestPaidOrder(polar, subscriptionId) {
+// The PAID orders for a subscription, NEWEST-FIRST (first page only — ample for both
+// pro-rating the current period [index 0] and the contract-start fallback anchor [last]).
+// Returns [] if none/unavailable.
+async function paidOrders(polar, subscriptionId) {
   try {
     const iter = await polar.orders.list({ subscriptionId, sorting: ["-created_at"], limit: 20 });
     for await (const page of iter) {
       const items = (page && page.result && page.result.items) || [];
-      const paid = items.filter((o) => o && o.paid);
-      if (paid.length) return paid[0];
-      break; // first page is newest-first; one page is enough
+      return items.filter((o) => o && o.paid); // first page is newest-first; one page is enough
     }
   } catch (e) {
     console.error("[/api/account/withdraw] orders.list failed", e);
   }
-  return null;
+  return [];
 }
 
 export async function POST(req) {
@@ -106,7 +105,18 @@ export async function POST(req) {
     );
   }
 
-  // The 14-day window, anchored on the latest recorded Art. 16(a) consent (= contract start).
+  const subId = subRow.polar_subscription_id;
+  const now = new Date();
+
+  // Paid orders (newest-first), fetched once: orders[0] is the current paid period we pro-rate
+  // against; the OLDEST is the contract-start fallback anchor used just below.
+  const orders = await paidOrders(polar, subId);
+  const order = orders[0] || null;
+
+  // The 14-day window is anchored on the contract start. PRIMARY anchor: the latest recorded
+  // Art. 16(a) consent row. If a checkout-time audit-write hiccup left that row missing, fall
+  // back to the subscription's FIRST paid order date (Polar's source of truth), so a DB glitch
+  // can never silently void the customer's statutory withdrawal right.
   const { data: consentRow } = await admin
     .from("billing_audit")
     .select("created_at")
@@ -115,7 +125,9 @@ export async function POST(req) {
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  const anchor = consentRow && consentRow.created_at;
+  const anchor =
+    (consentRow && consentRow.created_at) ||
+    (orders.length ? orders[orders.length - 1].createdAt : null);
   if (!isWithinWithdrawalWindow(anchor)) {
     return NextResponse.json(
       {
@@ -126,17 +138,19 @@ export async function POST(req) {
     );
   }
 
-  const subId = subRow.polar_subscription_id;
-  const now = new Date();
-
-  // Compute the pro-rata refund from the latest paid order BEFORE revoking (revoking
-  // doesn't change past orders, but we want the amount even if revoke is the failure point).
-  const order = await latestPaidOrder(polar, subId);
+  // Compute the pro-rata refund from the latest paid order BEFORE revoking (revoking doesn't
+  // change past orders, but we want the amount even if revoke is the failure point).
   let refundMinor = 0;
   let currency = null;
   if (order) {
     currency = order.currency || null;
-    const periodEnd = subRow.current_period_end || new Date(new Date(order.createdAt).getTime() + 30 * 24 * 60 * 60 * 1000);
+    // Guard an absent/inverted period end (a NULL or pre-start value would yield a nonsensical
+    // ratio): fall back to a 30-day period from the order date. Polar's cap still bounds it.
+    const start = new Date(order.createdAt).getTime();
+    let periodEnd = subRow.current_period_end ? new Date(subRow.current_period_end) : null;
+    if (!periodEnd || !Number.isFinite(periodEnd.getTime()) || periodEnd.getTime() <= start) {
+      periodEnd = new Date(start + 30 * 24 * 60 * 60 * 1000);
+    }
     const computed = proRataRefundMinor(order.netAmount, order.createdAt, periodEnd, now);
     // Never ask Polar to refund more than it says is still refundable on this order.
     const cap = Number.isFinite(order.refundableAmount) ? order.refundableAmount : computed;

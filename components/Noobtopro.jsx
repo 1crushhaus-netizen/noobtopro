@@ -18,7 +18,7 @@ import {
 import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData, deleteAccount as requestAccountDeletion, submitAgeVerification, hasGuestAgeAck, recordGuestAgeAck, clearGuestAgeAck, exportMyData, loadReviews, loadTrends, loadMastery, loadSubscription, withdrawFromContract } from "@/lib/store";
 import { IMMEDIATE_ACCESS_CONSENT_TEXT, IMMEDIATE_ACCESS_CONSENT_VERSION } from "@/lib/consent";
 import { getSupabase, isSupabaseConfigured, signInWithProvider, signOutUser, PROVIDERS } from "@/lib/supabase";
-import { track } from "@vercel/analytics";
+import { track } from "@/lib/analytics";
 import { isActiveSubscription } from "@/lib/proStatus";
 import { resolveConceptKey, conceptByKey, conceptLabel } from "@/lib/curriculum";
 import { effectiveScores, effectiveSubjectScore, pickPracticeConcept } from "@/lib/promotion";

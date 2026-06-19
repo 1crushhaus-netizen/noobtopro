@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Analytics } from "@vercel/analytics/next";
+import { CONSENT_STORAGE_KEY as STORAGE_KEY } from "@/lib/analytics";
 
 // ---------------------------------------------------------------------------
 // ConsentManager — EU/ePrivacy prior-consent gate for the NON-essential analytics.
@@ -26,7 +27,6 @@ import { Analytics } from "@vercel/analytics/next";
 // load in the root layout for everyone.
 // ---------------------------------------------------------------------------
 
-const STORAGE_KEY = "noobtopro:consent";
 export const OPEN_CONSENT_EVENT = "noobtopro:open-consent";
 
 function readStoredChoice() {

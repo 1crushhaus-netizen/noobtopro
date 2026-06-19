@@ -125,6 +125,42 @@ describe("POST /api/account/withdraw — EU 14-day withdrawal (CRD Art. 11a)", (
     expect(revoke).not.toHaveBeenCalled();
   });
 
+  it("falls back to the FIRST paid order date as the window anchor when the consent row is missing (a checkout audit-write hiccup must not void the statutory right)", async () => {
+    const now = Date.now();
+    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
+    const revoke = vi.fn(async () => ({ id: "sub_1" }));
+    const refundCreate = vi.fn(async () => ({ id: "ref_1" }));
+    storage.getAdmin.mockReturnValue(
+      fakeAdmin({
+        subRow: { status: "active", current_period_end: iso(now + 28 * DAY), polar_subscription_id: "sub_1" },
+        consentRow: null, // audit write failed at checkout → no consent anchor
+      }, [])
+    );
+    const order = { id: "ord_1", paid: true, netAmount: 999, refundableAmount: 999, createdAt: iso(now - 2 * DAY), currency: "eur" };
+    polar.getPolar.mockReturnValue(fakePolar({ orders: [order], revoke, refundCreate }));
+    const res = await withdrawPOST(req());
+    expect(res.status).toBe(200); // anchored on the order date (2 days ago) → still in-window
+    expect(revoke).toHaveBeenCalledWith({ id: "sub_1" });
+  });
+
+  it("still closes the window via the order-date fallback when the consent row is missing AND the order is old", async () => {
+    const now = Date.now();
+    auth.requireUser.mockResolvedValue({ user: { id: "u1" } });
+    const revoke = vi.fn(async () => ({}));
+    storage.getAdmin.mockReturnValue(
+      fakeAdmin({
+        subRow: { status: "active", current_period_end: iso(now + 10 * DAY), polar_subscription_id: "sub_1" },
+        consentRow: null,
+      })
+    );
+    const order = { id: "ord_1", paid: true, netAmount: 999, refundableAmount: 999, createdAt: iso(now - 20 * DAY), currency: "eur" };
+    polar.getPolar.mockReturnValue(fakePolar({ orders: [order], revoke, refundCreate: vi.fn() }));
+    const res = await withdrawPOST(req());
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("window_closed");
+    expect(revoke).not.toHaveBeenCalled();
+  });
+
   it("happy path: revokes immediately, issues the pro-rata refund, records the audit, returns the confirmation", async () => {
     const now = Date.now();
     const fx = activeFixtures(now);
