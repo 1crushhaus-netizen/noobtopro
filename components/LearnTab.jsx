@@ -427,7 +427,7 @@ function ConceptPage({ concept, state, stateFor, onOpen, onBack, onPractice, bus
 
       {/* A11y P1-5: this concept title was an <h2> styled as np-h1 — make it a real
           <h1> so the visual level matches the semantic level (one h1 per view). */}
-      <h1 className="np-h1" style={{ color }}>{label}</h1>
+      <h1 className="np-h1">{label}</h1>
 
       {/* The learner's standing on THIS concept (state also shown in text, not color alone). */}
       {state && state !== "grey" && (
@@ -518,8 +518,7 @@ function ConceptPage({ concept, state, stateFor, onOpen, onBack, onPractice, bus
         {onPractice ? (
           <button
             type="button"
-            className="np-btn np-primary np-btn--subject"
-            style={{ "--subject": color }}
+            className="np-btn np-primary"
             disabled={generating}
             onClick={() => onPractice({ ...concept, masteryState: state })}
           >

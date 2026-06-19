@@ -2251,7 +2251,7 @@ export default function Noobtopro() {
             )}
 
             {/* SCORING */}
-            {stage === "scoring" && <Loader subject="evaluating all three" />}
+            {stage === "scoring" && <Loader subject="scoring all three subjects" />}
 
             {/* DASHBOARD (subject scores) */}
             {stage === "dashboard" && scores && (
@@ -2350,7 +2350,7 @@ export default function Noobtopro() {
                             </div>
                           );
                         })()}
-                        <button className="np-btn np-secondary np-btn--block np-btn--subject" style={{ marginTop: 14, "--subject": SUBJECTS[k].color }} onClick={() => startPractice(k)}>
+                        <button className="np-btn np-secondary np-btn--block" style={{ marginTop: 14 }} onClick={() => startPractice(k)}>
                           Practice {SUBJECTS[k].label} <Icon name="arrow" size={15} />
                         </button>
                       </div>

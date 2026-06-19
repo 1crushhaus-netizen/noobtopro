@@ -137,7 +137,7 @@ function KpiStats({ scores, attempts }) {
   return (
     <div className="np-dash-kpis">
       <div className="np-card np-lift np-statcard">
-        <span className="np-eyebrow np-eyebrow--xs">Doctorate index</span>
+        <span className="np-eyebrow np-eyebrow--xs" title="Your overall standing across all three subjects on the 0–350 scale.">Doctorate index</span>
         {/* Neutral ink like its siblings — the KPI is not a subject or a valence,
             so it gets no chromatic accent under the greyscale system. */}
         <span className="np-statnum">

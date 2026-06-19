@@ -44,7 +44,7 @@ const ENGINE = [
   ["shield", "Built to resist gaming",
     "Jargon-salad scores single digits. Farming one topic damps your gains. Scoring is server-authoritative over an HMAC-signed step chain, so you can’t forge a grade or skip a step."],
   ["clip", "Photo-of-work grading",
-    "Snap a photo of your handwritten solution. A vision model reads your steps and grades the reasoning, with a graceful text fallback. Free on your diagnostic, unlimited with Pro for practice."],
+    "Snap a photo of your handwritten solution. A vision model reads your steps and grades the reasoning, with a graceful text fallback. One free photo grade on your diagnostic; unlimited with Pro for practice."],
   ["bulb", "Learn, don’t leak",
     "Stuck? It won’t hand you the answer; it asks the right question and teaches the one concept you’re missing, with the proof or derivation behind it."],
 ];
@@ -73,7 +73,7 @@ const FREE_FEATURES = [
   "Full adaptive diagnostic + your 0–350 rank",
   "Anonymous leaderboard placement",
   "Every curated concept guide",
-  "~5 graded practice problems / day",
+  "Up to 5 graded practice problems / day",
   "Reasoning radar + typed feedback",
 ];
 const PRO_FEATURES = [
