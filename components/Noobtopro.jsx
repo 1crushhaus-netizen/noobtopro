@@ -364,7 +364,12 @@ const AnswerComposer = React.memo(function AnswerComposer({
       />
       {img && (
         <div style={{ padding: "0 16px 8px", display: "flex", alignItems: "center", gap: 10 }}>
-          <img src={img.preview} alt="your work" style={{ height: 56, borderRadius: 8, border: "1px solid var(--line)" }} />
+          {/* img.preview is a blob: URL we minted from the selected File via
+              URL.createObjectURL. encodeURI() is a no-op on a well-formed blob: URL but
+              percent-encodes any HTML meta-characters (< > "), so even a non-blob value
+              could never break out of the src attribute — defense-in-depth for the
+              user-supplied image preview (CWE-079, js/xss-through-dom). */}
+          <img src={encodeURI(img.preview)} alt="your work" style={{ height: 56, borderRadius: 8, border: "1px solid var(--line)" }} />
           <span style={{ fontSize: 13, color: "var(--muted)" }}>{img.name}</span>
           <button className="np-iconbtn" onClick={onRemoveImg} aria-label="remove image"><Icon name="x" size={15} /></button>
         </div>
