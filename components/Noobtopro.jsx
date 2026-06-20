@@ -17,7 +17,7 @@ import {
 } from "@/lib/scoring";
 import { loadState, saveProgress, resetAll, migrateGuestToAccount, deleteAllUserData, deleteAccount as requestAccountDeletion, submitAgeVerification, hasGuestAgeAck, recordGuestAgeAck, clearGuestAgeAck, exportMyData, loadReviews, loadTrends, loadMastery, loadSubscription, withdrawFromContract } from "@/lib/store";
 import { IMMEDIATE_ACCESS_CONSENT_TEXT, IMMEDIATE_ACCESS_CONSENT_VERSION } from "@/lib/consent";
-import { getSupabase, isSupabaseConfigured, signInWithProvider, signOutUser, PROVIDERS } from "@/lib/supabase";
+import { getSupabase, ensureSupabase, isSupabaseConfigured, signInWithProvider, signOutUser, PROVIDERS } from "@/lib/supabase";
 import { track } from "@/lib/analytics";
 import { isActiveSubscription } from "@/lib/proStatus";
 import { resolveConceptKey, conceptByKey, conceptLabel } from "@/lib/curriculum";
@@ -103,8 +103,16 @@ async function api(path, body) {
 // can verify the caller's identity from the JWT. Used by the authenticated routes:
 // the Admin tab (/api/admin/*) and server-authoritative scoring (/api/score), which
 // both re-verify the token on every call and never trust a client-supplied identity.
+// Resolve the browser Supabase client, loading the code-split @supabase/supabase-js bundle
+// on first use (ensureSupabase — see lib/supabase.js). Falls back to the synchronous
+// getSupabase() when ensureSupabase isn't present (e.g. a unit-test mock that only stubs
+// getSupabase), so behavior is identical in the app and in tests.
+async function resolveSupabase() {
+  return (await ensureSupabase?.()) ?? getSupabase();
+}
+
 async function authApi(path, body) {
-  const sb = getSupabase();
+  const sb = await resolveSupabase();
   let token = null;
   if (sb) {
     const { data } = await sb.auth.getSession();
@@ -820,80 +828,99 @@ export default function Noobtopro() {
   }
 
   useEffect(() => {
-    const sb = getSupabase();
     hydrate();
     refreshMastery(); // FRONTEND P1-2: fetch mastery once for both Dashboard + LearnTab
-    if (!sb) return;
-    sb.auth.getUser().then(({ data }) => {
-      const u = (data && data.user) || null;
-      setUser(u);
-      if (u) { checkAdmin(); refreshPro(); }
-    }).catch(() => setUser(null));
-    const { data: sub } = sb.auth.onAuthStateChange((event, session) => {
-      setUser((session && session.user) || null);
-      // Only reload data when the identity actually changes. TOKEN_REFRESHED /
-      // USER_UPDATED / INITIAL_SESSION fire routinely and would otherwise re-run
-      // hydrate mid-attempt (the mount call above already covers session restore).
-      if (event === "SIGNED_IN") {
-        setShowSaveModal(false);
-        setStage((p) => (p === "signin" ? "dashboard" : p)); // leave the sign-in menu
-        hydrate(); // migrates guest progress, then loads the account
-        checkAdmin(); // reveal the Admin tab if this account is an admin
-        refreshPro(); // load the account's Pro entitlement
-        refreshMastery(); // FRONTEND P1-2: load the account's per-concept mastery
-        // Resume a pending "Upgrade to Pro" the guest started before signing in (the
-        // purchase needs an account). authApi reads the token from the fresh session, so
-        // it works even before `user` state lands. Cleared so it fires exactly once.
-        try {
-          if (typeof window !== "undefined" && window.sessionStorage.getItem("noobtopro:pendingUpgrade")) {
-            window.sessionStorage.removeItem("noobtopro:pendingUpgrade");
-            openConsent(); // capture the Art. 16(a) consent before redirecting to Polar
-          }
-        } catch {}
-      } else if (event === "SIGNED_OUT") {
-        // Signing out abandons any in-progress diagnostic/practice. Free its image
-        // previews and clear the composer state, then drop to "intro" so the
-        // abandoned flow unmounts cleanly — without the explicit stage reset, a
-        // sign-out mid-diagnostic leaves stage="diagnostic" with no questions (a
-        // blank screen), since hydrate()'s no-data branch only resets dashboard/
-        // practice. hydrate() then loads the guest view (intro -> dashboard if the
-        // guest already has scores).
-        Object.values(answersRef.current || {}).forEach((a) => revokePreview(a && a.img));
-        revokePreview(pImgRef.current);
-        diagRun.current++; // supersede any in-flight diagnostic grade so it can't land a stale write
-        practiceRun.current++; // and any in-flight practice grade (so it can't write the prior identity's score into the guest store)
-        setBusy(false); // clear any busy left by a now-superseded in-flight grade
-        setAnswers({});
-        setQuestions([]);
-        setQi(0);
-        setPImg(null);
-        setPText("");
-        setPQuestion(null);
-        setFeedback(null);
-        setStage("intro");
-        setView("practice");
-        // Drop the prior user's in-memory copy of scores/history/learn IMMEDIATELY
-        // (defense-in-depth on shared devices). hydrate()'s no-data branch clears
-        // these too, but only after an awaited getSession() — that async gap leaves a
-        // sub-second window where the next person could click Learn/Progress and see
-        // the prior user's data. These synchronous resets close that window so the
-        // stale data can't render during the async hydrate.
-        setScores(null);
-        setHistory([]);
-        setScoreDelta(null);
-        setLearnConcept(null);
-        setMastery({}); // FRONTEND P1-2: drop the prior user's mastery coloring too
-        setIsAdmin(false); // hide the Admin tab immediately on sign-out
-        setSubscription(null); // drop the prior user's Pro entitlement
-        setUpgradeNudge(null);
-        // Clear the local guest blob on sign-out so the prior user's scores/weak
-        // concepts aren't exposed to the next person on a shared device.
-        resetAll();
-        hydrate();
-        refreshMastery(); // reload mastery for the now-guest (empty) session
-      }
-    });
-    return () => sub && sub.subscription && sub.subscription.unsubscribe();
+    let cancelled = false;
+    let unsubscribe = null;
+    // Wire the auth bootstrap (session restore + the onAuthStateChange listener) once the
+    // browser Supabase client is available. Extracted so it can run synchronously in tests
+    // (which mock getSupabase) and only after the dynamic import resolves in production
+    // (ensureSupabase) — the behavior is otherwise identical to wiring it inline on mount.
+    const wireAuth = (sb) => {
+      if (cancelled || !sb) return;
+      sb.auth.getUser().then(({ data }) => {
+        const u = (data && data.user) || null;
+        setUser(u);
+        if (u) { checkAdmin(); refreshPro(); }
+      }).catch(() => setUser(null));
+      const { data: sub } = sb.auth.onAuthStateChange((event, session) => {
+        setUser((session && session.user) || null);
+        // Only reload data when the identity actually changes. TOKEN_REFRESHED /
+        // USER_UPDATED / INITIAL_SESSION fire routinely and would otherwise re-run
+        // hydrate mid-attempt (the mount call above already covers session restore).
+        if (event === "SIGNED_IN") {
+          setShowSaveModal(false);
+          setStage((p) => (p === "signin" ? "dashboard" : p)); // leave the sign-in menu
+          hydrate(); // migrates guest progress, then loads the account
+          checkAdmin(); // reveal the Admin tab if this account is an admin
+          refreshPro(); // load the account's Pro entitlement
+          refreshMastery(); // FRONTEND P1-2: load the account's per-concept mastery
+          // Resume a pending "Upgrade to Pro" the guest started before signing in (the
+          // purchase needs an account). authApi reads the token from the fresh session, so
+          // it works even before `user` state lands. Cleared so it fires exactly once.
+          try {
+            if (typeof window !== "undefined" && window.sessionStorage.getItem("noobtopro:pendingUpgrade")) {
+              window.sessionStorage.removeItem("noobtopro:pendingUpgrade");
+              openConsent(); // capture the Art. 16(a) consent before redirecting to Polar
+            }
+          } catch {}
+        } else if (event === "SIGNED_OUT") {
+          // Signing out abandons any in-progress diagnostic/practice. Free its image
+          // previews and clear the composer state, then drop to "intro" so the
+          // abandoned flow unmounts cleanly — without the explicit stage reset, a
+          // sign-out mid-diagnostic leaves stage="diagnostic" with no questions (a
+          // blank screen), since hydrate()'s no-data branch only resets dashboard/
+          // practice. hydrate() then loads the guest view (intro -> dashboard if the
+          // guest already has scores).
+          Object.values(answersRef.current || {}).forEach((a) => revokePreview(a && a.img));
+          revokePreview(pImgRef.current);
+          diagRun.current++; // supersede any in-flight diagnostic grade so it can't land a stale write
+          practiceRun.current++; // and any in-flight practice grade (so it can't write the prior identity's score into the guest store)
+          setBusy(false); // clear any busy left by a now-superseded in-flight grade
+          setAnswers({});
+          setQuestions([]);
+          setQi(0);
+          setPImg(null);
+          setPText("");
+          setPQuestion(null);
+          setFeedback(null);
+          setStage("intro");
+          setView("practice");
+          // Drop the prior user's in-memory copy of scores/history/learn IMMEDIATELY
+          // (defense-in-depth on shared devices). hydrate()'s no-data branch clears
+          // these too, but only after an awaited getSession() — that async gap leaves a
+          // sub-second window where the next person could click Learn/Progress and see
+          // the prior user's data. These synchronous resets close that window so the
+          // stale data can't render during the async hydrate.
+          setScores(null);
+          setHistory([]);
+          setScoreDelta(null);
+          setLearnConcept(null);
+          setMastery({}); // FRONTEND P1-2: drop the prior user's mastery coloring too
+          setIsAdmin(false); // hide the Admin tab immediately on sign-out
+          setSubscription(null); // drop the prior user's Pro entitlement
+          setUpgradeNudge(null);
+          // Clear the local guest blob on sign-out so the prior user's scores/weak
+          // concepts aren't exposed to the next person on a shared device.
+          resetAll();
+          hydrate();
+          refreshMastery(); // reload mastery for the now-guest (empty) session
+        }
+      });
+      unsubscribe = () => sub && sub.subscription && sub.subscription.unsubscribe();
+    };
+    // PERF (Lighthouse "unused"/"legacy" JS): pull @supabase/supabase-js off the landing
+    // page's critical bundle by loading it via dynamic import (ensureSupabase) AFTER hydration.
+    // Tests stub only getSupabase (no ensureSupabase), so wire synchronously in that case.
+    if (typeof ensureSupabase === "function") {
+      ensureSupabase().then((sb) => wireAuth(sb));
+    } else {
+      wireAuth(getSupabase());
+    }
+    return () => {
+      cancelled = true;
+      if (unsubscribe) unsubscribe();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1027,7 +1054,7 @@ export default function Noobtopro() {
   async function confirmAge({ dob }) {
     if (user) {
       await submitAgeVerification(dob);
-      const sb = getSupabase();
+      const sb = await resolveSupabase();
       if (sb) {
         const { data } = await sb.auth.getUser();
         setUser((data && data.user) || user);

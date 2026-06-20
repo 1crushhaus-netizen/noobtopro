@@ -42,6 +42,17 @@ const nextConfig = {
   // Don't advertise the framework/version in an `X-Powered-By` response header
   // (defense-in-depth: removes a free fingerprinting signal for attackers).
   poweredByHeader: false,
+  experimental: {
+    // PERF (Lighthouse "Render-blocking requests", ~260ms on /): inline the page's
+    // CSS into a <style> tag in the SSR <head> instead of emitting a render-blocking
+    // <link rel="stylesheet"> that the browser must round-trip for before first paint.
+    // The whole app shares ONE ~13 KiB-gzip stylesheet (Tailwind v4 + the np-* design
+    // system), so inlining it removes that request from the critical path entirely and
+    // improves FCP/LCP with negligible HTML bloat. Next stamps the per-request CSP nonce
+    // (middleware.js) onto the injected <style>; style-src already allows 'unsafe-inline'
+    // (lib/csp.js), so this is CSP-safe.
+    inlineCss: true,
+  },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

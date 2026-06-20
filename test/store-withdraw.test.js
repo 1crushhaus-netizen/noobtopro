@@ -5,9 +5,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 // computation (from the latest recorded consent) and withdrawFromContract's server call.
 // A tailored Supabase mock (the shared store.test.js builder has no maybeSingle).
 const mocks = vi.hoisted(() => ({ session: null, db: {} }));
-vi.mock("@/lib/supabase", () => ({
-  isSupabaseConfigured: true,
-  getSupabase: () => ({
+vi.mock("@/lib/supabase", () => {
+  const build = () => ({
     auth: { getSession: async () => mocks.session },
     from: (table) => {
       const chain = {
@@ -22,8 +21,13 @@ vi.mock("@/lib/supabase", () => ({
       };
       return chain;
     },
-  }),
-}));
+  });
+  return {
+    isSupabaseConfigured: true,
+    getSupabase: build,
+    ensureSupabase: async () => build(),
+  };
+});
 
 import { loadSubscription, withdrawFromContract } from "@/lib/store";
 import { WITHDRAWAL_WINDOW_DAYS } from "@/lib/consent";

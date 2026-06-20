@@ -10,9 +10,8 @@ const mocks = vi.hoisted(() => ({
   db: {},
   calls: {}, // per-table captured args: { [table]: { select, eq:[], order:[], upsert:[] } }
 }));
-vi.mock("@/lib/supabase", () => ({
-  isSupabaseConfigured: true,
-  getSupabase: () => ({
+vi.mock("@/lib/supabase", () => {
+  const build = () => ({
     auth: { getSession: async () => mocks.session },
     rpc: mocks.rpc,
     // A chainable query builder matching supabase-js: select/eq/order return the
@@ -36,8 +35,13 @@ vi.mock("@/lib/supabase", () => ({
       };
       return chain;
     },
-  }),
-}));
+  });
+  return {
+    isSupabaseConfigured: true,
+    getSupabase: build,
+    ensureSupabase: async () => build(),
+  };
+});
 
 import { migrateGuestToAccount, deleteAllUserData, loadState, saveProgress, loadReviews, loadMastery } from "@/lib/store";
 

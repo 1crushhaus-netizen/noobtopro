@@ -45,6 +45,7 @@ mocks.makeClient = () => ({
 vi.mock("@/lib/supabase", () => ({
   isSupabaseConfigured: true,
   getSupabase: () => mocks.client,
+  ensureSupabase: async () => mocks.client,
 }));
 
 import { loadTopics, browsePublicConcepts, reportConcept } from "@/lib/catalog";
