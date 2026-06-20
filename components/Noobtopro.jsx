@@ -299,6 +299,11 @@ const AnswerComposer = React.memo(function AnswerComposer({
   onText,
   img,
   onAttach,
+  // Photo-of-work grading is a Pro feature (the server enforces it with a 402); when
+  // `canAttach` is false the control is replaced by an upgrade nudge so a non-Pro photo
+  // is never sent. `onUpgrade` opens that nudge.
+  canAttach = true,
+  onUpgrade,
   onRemoveImg,
   onSubmit,
   onSkip,
@@ -359,25 +364,48 @@ const AnswerComposer = React.memo(function AnswerComposer({
       />
       {img && (
         <div style={{ padding: "0 16px 8px", display: "flex", alignItems: "center", gap: 10 }}>
-          <img src={img.preview} alt="your work" style={{ height: 56, borderRadius: 8, border: "1px solid var(--line)" }} />
+          {/* img.preview is a blob: URL we minted from the selected File via
+              URL.createObjectURL. encodeURI() is a no-op on a well-formed blob: URL but
+              percent-encodes any HTML meta-characters (< > "), so even a non-blob value
+              could never break out of the src attribute — defense-in-depth for the
+              user-supplied image preview (CWE-079, js/xss-through-dom). */}
+          <img src={encodeURI(img.preview)} alt="your work" style={{ height: 56, borderRadius: 8, border: "1px solid var(--line)" }} />
           <span style={{ fontSize: 13, color: "var(--muted)" }}>{img.name}</span>
           <button className="np-iconbtn" onClick={onRemoveImg} aria-label="remove image"><Icon name="x" size={15} /></button>
         </div>
       )}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "10px 12px", borderTop: "1px solid var(--line)", background: "var(--tint-1)", flexWrap: "wrap" }}>
-        <button className="np-ghost" onClick={() => fileRef.current && fileRef.current.click()}><Icon name="clip" size={15} /> Attach your work</button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/*"
-          aria-label="Upload a photo of your work"
-          style={{ display: "none" }}
-          onChange={async (e) => {
-            const f = e.target.files && e.target.files[0];
-            if (f) await onAttach(f);
-            e.target.value = "";
-          }}
-        />
+        {canAttach ? (
+          <>
+            <button className="np-ghost" onClick={() => fileRef.current && fileRef.current.click()}><Icon name="clip" size={15} /> Attach your work</button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              aria-label="Upload a photo of your work"
+              style={{ display: "none" }}
+              onChange={async (e) => {
+                const f = e.target.files && e.target.files[0];
+                if (f) await onAttach(f);
+                e.target.value = "";
+              }}
+            />
+          </>
+        ) : (
+          // Gated: photo grading is Pro-only. A clear, non-dead affordance that opens
+          // the upgrade nudge instead of a file picker (no file input is rendered, so a
+          // non-Pro photo can't be selected or sent).
+          <button
+            type="button"
+            className="np-ghost"
+            onClick={() => onUpgrade && onUpgrade()}
+            aria-label="Attach your work — a Pro feature. Upgrade to Pro to attach a photo of your work."
+            title="Photo-of-work grading is a Pro feature"
+          >
+            <Icon name="clip" size={15} /> Attach your work
+            <span className="np-badge" style={{ marginLeft: 4 }}>Pro</span>
+          </button>
+        )}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
           {onSkip && (
             <button
@@ -475,6 +503,17 @@ export default function Noobtopro() {
   // the server mirrors this via lib/polar.js#proIsAvailable. The owner flips both on
   // together when going live (see MONETIZATION_PLAN.md).
   const proEnabled = process.env.NEXT_PUBLIC_PRO_ENABLED === "true";
+  // Photo-of-work grading is a Pro feature: the server 402s a non-Pro image (incl. on
+  // a diagnostic step). Mirror that on the client so guests + free users never trigger
+  // the attach control — a non-Pro photo otherwise dead-ended the diagnostic on a
+  // perpetual, misleading loader. When Pro isn't sellable in this deployment the server
+  // grades images for free, so attach stays available for everyone (and for the
+  // Pro-less test env, keeping the image-attach tests valid).
+  const canAttachWork = isPro || !proEnabled;
+  const onAttachUpgrade = useCallback(
+    () => setUpgradeNudge("Photo-of-work grading is a Pro feature — upgrade to Pro to attach a photo of your work."),
+    []
+  );
   const navScrolled = useScrolled(); // drives the shared TopNav condense-on-scroll
 
   const [questions, setQuestions] = useState([]);
@@ -1238,9 +1277,13 @@ export default function Noobtopro() {
         return;
       }
       if (e && (e.status === 402 || e.upgrade)) {
-        // Paywall hit mid-diagnostic: a retry can't succeed, so surface the upgrade
-        // path instead of an unwinnable "Try again" loop (audit P0-2).
+        // Paywall mid-diagnostic (e.g. a photo step for a non-Pro user). A retry can't
+        // succeed AND the step never completes — so besides the upgrade nudge, flag a
+        // FATAL state so the waiting card shows a clear "Restart diagnostic" instead of
+        // a perpetual, misleading loader (the reported "infinite loading status" loop).
         setUpgradeNudge(e.message || "You've reached a free-tier limit. Upgrade to Pro to keep going.");
+        setDiagFatal(true);
+        setDiagError(e.message || "This step needs Pro. Restart the diagnostic to finish, or upgrade to Pro.");
         return;
       }
       diagFailed.current.push({ q, a });
@@ -2233,6 +2276,8 @@ export default function Noobtopro() {
                   onText={setCurText}
                   img={curAns.img}
                   onAttach={attachCur}
+                  canAttach={canAttachWork}
+                  onUpgrade={onAttachUpgrade}
                   onRemoveImg={removeCurImg}
                   onSubmit={nextDiagnostic}
                   onSkip={skipDiagnostic}
@@ -2459,6 +2504,8 @@ export default function Noobtopro() {
                           onText={setPText}
                           img={pImg}
                           onAttach={attachP}
+                          canAttach={canAttachWork}
+                          onUpgrade={onAttachUpgrade}
                           onRemoveImg={onPracticeRemoveImg}
                           onSubmit={onPracticeSubmit}
                           onSkip={onPracticeSkip}
