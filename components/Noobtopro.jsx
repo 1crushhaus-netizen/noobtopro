@@ -533,6 +533,10 @@ export default function Noobtopro() {
   const [subscription, setSubscription] = useState(null);
   const [upgradeNudge, setUpgradeNudge] = useState(null);
   const [upgradeBusy, setUpgradeBusy] = useState(false);
+  // Synchronous in-flight guard for the money round-trips (checkout / portal). setState
+  // is async, so a fast double-click could fire two POSTs before `upgradeBusy` flips and
+  // disables the button — opening two Polar sessions. This ref flips synchronously.
+  const moneyInFlight = useRef(false);
   const [checkoutDone, setCheckoutDone] = useState(false);
   const isPro = isActiveSubscription(subscription);
   // CRD Art. 16(a) checkout-consent gate: the immediate-access dialog (shown before the
@@ -615,6 +619,11 @@ export default function Noobtopro() {
   // payloads awaiting the learner's "Try again".
   const diagFinal = useRef({});
   const diagFailed = useRef([]);
+  // A11y (WCAG 2.4.3 / 4.1.3): the diagnostic question subtree is keyed by `qi`, so
+  // advancing unmounts the focused control. After each advance we move focus to the
+  // new question prompt (a tabindex=-1 region) so keyboard users aren't dropped to
+  // the page top, and the prompt is also an aria-live region so SR users hear it.
+  const diagQRef = useRef(null);
   // Steps answered per subject (drives the progress pips), and the step-flow
   // error shown on the diagnostic waiting card (kept apart from the global
   // `error` banner so a recoverable step failure doesn't look fatal).
@@ -793,6 +802,8 @@ export default function Noobtopro() {
   // refuses a checkout without consent:true), so the express immediate-access request is
   // captured + audited before the sale.
   async function beginCheckout() {
+    if (moneyInFlight.current) return; // sync double-submit guard (see moneyInFlight)
+    moneyInFlight.current = true;
     setShowConsent(false);
     setUpgradeBusy(true);
     // Funnel analytics: the checkout POST is firing (covers both the signed-in path and
@@ -806,6 +817,7 @@ export default function Noobtopro() {
       }
       throw new Error("Could not start checkout. Please try again.");
     } catch (e) {
+      moneyInFlight.current = false;
       setUpgradeBusy(false);
       setError(e.message || "Could not start checkout. Please try again.");
     }
@@ -849,6 +861,8 @@ export default function Noobtopro() {
 
   // Open the Polar customer portal (manage payment / cancel / invoices) for a subscriber.
   async function openPortal() {
+    if (moneyInFlight.current) return; // sync double-submit guard (see moneyInFlight)
+    moneyInFlight.current = true;
     setUpgradeBusy(true);
     try {
       const data = await authApi("/api/portal", {});
@@ -858,6 +872,7 @@ export default function Noobtopro() {
       }
       throw new Error("Could not open subscription management. Please try again.");
     } catch (e) {
+      moneyInFlight.current = false;
       setUpgradeBusy(false);
       setError(e.message || "Could not open subscription management. Please try again.");
     }
@@ -1272,6 +1287,29 @@ export default function Noobtopro() {
     revokePreview(curAns.img);
     setAnswers((a) => ({ ...a, [curKey]: { ...a[curKey], img: null } }));
   }
+
+  // PERF (FRONTEND P1-1): stable handler identities for the memoized diagnostic
+  // AnswerComposer, mirroring the practice composer below. The raw handlers close
+  // over curKey/curQ/curAns/qi (fresh every render), which would defeat React.memo
+  // and re-render the composer mid-typing on any shell re-render. useStableCallback
+  // keeps the identity fixed while always invoking the LATEST closure via a ref, so
+  // there's no stale-state risk.
+  const onDiagText = useStableCallback(setCurText);
+  const onDiagAttach = useStableCallback(attachCur);
+  const onDiagRemoveImg = useStableCallback(removeCurImg);
+  const onDiagSubmit = useStableCallback(nextDiagnostic);
+  const onDiagSkip = useStableCallback(skipDiagnostic);
+
+  // A11y (WCAG 2.4.3 focus order / 4.1.3 status messages): on each advance the
+  // `qi`-keyed question subtree remounts, so move keyboard focus to the new prompt
+  // (rather than letting it fall to <body>). Skip the very first step so the page
+  // load doesn't yank focus from the top. The prompt's aria-live region handles the
+  // SR announcement; this restores a sensible focus position for keyboard users.
+  useEffect(() => {
+    if (stage !== "diagnostic" || !curQ || qi === 0) return;
+    diagQRef.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qi, stage]);
 
   // Submit the CURRENT step's answer: fire its grade in the background (the §8
   // walk's next item arrives with the grade) and advance immediately to the next
@@ -1963,6 +2001,8 @@ export default function Noobtopro() {
           onDismissError={onDismissError}
           showAuthNote={showAuthNote}
           onDismissAuthNote={onDismissAuthNote}
+          /* PERF: reuse the shell's scroll listener so Landing doesn't attach a second one. */
+          scrolled={navScrolled}
         />
         {resetToast}
       </>
@@ -2346,17 +2386,27 @@ export default function Noobtopro() {
                   </span>
                   {curQ.topic && <span className="np-topic">{curQ.topic}</span>}
                 </div>
-                <div className="np-card np-question">{curQ.question}</div>
+                {/* A11y: tabindex=-1 receiving target for the post-advance focus move,
+                    plus aria-live so SR users hear the new prompt when it changes. */}
+                <div
+                  className="np-card np-question"
+                  ref={diagQRef}
+                  tabIndex={-1}
+                  aria-live="polite"
+                  aria-label={`Question ${curQ.stepNo} of ${curQ.stepsTotal || 3}, ${SUBJECTS[curSubject].label}`}
+                >
+                  {curQ.question}
+                </div>
                 <AnswerComposer
                   initialValue={curAns.text}
-                  onText={setCurText}
+                  onText={onDiagText}
                   img={curAns.img}
-                  onAttach={attachCur}
+                  onAttach={onDiagAttach}
                   canAttach={canAttachWork}
                   onUpgrade={onAttachUpgrade}
-                  onRemoveImg={removeCurImg}
-                  onSubmit={nextDiagnostic}
-                  onSkip={skipDiagnostic}
+                  onRemoveImg={onDiagRemoveImg}
+                  onSubmit={onDiagSubmit}
+                  onSkip={onDiagSkip}
                   lockKey={curKey}
                   submitLabel={
                     Object.values(diagAnswered).reduce((a, n) => a + n, 0) >= ORDER.length * (curQ.stepsTotal || 3) - 1

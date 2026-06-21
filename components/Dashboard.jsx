@@ -342,12 +342,15 @@ function RecentMoves({ history }) {
 // upgrade); the route itself returns 402 as the server backstop.
 function TrendCharts({ loadTrends }) {
   const [state, setState] = useState({ status: "loading", trends: [] });
+  // Bumping `reload` re-runs the fetch effect — backs the error branch's "Try again".
+  const [reload, setReload] = useState(0);
   useEffect(() => {
     if (typeof loadTrends !== "function") {
       setState({ status: "ready", trends: [] });
       return;
     }
     let alive = true;
+    setState((s) => ({ status: "loading", trends: s.trends }));
     loadTrends()
       .then((res) => {
         if (!alive) return;
@@ -360,7 +363,7 @@ function TrendCharts({ loadTrends }) {
     return () => {
       alive = false;
     };
-  }, [loadTrends]);
+  }, [loadTrends, reload]);
 
   const linePoints = useMemo(
     () => state.trends.filter((h) => typeof h.totalAfter === "number").map((h) => h.totalAfter),
@@ -376,7 +379,13 @@ function TrendCharts({ loadTrends }) {
 
   if (state.status === "loading") return <p className="np-statsub">Loading your trends…</p>;
   if (state.status === "error")
-    return <p className="np-statsub">Couldn&rsquo;t load your trends. Please try again.</p>;
+    return (
+      <div className="np-statsub">
+        <p>Couldn&rsquo;t load your trends.</p>
+        <button className="np-btn np-secondary" onClick={() => setReload((n) => n + 1)}>Try again</button>
+      </div>
+    );
+  const attemptCount = barItems.length;
   return (
     <>
       <div className="np-card np-chartcard">
@@ -385,13 +394,17 @@ function TrendCharts({ loadTrends }) {
         {linePoints.length >= 2 ? (
           <LineChart values={linePoints} yMax={1050} />
         ) : (
-          <p className="np-statsub">Answer a practice problem to start the trend line.</p>
+          <p className="np-statsub">
+            {attemptCount === 1
+              ? "One graded attempt so far — answer another to draw the trend line."
+              : "Answer a practice problem to start the trend line."}
+          </p>
         )}
       </div>
       <div className="np-card np-chartcard">
         <h2 className="np-charttitle">Points gained and lost</h2>
         <div className="np-chartsub">Each bar is one graded attempt: above the line when your reasoning earned points, below it when it cost them.</div>
-        {barItems.length >= 1 ? (
+        {attemptCount >= 1 ? (
           <BarChart items={barItems} />
         ) : (
           <p className="np-statsub">No graded attempts yet.</p>
@@ -449,6 +462,9 @@ export default function Dashboard({
   // so a slow operation can't be double-fired.
   const [confirmAction, setConfirmAction] = useState(null);
   const [resetting, setResetting] = useState(false);
+  // Inline error shown in the confirm dialog when reset/delete THROWS (vs the handler's
+  // own ok===false soft-fail). Without it a throw left `resetting` stuck true forever.
+  const [resetError, setResetError] = useState("");
   const resetNoRef = useRef(null); // default focus = the safe "No" button
   const resetPrevFocus = useRef(null); // focus to restore when the dialog closes
   const resettingRef = useRef(false);
@@ -477,6 +493,12 @@ export default function Dashboard({
   // fetches nothing); a load failure just renders ungated bands — nothing is lost.
   const [fetchedMastery, setFetchedMastery] = useState({});
   const mastery = masteryProp ?? fetchedMastery;
+  // Distinguish a mastery FETCH FAILURE from a genuinely-empty map: on error we surface
+  // a non-blocking "couldn't load your progress — retry" instead of silently rendering
+  // ungated bands (which looks identical to "no concepts mastered yet"). `masteryReload`
+  // bumps to re-run the self-fetch effect.
+  const [masteryError, setMasteryError] = useState(false);
+  const [masteryReload, setMasteryReload] = useState(0);
   // The mastery-blended scores (depth × coverage) drive every headline rank/number on
   // the dashboard (KPIs, identity chip, by-subject). The radar/profile stays on the raw
   // scores (it's about reasoning quality, not coverage). Until mastery has loaded, fall
@@ -491,13 +513,18 @@ export default function Dashboard({
     let alive = true;
     loadMastery()
       .then((res) => {
-        if (alive && res && res.mastery) setFetchedMastery(res.mastery);
+        if (!alive) return;
+        if (res && res.error) { setMasteryError(true); return; }
+        setMasteryError(false);
+        if (res && res.mastery) setFetchedMastery(res.mastery);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (alive) setMasteryError(true);
+      });
     return () => {
       alive = false;
     };
-  }, [user, loadMastery, masteryProp]);
+  }, [user, loadMastery, masteryProp, masteryReload]);
 
   // Make the page background inert while a drawer is open (proper modal focus
   // containment). The guest gate does NOT inert the page — it's scoped to the
@@ -529,6 +556,7 @@ export default function Dashboard({
     return () => {
       document.removeEventListener("keydown", onKey);
       resetPrevFocus.current?.focus?.();
+      setResetError(""); // clear any inline retry error when the dialog closes
     };
   }, [confirmAction]);
 
@@ -633,6 +661,15 @@ export default function Dashboard({
         </h1>
         <p className="np-lede">Your scores, reasoning profile, rank, and recent progress, all in one place.</p>
       </div>
+      {/* Non-blocking notice: the mastery fetch FAILED (distinct from an empty map). Bands
+          fall back to ungated, but we tell the learner their progress couldn't load + offer
+          a retry rather than silently showing what looks like "no progress". */}
+      {masteryError && (
+        <div className="np-banner fade-up" role="status">
+          <span>Couldn&rsquo;t load your progress. Your ranks may be incomplete.</span>
+          <button className="np-ghost" onClick={() => { setMasteryError(false); setMasteryReload((n) => n + 1); }}>Retry</button>
+        </div>
+      )}
       <div className="np-dash">
         {/* Identity (avatar + name + rank) lives in the app top nav — the bento's
             top row is purely the KPI cluster. */}
@@ -762,28 +799,46 @@ export default function Dashboard({
                   ? "This permanently deletes your account and all your data, and cancels any Pro subscription. This can't be undone."
                   : "This permanently deletes all your scores and history."}
               </p>
+              {resetError && (
+                <p className="np-error" role="alert" style={{ marginBottom: 12 }}>{resetError}</p>
+              )}
               <div className="np-modal-actions">
                 <button
                   ref={resetNoRef}
                   className="np-btn np-secondary"
-                  onClick={() => setConfirmAction(null)}
+                  onClick={() => { setResetError(""); setConfirmAction(null); }}
                   disabled={resetting}
                 >
-                  No
+                  {resetError ? "Cancel" : "No"}
                 </button>
                 <button
                   className="np-btn np-danger"
                   onClick={async () => {
+                    setResetError("");
                     setResetting(true);
-                    const ok = confirmAction === "delete" ? await onDeleteAccount?.() : await onReset?.();
-                    // Success → the app switches to the intro view (reset) or signs out
-                    // (delete) and unmounts this dashboard. Failure → the handler surfaces
-                    // the error banner; close the dialog and clear the spinner.
-                    if (ok === false) { setResetting(false); setConfirmAction(null); }
+                    try {
+                      const ok = confirmAction === "delete" ? await onDeleteAccount?.() : await onReset?.();
+                      // Success → the app switches to the intro view (reset) or signs out
+                      // (delete) and unmounts this dashboard. Soft-fail (ok===false) → the
+                      // handler surfaced its own banner; close the dialog.
+                      if (ok === false) setConfirmAction(null);
+                    } catch (e) {
+                      // A THROW used to leave `resetting` stuck true forever (dialog frozen,
+                      // Escape/backdrop blocked). Surface it inline + offer a retry instead.
+                      setResetError((e && e.message) || "Something went wrong. Please try again.");
+                    } finally {
+                      // Always clear the spinner. On success this dashboard unmounts anyway;
+                      // on any failure the buttons + backdrop become usable again.
+                      setResetting(false);
+                    }
                   }}
                   disabled={resetting}
                 >
-                  {resetting ? (confirmAction === "delete" ? "Deleting…" : "Resetting…") : "Yes"}
+                  {resetting
+                    ? (confirmAction === "delete" ? "Deleting…" : "Resetting…")
+                    : resetError
+                      ? "Try again"
+                      : "Yes"}
                 </button>
               </div>
             </div>

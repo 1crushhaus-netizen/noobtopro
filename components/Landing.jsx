@@ -40,7 +40,7 @@ const ENGINE = [
   ["grid", "9-axis chain-link rubric",
     "Every answer is scored 0–4 on nine axes and drawn as a radar, so you see exactly where the reasoning holds and where it breaks."],
   ["refresh", "Unified Glicko-2 ranking",
-    "Each axis is a difficulty-adjusted rating judged against the question’s level. Beating a hard problem climbs; acing an easy one barely moves you. Score, radar, and leaderboard never disagree."],
+    "Each axis is a difficulty-adjusted rating judged against the question’s level. Beating a hard problem climbs; acing an easy one barely moves you. Your score and radar always agree on where you stand."],
   ["shield", "Built to resist gaming",
     "Jargon-salad scores single digits. Farming one topic damps your gains. Scoring is server-authoritative over a tamper-proof, signed step chain, so you can’t forge a grade or skip a step."],
   ["clip", "Photo-of-work grading",
@@ -71,7 +71,7 @@ const SUBJECT_BLURB = {
 
 const FREE_FEATURES = [
   "Full adaptive diagnostic + your 0–350 rank",
-  "Anonymous leaderboard placement",
+  "Your private 0–350 rank per subject (no comparison to other users)",
   "Every curated concept guide",
   "Up to 5 graded practice problems / day",
   "Reasoning radar + typed feedback",
@@ -89,7 +89,7 @@ const FAQ = [
     cat: "Getting started",
     items: [
       ["Is noobtopro free?",
-        "Yes. The diagnostic, your rank, the leaderboard, and the full concept library are free forever, with no credit card. A Pro tier is planned for unlimited graded practice and extras, but everything you need to find your level and start learning is free."],
+        "Yes. The diagnostic, your private 0–350 rank, and the full concept library are free forever, with no credit card. Pro adds unlimited graded practice, photo-of-work grading, full worked solutions, and progress trends, but everything you need to find your level and start learning is free."],
       ["Do I need an account?",
         "No. The whole flow runs as a guest in your browser. Sign in only to save your rank across devices; your guest progress carries over automatically the first time you do."],
       ["Is it for my level?",
@@ -134,7 +134,7 @@ const FAQ = [
       ["What if I disagree with a grade?",
         "You can see exactly why you got it. Every graded answer shows the per-axis breakdown, what you did well, and exactly where your reasoning broke, so a score is always inspectable rather than a black box; Pro adds the full worked solution and the specific steps to reach full marks. Your rank is a tool for growth, not a verdict, and your next answers move it."],
       ["Is the rank trustworthy enough to share?",
-        "It is built to be. The rank is relative and self-calibrating, hard to game, and computed server-side, so it is an honest signal of where your STEM reasoning stands. It is not an accredited exam score, and we do not pretend it is."],
+        "It is built to be. The rank is an absolute 0–350 achievement scale that measures your own reasoning against a rubric, not against other users; it is self-calibrating, hard to game, and computed server-side, so it is an honest signal of where your STEM reasoning stands. It is not an accredited exam score, and we do not pretend it is."],
     ],
   },
   {
@@ -156,7 +156,7 @@ const FAQ = [
       ["How do I sign in?",
         "Sign in with Google. You can also do everything as a guest first and sign in later; your guest progress migrates into your account automatically the first time you sign in."],
       ["Is my data safe, and do you sell it?",
-        "Your data is private, and no, we do not sell it. As a guest, your progress stays in your own browser. Once you sign in, your data is readable only by you, and the leaderboard is fully anonymous, showing the rank distribution and your position but never names or emails. You can reset your progress anytime."],
+        "Your data is private, and no, we do not sell it. As a guest, your progress stays in your own browser. Once you sign in, your data is readable only by you; your rank is a private, absolute 0–350 score and is never compared to or shown alongside other users. You can reset your progress anytime."],
       ["What devices does it work on?",
         "Any modern browser, on desktop or phone, with nothing to install. Photo grading is especially handy on mobile, where you can shoot your handwritten work directly."],
     ],
@@ -183,7 +183,25 @@ const FAQ_LD = JSON.stringify({
 // scope rather than calling the impure new Date() during every render.
 const YEAR = new Date().getFullYear();
 
-export default function Landing({
+// PERF: the public landing is rendered as an early return from the Noobtopro shell,
+// which ALREADY runs useScrolled() for its own nav. To avoid a second scroll
+// listener on the same page, Landing accepts an optional `scrolled` prop; when it is
+// provided we use it directly and never call useScrolled(). A hook can't be called
+// conditionally, so the standalone fallback (no prop) lives in a separate tiny
+// wrapper component (LandingWithScroll) that owns the hook — the common, prop-fed
+// path mounts LandingView, which has no scroll hook at all.
+export default function Landing(props) {
+  return props.scrolled !== undefined
+    ? <LandingView {...props} />
+    : <LandingWithScroll {...props} />;
+}
+
+function LandingWithScroll(props) {
+  const scrolled = useScrolled();
+  return <LandingView {...props} scrolled={scrolled} />;
+}
+
+function LandingView({
   user,
   busy,
   isPro,
@@ -194,13 +212,13 @@ export default function Landing({
   onDismissError,
   showAuthNote,
   onDismissAuthNote,
+  scrolled,
 }) {
   const [openFaq, setOpenFaq] = useState(null);
   // Scroll-reveal + nav-condense, via the shared motion hooks (one source of
   // truth with the signed-in app). The reveal arms after first paint, so the
   // page renders fully visible first (JS-off / crawler safe).
   const { ref: rootRef, armed } = useScrollReveal();
-  const scrolled = useScrolled();
 
   return (
     <div className={"np-lp" + (armed ? " is-armed" : "")} ref={rootRef}>
@@ -253,6 +271,13 @@ export default function Landing({
           <p className="np-lp-sub">
             Real problems in math, physics, and chemistry, graded on how you reason, not what you
             recall. noobtopro pinpoints your level, then gives you a structured path to climb.
+          </p>
+          {/* AEO: a visible, citeable entity definition (mirrors llms.txt phrasing) so
+              answer engines can quote a single authoritative "What is noobtopro?" sentence. */}
+          <p className="np-lp-define">
+            <strong>What is noobtopro?</strong> noobtopro is a free, reasoning-first STEM assessment
+            platform for mathematics, physics, and chemistry — it grades how you reason, not just
+            your final answer.
           </p>
           <div className="np-lp-herocta">
             <button className="np-btn np-primary np-big" onClick={onProveIt} disabled={busy}>
@@ -450,15 +475,16 @@ export default function Landing({
                         id={qid}
                         className="np-lp-faq-q"
                         aria-expanded={open}
-                        aria-controls={open ? aid : undefined}
+                        aria-controls={aid}
                         onClick={() => setOpenFaq(open ? null : id)}
                       >
                         <span>{q}</span>
                         <Icon name="chevron" size={18} />
                       </button>
-                      {open && (
-                        <div id={aid} role="region" aria-labelledby={qid} className="np-lp-faq-a">{a}</div>
-                      )}
+                      {/* Always render the answer in the DOM (CSS-collapsed via `hidden` when
+                          closed) so SSR/crawlers see the same text the FAQPage JSON-LD claims,
+                          while `hidden` keeps it out of the layout + a11y tree when collapsed. */}
+                      <div id={aid} role="region" aria-labelledby={qid} className="np-lp-faq-a" hidden={!open}>{a}</div>
                     </div>
                   );
                 })}
