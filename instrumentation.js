@@ -25,17 +25,22 @@ export async function register() {
     );
   }
 
-  // ADVISORY (red-team Finding 2): when QUESTION_TOKEN_SECRET is unset, lib/questionToken.js
+  // FAIL-FAST (red-team Finding 2): when QUESTION_TOKEN_SECRET is unset, lib/questionToken.js
   // DERIVES the HMAC signing key from SUPABASE_SERVICE_ROLE_KEY. That works (domain-separated
   // by a "qtoken:" prefix), but it COUPLES two secrets of very different blast radius: rotating
   // the service-role key silently invalidates every outstanding question token, and any leak of
-  // one secret is a leak of both. Recommend an explicit, independent secret in production
-  // (`openssl rand -hex 32`, marked Sensitive in Vercel). Non-fatal — token signing still works.
+  // one secret is a leak of both. QUESTION_TOKEN_SECRET is the anti-cheat linchpin (it signs the
+  // server-issued question/diagnostic tokens the rating engine trusts), so in PRODUCTION runtime
+  // refuse to boot without an explicit, independent secret rather than silently coupling it —
+  // mirroring the service-role fail-fast above. The build-phase and non-prod skips at the top of
+  // register() are already applied, so CI builds with empty secrets still pass; this only fires in
+  // a real production server start. Set it via `openssl rand -hex 32`, marked Sensitive in Vercel.
   if (!process.env.QUESTION_TOKEN_SECRET) {
-    console.warn(
-      "[instrumentation] QUESTION_TOKEN_SECRET is unset — question/diagnostic token signing is " +
-        "falling back to SUPABASE_SERVICE_ROLE_KEY (coupled rotation + blast radius). Set an " +
-        "explicit secret (openssl rand -hex 32) in production and mark it Sensitive."
+    throw new Error(
+      "[instrumentation] Refusing to boot: missing required production env QUESTION_TOKEN_SECRET. " +
+        "Without it, question/diagnostic token signing falls back to SUPABASE_SERVICE_ROLE_KEY " +
+        "(coupled rotation + shared blast radius for the anti-cheat linchpin) — set an explicit " +
+        "secret (openssl rand -hex 32), marked Sensitive, in the deployment's environment."
     );
   }
 }
