@@ -32,9 +32,8 @@ vi.mock("@/lib/store", () => store);
 // `supa.authCb` captures the onAuthStateChange listener so a test can fire a
 // SIGNED_OUT event and assert the component's reaction.
 const supa = vi.hoisted(() => ({ user: null, authCb: null }));
-vi.mock("@/lib/supabase", () => ({
-  isSupabaseConfigured: true,
-  getSupabase: () =>
+vi.mock("@/lib/supabase", () => {
+  const build = () =>
     supa.user
       ? {
           auth: {
@@ -47,11 +46,16 @@ vi.mock("@/lib/supabase", () => ({
             signOut: async () => {},
           },
         }
-      : null,
-  signInWithProvider: vi.fn(async () => ({})),
-  signOutUser: vi.fn(async () => {}),
-  PROVIDERS: [{ id: "google", label: "Google", enabled: true }],
-}));
+      : null;
+  return {
+    isSupabaseConfigured: true,
+    getSupabase: build,
+    ensureSupabase: async () => build(),
+    signInWithProvider: vi.fn(async () => ({})),
+    signOutUser: vi.fn(async () => {}),
+    PROVIDERS: [{ id: "google", label: "Google", enabled: true }],
+  };
+});
 
 import Noobtopro from "@/components/Noobtopro";
 

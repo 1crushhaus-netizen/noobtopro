@@ -25,6 +25,7 @@ vi.mock("@/lib/store", () => store);
 vi.mock("@/lib/supabase", () => ({
   isSupabaseConfigured: true,
   getSupabase: () => null, // guest
+  ensureSupabase: async () => null,
   signInWithProvider: vi.fn(),
   signOutUser: vi.fn(),
   PROVIDERS: [{ id: "google", label: "Google", enabled: true }],

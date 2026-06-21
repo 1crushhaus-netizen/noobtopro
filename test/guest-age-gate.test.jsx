@@ -21,6 +21,7 @@ const store = vi.hoisted(() => ({
 vi.mock("@/lib/store", () => store);
 vi.mock("@/lib/supabase", () => ({
   getSupabase: () => null, // guest mode: no auth
+  ensureSupabase: async () => null,
   isSupabaseConfigured: false,
   signInWithProvider: vi.fn(),
   signOutUser: vi.fn(),
