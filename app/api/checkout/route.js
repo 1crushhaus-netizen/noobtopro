@@ -16,6 +16,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/adminAuth";
 import { getPolar, proProductId, successUrl } from "@/lib/polar";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import { isProUserId } from "@/lib/entitlements";
 import { checkRateLimit, clientKey } from "@/lib/rateLimit";
 import { isCrossSiteRequest, isWrongContentType } from "@/lib/requestGuard";
 import { IMMEDIATE_ACCESS_CONSENT_TEXT, IMMEDIATE_ACCESS_CONSENT_VERSION } from "@/lib/consent";
@@ -79,6 +80,20 @@ export async function POST(req) {
   const productId = proProductId();
   if (!polar || !productId) {
     return NextResponse.json({ error: "Checkout is not available right now." }, { status: 503 });
+  }
+
+  // ALREADY-ACTIVE short-circuit (audit P2): a concurrent/double first checkout (e.g. a
+  // double-click, or a retry after the first session already converted) would otherwise
+  // create a SECOND Polar subscription for an account that is already Pro. Re-check the
+  // authoritative local entitlement here and, if the account is already Pro, return a signal
+  // to open the customer portal (manage the existing sub) instead of minting a new checkout.
+  // This is best-effort dedup, not a hard lock — a brand-new payer reads as not-Pro until the
+  // webhook records the sub, so the normal FIRST-purchase flow is untouched.
+  if (await isProUserId(uid)) {
+    return NextResponse.json(
+      { error: "You already have an active Pro subscription.", alreadyPro: true, openPortal: true },
+      { status: 409 }
+    );
   }
 
   // Origin of THIS request (for the success-URL fallback) — server-derived, not body-supplied.
