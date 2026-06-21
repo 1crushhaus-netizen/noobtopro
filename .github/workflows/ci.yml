@@ -37,9 +37,13 @@ jobs:
         run: npm ci
 
       # Static analysis (ESLint flat config, eslint.config.mjs). Fast fail-first gate.
-      # `npm run lint` exits non-zero on ERRORS only — warnings are advisory (no
-      # --max-warnings). Enforces correctness (incl. react-hooks/rules-of-hooks) and the
-      # server-only-secret import boundary (no GROQ/Polar/service-role module in a client).
+      # `npm run lint` runs `eslint . --max-warnings 20`: it fails on any ERROR and on MORE
+      # than the current 20 advisory warnings — a RATCHET so the warning count can only go
+      # down, never up (a stale hook dep / dead binding now fails CI). Lower the cap in
+      # package.json as warnings are fixed. Enforces correctness (incl. react-hooks/rules-of-hooks)
+      # and the server-only-secret import boundary (no GROQ/Polar/service-role module in a client).
+      # NOTE (deferred): a tsc/typecheck gate is intentionally NOT added — the repo is untyped JS,
+      # so it would fail. Revisit if/when types are introduced.
       - name: Lint (ESLint)
         run: npm run lint
 
