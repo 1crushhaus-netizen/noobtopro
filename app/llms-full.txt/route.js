@@ -1,5 +1,5 @@
-// /llms-full.txt — the companion to /llms.txt: the ENTIRE Learn library (all 224
-// guides) concatenated as clean Markdown, so an LLM can ingest the whole
+// /llms-full.txt — the companion to /llms.txt: the ENTIRE Learn library (every
+// guide) concatenated as clean Markdown, so an LLM can ingest the whole
 // reasoning-first corpus in one fetch. Generated at build from the same curated
 // guides the pages render (single source of truth), so it never drifts.
 import { ORDER } from "@/lib/scoring";
@@ -12,15 +12,17 @@ import {
   rankSeoLabel,
   PUBLIC_RANKS,
 } from "@/lib/learn/seo";
+import { totalConceptCount } from "@/lib/learn/content";
 
 export const dynamic = "force-static";
 
 async function build() {
+  const total = totalConceptCount();
   const out = [];
   out.push("# noobtopro — full concept library");
   out.push("");
   out.push(
-    "> Every concept guide on noobtopro (https://noobto.pro), in one file. noobtopro is a free, reasoning-first learning and assessment platform for mathematics, physics, and chemistry: it grades how you reason, not just the final answer. Each entry below gives a plain-English explanation, one fully worked example, and self-check questions for a single concept. 224 guides across three subjects and four levels (Elementary → University)."
+    `> Every concept guide on noobtopro (https://noobto.pro), in one file. noobtopro is a free, reasoning-first learning and assessment platform for mathematics, physics, and chemistry: it grades how you reason, not just the final answer. Each entry below gives a plain-English explanation, one fully worked example, and self-check questions for a single concept. ${total} guides across three subjects and four levels (Elementary → University).`
   );
   out.push("");
 

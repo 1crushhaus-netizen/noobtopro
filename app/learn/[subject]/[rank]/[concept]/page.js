@@ -50,7 +50,9 @@ export async function generateMetadata({ params }) {
     description,
     alternates: { canonical },
     ...socialMeta({
-      type: "article",
+      // og:type "website" (the socialMeta default) rather than "article": an
+      // article type implies article:published_time/author fields we don't emit,
+      // so a plain website type is the cleaner, complete markup.
       title: `${data.concept.label} — noobtopro`,
       description,
       url: absolute(canonical),

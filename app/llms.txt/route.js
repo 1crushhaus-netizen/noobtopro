@@ -23,15 +23,17 @@ import {
   SUBJECT_SEO,
   PUBLIC_RANKS,
 } from "@/lib/learn/seo";
+import { totalConceptCount } from "@/lib/learn/content";
 
 export const dynamic = "force-static";
 
 function build() {
+  const total = totalConceptCount();
   const lines = [];
   lines.push("# noobtopro");
   lines.push("");
   lines.push(
-    "> noobtopro is a free, reasoning-first assessment and learning platform for mathematics, physics, and chemistry. It grades how you reason, not just your final answer: an adaptive diagnostic places you on a 0–350 scale per subject (Elementary → Doctorate), and a transparent 9-axis rubric scores your reasoning so a sound method outscores a lucky guess. The Learn library below holds 224 original concept guides — each with a plain-English explanation, one fully worked example, and self-check questions."
+    `> noobtopro is a free, reasoning-first assessment and learning platform for mathematics, physics, and chemistry. It grades how you reason, not just your final answer: an adaptive diagnostic places you on a 0–350 scale per subject (Elementary → Doctorate), and a transparent 9-axis rubric scores your reasoning so a sound method outscores a lucky guess. The Learn library below holds ${total} original concept guides — each with a plain-English explanation, one fully worked example, and self-check questions.`
   );
   lines.push("");
   lines.push(
@@ -59,7 +61,7 @@ function build() {
   lines.push("## Key pages");
   lines.push("");
   lines.push(`- [noobtopro home](${absolute("/")}): take the free adaptive diagnostic and get ranked.`);
-  lines.push(`- [Learn library](${absolute(learnUrl())}): all 224 concept guides across the three subjects.`);
+  lines.push(`- [Learn library](${absolute(learnUrl())}): all ${total} concept guides across the three subjects.`);
   lines.push(`- [Full content for ingestion](${absolute("/llms-full.txt")}): every guide's text in one Markdown file.`);
   lines.push("");
 
