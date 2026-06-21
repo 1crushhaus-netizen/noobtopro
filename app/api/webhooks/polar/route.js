@@ -21,6 +21,7 @@ import { NextResponse } from "next/server";
 import { verifyPolarWebhook, WebhookSignatureError } from "@/lib/polarWebhook";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { readTextLimited, MAX_BODY_BYTES_TEXT } from "@/lib/requestGuard";
+import { checkRateLimit, clientKey } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +51,19 @@ function resolveUserId(sub) {
 }
 
 export async function POST(req) {
+  // Per-IP ceiling BEFORE the HMAC compute (audit P2-3). Unlike the JWT routes this is an
+  // external caller (no same-origin/JSON guards, correct to omit), but an unauthenticated
+  // flood would otherwise force a signature verification per request; bound that per source
+  // IP first. FAIL-OPEN: a degraded limiter must never drop a legitimate Polar delivery —
+  // the signature is still the real authentication, so a 429 here is purely flood relief.
+  const rl = await checkRateLimit(`${clientKey(req)}:polar-webhook`);
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: "Too many requests." },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
+    );
+  }
+
   const secret = process.env.POLAR_WEBHOOK_SECRET;
   if (!secret) {
     // No secret configured -> the webhook is inert (deny-by-default). 503 so a
@@ -92,8 +106,18 @@ export async function POST(req) {
   const sub = event.data || {};
   const userId = resolveUserId(sub);
   if (!userId) {
-    // Can't map the purchase to an account — log and ACK (a retry won't add a mapping).
-    console.error("[/api/webhooks/polar] no user_id on event", event.type, sub && sub.id);
+    // Can't map the purchase to an account — log and ACK (a retry won't add a mapping, so a
+    // 500-retry-loop would just churn). A dedicated dead-letter table is out of scope, so the
+    // durable signal IS this structured log line: emit the event id/type + the Polar customer
+    // ids so an operator can grep Polar's delivery log and manually reconcile the entitlement.
+    console.error(
+      "[/api/webhooks/polar] unmapped subscription event — no resolvable user_id; ACKing without write",
+      JSON.stringify({
+        eventType: event.type || null,
+        subscriptionId: typeof sub.id === "string" ? sub.id : null,
+        polarCustomerId: typeof sub.customerId === "string" ? sub.customerId : null,
+      })
+    );
     return NextResponse.json({ received: true, unmapped: true }, { status: 202 });
   }
 
@@ -138,6 +162,22 @@ export async function POST(req) {
     if (e && e.code === "23503") {
       console.warn("[/api/webhooks/polar] subscription event for a deleted user — acknowledging", userId);
       return NextResponse.json({ received: true, userGone: true }, { status: 202 });
+    }
+    // The SAME polar_subscription_id already belongs to a DIFFERENT user_id: the UNIQUE
+    // constraint on the subscription id (23505) fires. This is the constraint working as
+    // intended — it correctly PREVENTS the same Polar subscription from granting Pro on two
+    // accounts (cross-account entitlement duplication). Retrying can never change the owner,
+    // so ACK (202) with a clear log instead of 500-looping Polar forever. Surfaced loudly so
+    // an operator can investigate the (suspicious) cross-account collision.
+    if (e && e.code === "23505") {
+      console.error(
+        "[/api/webhooks/polar] subscription already mapped to a different account — UNIQUE blocked the cross-account duplicate; acknowledging",
+        JSON.stringify({
+          userId,
+          subscriptionId: typeof sub.id === "string" ? sub.id : null,
+        })
+      );
+      return NextResponse.json({ received: true, duplicate: true }, { status: 202 });
     }
     // 500 -> Polar retries with backoff, so a transient DB hiccup doesn't drop the
     // entitlement update permanently.
