@@ -141,12 +141,17 @@ export default function PrivacyPage() {
       <Section heading="4. AI grading and photos (automated processing)">
         <p>
           Your work is graded by an <strong>AI model</strong> run by our inference provider,{" "}
-          <strong>Groq</strong>, on infrastructure in the <strong>United States</strong>. To produce
-          a grade, the text of your answer, the question, and any photo of your handwritten work you
-          upload are sent to Groq. Your submissions and photos are{" "}
+          <strong>Groq</strong>, on infrastructure in the <strong>United States</strong> (Google
+          Cloud / GCP). To produce a grade, the text of your answer, the question, and any photo of
+          your handwritten work you upload are sent to Groq. Your submissions and photos are{" "}
           <strong>not used to train</strong> the model, and the photo is processed transiently to
           read the work shown — we do not keep a copy on our servers and we do not use facial
           recognition or any technique to identify you from an image.
+        </p>
+        <p>
+          Before any photo leaves our servers, we <strong>strip its EXIF metadata server-side</strong>,
+          which removes any precise GPS location and other embedded metadata that a camera may have
+          recorded — so that information is never sent to the AI provider.
         </p>
         <p>
           <strong>Please do not include personal or sensitive information</strong> in your answers,
@@ -184,11 +189,16 @@ export default function PrivacyPage() {
         <ul>
           <li><strong>Supabase</strong> — authentication and database (stores your account and progress).</li>
           <li>
-            <strong>Groq</strong> — AI inference that grades your work, in the United States (see
-            &quot;AI grading and photos&quot; above).
+            <strong>Groq</strong> — AI inference that grades your work, in the United States (Google
+            Cloud / GCP) (see &quot;AI grading and photos&quot; above).
           </li>
           <li><strong>Vercel</strong> — hosting and privacy-friendly analytics (Web Analytics &amp; Speed Insights).</li>
           <li><strong>Ahrefs</strong> — privacy-friendly, cookieless web analytics for understanding traffic.</li>
+          <li>
+            <strong>Resend</strong> — transactional email (e.g. the durable-medium acknowledgement
+            sent after a withdrawal), in the United States. <strong>Dormant</strong> until configured:
+            no email is sent unless the provider is enabled.
+          </li>
         </ul>
         <p>
           <strong>Independent controllers:</strong>
@@ -238,8 +248,14 @@ export default function PrivacyPage() {
             <strong>not stored</strong> on our servers afterward.
           </li>
           <li>
-            <strong>Security &amp; event logs</strong> (such as IP address and route accessed) — kept on
-            a short-lived basis, around <strong>90 days</strong>, then deleted.
+            <strong>Security &amp; event logs</strong> (such as IP address and the route accessed) —
+            kept on a short-lived basis. Where an event is <strong>flagged for abuse</strong> (for
+            example a suspected prompt-injection attempt), the log additionally retains a{" "}
+            <strong>short snippet of the typed answer text</strong> that triggered the flag, together
+            with the IP address, so we can investigate. We prune these logs periodically on a{" "}
+            <strong>best-effort basis, targeting about 90 days</strong>; because pruning runs
+            opportunistically rather than on a fixed schedule, individual records may persist somewhat
+            longer before they are removed.
           </li>
           <li>
             <strong>Analytics data</strong> — retained for about <strong>14 months</strong> per our
@@ -320,7 +336,8 @@ export default function PrivacyPage() {
             both are certified.
           </li>
           <li>
-            <strong>Supabase</strong> (US, AWS us-east-1), <strong>Groq</strong> (US), and{" "}
+            <strong>Supabase</strong> (US, AWS us-east-1), <strong>Groq</strong> (US, Google Cloud /
+            GCP), <strong>Resend</strong> (US; the dormant transactional-email provider), and{" "}
             <strong>Ahrefs</strong> (Ahrefs Pte. Ltd., a Singapore entity; data processed in the{" "}
             <strong>United States</strong> on AWS) — the European Commission&apos;s{" "}
             <strong>Standard Contractual Clauses</strong> (plus the UK Addendum), together with a{" "}

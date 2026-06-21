@@ -49,14 +49,11 @@ export default function AccessibilityPage() {
         </p>
         <ul>
           <li>
-            <strong>Public &quot;Learn&quot; pages (light theme).</strong> The Math subject-accent
-            &quot;eyebrow&quot; text has a contrast ratio of 3.81:1, below the AA minimum of 4.5:1
-            (WCAG 1.4.3).
-          </li>
-          <li>
-            <strong>Public &quot;Learn&quot; pages (light theme).</strong> The Physics
-            subject-accent &quot;eyebrow&quot; text has a contrast ratio of 3.98:1, below the AA
-            minimum of 4.5:1 (WCAG 1.4.3).
+            <strong>Colour contrast (light theme).</strong> Most text now meets the AA contrast
+            minimum (WCAG 1.4.3) &mdash; the subject-accent &quot;eyebrow&quot; labels on the public
+            &quot;Learn&quot; pages were remediated and now pass. Some smaller secondary elements
+            (for example certain status chips and focus indicators) are still being reviewed and
+            improved.
           </li>
           <li>
             <strong>Certain views.</strong> A few views are missing a top-level{" "}
@@ -77,8 +74,9 @@ export default function AccessibilityPage() {
         </p>
         <p>
           <strong>Remediation.</strong> These known issues are being actively worked on. We are
-          prioritising the two colour-contrast failures and the missing top-level headings, followed
-          by the touch-target and live-region items, and we update this statement as fixes ship.
+          prioritising the remaining contrast items (status chips and focus indicators) and the
+          missing top-level headings, followed by the touch-target and live-region items, and we
+          update this statement as fixes ship.
         </p>
       </Section>
 

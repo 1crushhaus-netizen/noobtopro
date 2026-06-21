@@ -121,6 +121,31 @@ export default function SubProcessorsPage() {
             </tr>
             <tr>
               <td>
+                <strong>Resend, Inc.</strong>
+              </td>
+              <td>Processor</td>
+              <td>
+                Transactional email (e.g. the durable-medium acknowledgement we send after a
+                withdrawal, and account-related notices)
+              </td>
+              <td>
+                Recipient email address and the message content (e.g. the withdrawal
+                acknowledgement)
+              </td>
+              <td>USA</td>
+              <td>
+                Standard Contractual Clauses + Transfer Impact Assessment. Currently{" "}
+                <strong>dormant</strong> &mdash; email is sent only once the provider is configured
+                (an API key is set); until then no message is transmitted.
+              </td>
+              <td>
+                <a href="https://resend.com/legal/dpa" rel="noopener noreferrer" target="_blank">
+                  Resend DPA
+                </a>
+              </td>
+            </tr>
+            <tr>
+              <td>
                 <strong>Ahrefs</strong> (Ahrefs Pte. Ltd., Singapore)
               </td>
               <td>Processor</td>
@@ -209,8 +234,9 @@ export default function SubProcessorsPage() {
           <strong>EU&ndash;US Data Privacy Framework adequacy</strong> for certified recipients
           (Vercel, Google); or <strong>Standard Contractual Clauses</strong> together with the
           UK&nbsp;Addendum, a Transfer Impact Assessment, and supplementary measures (encryption,
-          data-minimisation, and reliance on zero-retention settings) for Supabase, Groq, and
-          Ahrefs. For payments, <strong>Polar</strong> acts as Merchant of Record and independent
+          data-minimisation, and reliance on zero-retention settings) for Supabase, Groq, Ahrefs,
+          and <strong>Resend</strong> (the dormant transactional-email provider). For payments,{" "}
+          <strong>Polar</strong> acts as Merchant of Record and independent
           controller under its own policy (with Stripe). You can request a copy of the relevant
           safeguards at <strong>{LEGAL.contactEmail}</strong>.
         </p>
