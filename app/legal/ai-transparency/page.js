@@ -29,12 +29,14 @@ export default function AiTransparencyPage() {
         <p>
           To produce your feedback, the text of your answer and any photo of your handwritten work
           you upload are sent to <strong>Groq</strong> and processed on infrastructure in the{" "}
-          <strong>United States</strong>. Your submissions and photos are{" "}
+          <strong>United States</strong> (Google Cloud / GCP). Your submissions and photos are{" "}
           <strong>not used to train</strong> the model: we rely on Groq&rsquo;s no-training commitment
-          and zero-data-retention terms. Please do <strong>not</strong> include unnecessary personal
-          or sensitive information in your photos (for example, other people, faces, or identifying
-          details) &mdash; see our <a href="/privacy">Privacy Policy</a> for how we handle the data
-          you submit.
+          and zero-data-retention terms. Before any photo leaves our servers, we{" "}
+          <strong>strip its EXIF metadata server-side</strong>, which removes any precise GPS location
+          and other embedded metadata, so that information is never sent to the AI provider. Please do{" "}
+          <strong>not</strong> include unnecessary personal or sensitive information in your photos
+          (for example, other people, faces, or identifying details) &mdash; see our{" "}
+          <a href="/privacy">Privacy Policy</a> for how we handle the data you submit.
         </p>
       </Section>
 

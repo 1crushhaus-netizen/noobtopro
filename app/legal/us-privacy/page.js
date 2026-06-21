@@ -86,10 +86,11 @@ export default function USPrivacyPage() {
         </p>
         <p>
           The service providers we use — such as our hosting provider, analytics, and the AI model
-          provider that grades uploaded work (Groq, in the United States) — process data only on our
-          instructions to operate the Service. That is a service-provider disclosure, not a sale or
-          a share. Before any photo is sent to the AI provider, we strip EXIF metadata{" "}
-          <strong>server-side</strong>, which removes any precise geolocation embedded in the image.
+          provider that grades uploaded work (Groq, in the United States, on Google Cloud / GCP) —
+          process data only on our instructions to operate the Service. That is a service-provider
+          disclosure, not a sale or a share. Before any photo is sent to the AI provider, we strip
+          EXIF metadata <strong>server-side</strong>, which removes any precise geolocation embedded
+          in the image.
         </p>
       </Section>
 
@@ -148,8 +149,8 @@ export default function USPrivacyPage() {
           We do <strong>not</strong> sell or share your personal information for cross-context
           behavioral advertising, so there is no &quot;Do Not Sell or Share My Personal
           Information&quot; activity to switch off. Our hosting/analytics setup is consistent with
-          this: our hosting provider operates cookieless and as a service provider, and our site
-          analytics are not used for ad targeting.
+          this: our hosting provider acts only as a service provider, and our site analytics are not
+          used for ad targeting.
         </p>
         <p>
           Even so, we honor the <strong>Global Privacy Control (GPC)</strong> as a courtesy. If your

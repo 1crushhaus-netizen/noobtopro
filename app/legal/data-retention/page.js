@@ -61,9 +61,14 @@ export default function DataRetentionPage() {
           </li>
           <li>
             <strong>Security &amp; event logs</strong> (such as a request&rsquo;s IP address and the
-            route accessed) are retained for <strong>up to 90 days</strong> and then deleted, so we
-            can protect the Service against abuse, investigate incidents and meet our security
-            obligations.
+            route accessed) are kept on a short-lived basis so we can protect the Service against
+            abuse, investigate incidents and meet our security obligations. Where an event is{" "}
+            <strong>flagged for abuse</strong> (for example a suspected prompt-injection attempt), the
+            log additionally retains a <strong>short, length-capped snippet of the typed text</strong>{" "}
+            that triggered the flag, alongside the IP address. We prune these logs periodically on a{" "}
+            <strong>best-effort basis, targeting about 90 days</strong>; because the prune runs
+            opportunistically rather than on a fixed schedule, some records may persist somewhat
+            longer before they are removed.
           </li>
           <li>
             <strong>Analytics</strong> (aggregate page views and performance) are retained for{" "}

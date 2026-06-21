@@ -1,10 +1,14 @@
+"use client";
+
 import Link from "next/link";
 import { LEGAL } from "@/lib/legal";
 
 // Shared chrome for the static legal/trust pages (/privacy, /terms, /refunds, /cookies, /aup,
-// /accessibility, /legal/*). Server component (no "use client") so these pages are fully
-// crawlable and need no JS. Inherits the global theme (data-theme on <html>) and color tokens
-// from globals.css.
+// /accessibility, /legal/*). A client component so the footer can offer a "Cookie preferences"
+// control that reopens the consent banner (ePrivacy / EDPB: withdrawing consent must be as easy
+// as giving it, and must be available everywhere the policies are). The pages still
+// server-render to fully crawlable HTML; only this small control needs JS. Inherits the global
+// theme (data-theme on <html>) and color tokens from globals.css.
 //
 // NOTE (for the operator/counsel, not rendered): these pages are a good-faith starting point
 // and have not been reviewed by qualified legal counsel; review is recommended. Entity details
@@ -69,6 +73,21 @@ export default function LegalLayout({ title, lastUpdated = LEGAL.lastUpdated, no
           <Link href="/aup" className="np-link">Acceptable Use</Link>
           <Link href="/accessibility" className="np-link">Accessibility</Link>
           <Link href="/legal/notice" className="np-link">Legal Notice</Link>
+          {/* ePrivacy: withdrawing consent must be as easy as giving it — reopen the consent
+              banner from any legal page. Dispatches the same window CustomEvent ConsentManager
+              listens for (OPEN_CONSENT_EVENT = "noobtopro:open-consent"). */}
+          <button
+            type="button"
+            className="np-link"
+            style={{ background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit" }}
+            onClick={() => {
+              if (typeof window !== "undefined") {
+                window.dispatchEvent(new Event("noobtopro:open-consent"));
+              }
+            }}
+          >
+            Cookie preferences
+          </button>
         </nav>
       </main>
     </div>
