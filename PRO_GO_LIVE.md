@@ -40,20 +40,54 @@ two secrets **Sensitive**.
 
 ## Phase A — Database (one-time)
 
-The entitlement store is migration **`0017_pro_subscriptions.sql`** (a `subscriptions` table +
-the service-role-only `upsert_subscription` RPC the webhook calls). It's idempotent and safe to
-re-run.
+> ⚠️ **Apply the WHOLE Pro-related migration set, not just `0017`.** A 2026-06 audit found that
+> only `0017` had been applied to production while `0024` and `0025` had been merged into the
+> repo but never pushed to the live DB — which (1) left the Pro "Progress trends" paywall
+> bypassable (`attempts` was still client-readable via PostgREST) and (2) made the EU
+> withdrawal/consent audit trail (`billing_audit`) silently no-op. **`db/schema.sql` is the
+> source of truth and must match production.** Don't ship Pro until the live migration head
+> equals the highest file in `db/migrations/`.
 
-**A1.** Apply it to your **production Supabase** project (the same DB the live app uses — the
-webhook writes here regardless of sandbox vs production Polar):
+The Pro tier + its compliance backstops span **`0017` through `0025`**:
 
-- **Easiest:** Supabase dashboard → **SQL Editor** → paste the full contents of
-  `db/migrations/0017_pro_subscriptions.sql` → **Run**.
+| Migration | What it provides | Required before… |
+|---|---|---|
+| `0017_pro_subscriptions.sql` | `subscriptions` table + service-role `upsert_subscription` RPC | any checkout |
+| `0018_pro_gate_attempt_reviews.sql` | locks answer-history (`attempt_reviews`) to the Pro `/api/reviews` route | selling Pro |
+| `0019_integrity_constraints.sql` | CHECK constraints + leaderboard/index backstops | selling Pro |
+| `0020_webhook_event_ordering.sql` | webhook idempotency / out-of-order guard | selling Pro |
+| `0021_verify_at_level.sql` | verified-badge at-level gate | selling Pro |
+| `0022_security_data_retention.sql` | `prune_security_data` (90-day PII prune) | selling Pro |
+| `0023_audit_round2_hardening.sql` | round-2 hardening | selling Pro |
+| `0024_pro_gate_trends.sql` | **revokes client SELECT on `attempts`** → enforces the trends paywall at the DB | **selling Pro** |
+| `0025_eu_withdrawal_audit.sql` | **`billing_audit`** — CRD Art. 16(a) consent + Art. 11a withdrawal records | **selling Pro (EU)** |
+
+**A1.** Apply every migration newer than the live DB to your **production Supabase** project (the
+same DB the live app uses — the webhook writes here regardless of sandbox vs production Polar):
+
+- **Easiest:** Supabase dashboard → **SQL Editor** → paste the full contents of each
+  `db/migrations/00NN_*.sql` not yet applied, in order → **Run**. (All are idempotent/safe to
+  re-run.)
 - **Or CLI:** `supabase db push` (if you track migrations with the CLI).
-- **Or ask me** — I can apply it for you via the Supabase MCP (I'll confirm the project first).
+- **Or ask me** — I can apply them for you via the Supabase MCP (I'll confirm the project first).
 
-**A2.** Verify it landed: SQL Editor → `select * from public.subscriptions limit 1;` should
-return an (empty) result, not an error.
+> ⚠️ **Deploy order for `0024`:** ship the app code (the `/api/history` + `/api/trends` routes that
+> read `attempts` via the service role) **before** applying `0024` — it's already shipped, so this
+> is satisfied, but keep the ordering if you ever rebuild the environment.
+
+**A2 — Release guard (verify the head matches the repo).** Before flipping `NEXT_PUBLIC_PRO_ENABLED`,
+confirm production is fully migrated:
+
+- SQL Editor → `select version, name from supabase_migrations.schema_migrations order by version desc limit 1;`
+  — the latest **name** must correspond to the highest-numbered file in `db/migrations/`
+  (currently `0025_eu_withdrawal_audit` → name `eu_withdrawal_audit`).
+- Spot-check the two audit-flagged objects exist/are locked:
+  - `select has_table_privilege('authenticated','public.attempts','select');` → **false** (0024 applied).
+  - `select to_regclass('public.billing_audit') is not null;` → **true** (0025 applied).
+- `select * from public.subscriptions limit 1;` should return an (empty) result, not an error (0017).
+
+*(As of 2026-06-21 the live production DB is at `0025` — all of the above already pass. Re-verify
+after any environment rebuild.)*
 
 ---
 
