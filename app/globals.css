@@ -81,10 +81,15 @@
   --chem: #9d685e;
   /* A11y P1-2: accessible TEXT variants of the subject accents for small,
      meaning-bearing text (rank band tag, subject band pill, mastery status).
-     On the dark theme the bright accents already pass AA on small text, so the
-     -text variants mirror them here; the light theme overrides them darker. */
+     On the dark theme most accents pass AA on small text, so the -text variants
+     mirror them here; the light theme overrides them darker. */
   --math-text: #97804d;
-  --phys-text: #56897e;
+  /* A11y AA fix: the bright accent #56897e is only 4.35:1 on the green "mastered"
+     chip's tinted --phys-soft bg (.np-concepttag--green), missing AA for small text.
+     Lifted to #6fa498 (≈6.13:1 on #0a0a0a / 5.60:1 on #141414, both over --phys-soft)
+     so the green mastery chip text passes AA. --phys (non-text fills/borders) is
+     unchanged. */
+  --phys-text: #6fa498;
   /* A11y AA fix: the bright accent #9d685e is only 4.01:1 on the #141414 panel
      (and 4.31:1 on #0a0a0a), missing AA for small text. Lifted to #c0897e
      (≈6.25:1 on #141414) so the chemistry rank/band/mastery labels pass AA while
@@ -158,7 +163,7 @@
   /* A11y P1-1: #999999 is only 2.6–2.9:1 on the light bg/panels — fails AA on the
      small meaningful labels (eyebrows, hero meta, footer, step numbers). Darkened
      to #707070 (4.95:1 on #ffffff, 4.54:1 on the #f5f5f5 panel — both pass AA) so
-     those labels are readable. The dark theme value (#6e6e6e) is unchanged. */
+     those labels are readable. The dark theme value (#808080) is set separately. */
   --faint: #707070;
   --focus: #111111;
 
@@ -811,8 +816,10 @@ body {
 .np-concepttag--assumed::before { content: "✓"; }
 .np-concepttag--yellow::before { content: "…"; }
 .np-concepttag--red::before    { content: "!"; }
-/* A11y (1.4.3): the chip TEXT uses the accessible -text accent variants (≥4.5:1 on
-   both themes); the bright accent stays on the BORDER (non-text, 3:1 suffices). */
+/* A11y (1.4.3): the chip TEXT uses the accessible -text accent variants — the green
+   "mastered" chip is --phys-text on --phys-soft, now ≥4.5:1 on both themes (dark
+   --phys-text was lifted to #6fa498 for ≈6.1:1 on the tinted dark bg); the bright
+   accent stays on the BORDER (non-text, 3:1 suffices). */
 .np-concepttag--green  { border-color: var(--phys);   color: var(--phys-text);   background: var(--phys-soft); }
 /* Assumed (inferred, not demonstrated): the mastered green, but HOLLOW + dashed so
    it reads as tentative — distinct from earned solid green at a glance. */
@@ -1092,6 +1099,17 @@ body {
 summary.np-cardicon { min-height: 44px; }
 @media (max-width: 480px) {
   .np-weaktag-btn, .np-concepttag, .np-filterchip { min-height: 44px; }
+}
+/* A11y (WCAG 2.5.5 / 2.5.8): grow the smaller controls toward a 44px touch target on
+   TOUCH pointers only, so desktop mouse layouts keep their compact sizing. The theme
+   toggle (34px) and the segmented-control buttons get a 44px min box; the filter chip
+   (28px base) covers the 481–640px range the @max-480 rule above doesn't. */
+@media (pointer: coarse) {
+  .np-theme-btn { width: 44px; height: 44px; }
+  .np-seg-btn { min-height: 44px; }
+}
+@media (min-width: 481px) and (max-width: 640px) {
+  .np-filterchip { min-height: 44px; }
 }
 
 /* =============================================================================

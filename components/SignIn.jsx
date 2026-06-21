@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import Icon from "./Icon";
 
 /* Provider brand marks (inline, no deps). The Google mark is the shared Icon (single
@@ -29,9 +29,34 @@ function ProviderGlyph({ id, size = 18 }) {
  * @param {{providers: Array<{id:string,label:string,enabled:boolean}>, onProvider:(id:string)=>void, onBack:()=>void}} props
  */
 export default function SignIn({ providers, onProvider, onBack }) {
+  // Per-provider in-flight state: the OAuth round-trip (redirect to the provider) takes a
+  // beat, so once a provider is picked we show "Connecting…" and disable ALL providers so a
+  // second tap can't kick off a competing flow. On the real flow the page navigates away;
+  // if onProvider rejects/returns without navigating, we clear pending so the menu recovers.
+  const [pending, setPending] = useState(null);
+  const choose = (id) => {
+    if (pending) return;
+    setPending(id);
+    let ret;
+    try {
+      ret = onProvider(id);
+    } catch {
+      setPending(null);
+      return;
+    }
+    // The real handler is async and redirects to the provider, so we keep "Connecting…"
+    // showing (and all providers disabled) until the page navigates away; on rejection we
+    // recover. A non-thenable return means no actual async flow (e.g. it already navigated
+    // synchronously, or a no-op) — clear pending so the menu doesn't stay stuck disabled.
+    if (ret && typeof ret.then === "function") {
+      ret.catch(() => setPending(null));
+    } else {
+      setPending(null);
+    }
+  };
   return (
     <div className="fade-up np-signinscreen">
-      <button className="np-ghost" style={{ marginBottom: 14 }} onClick={onBack}><Icon name="back" size={14} /> Back</button>
+      <button className="np-ghost" style={{ marginBottom: 14 }} onClick={onBack} disabled={!!pending}><Icon name="back" size={14} /> Back</button>
       <div className="np-pagehead">
         <span className="np-eyebrow--mono">Sign in</span>
         {/* h1: this is the page's primary heading on the sign-in view (a11y heading order) */}
@@ -43,20 +68,25 @@ export default function SignIn({ providers, onProvider, onBack }) {
       </div>
 
       <div className="np-providerlist">
-        {providers.map((p) => (
-          <button
-            key={p.id}
-            type="button"
-            className="np-providerbtn"
-            disabled={!p.enabled}
-            aria-label={p.enabled ? `Continue with ${p.label}` : `${p.label} sign-in coming soon`}
-            onClick={() => p.enabled && onProvider(p.id)}
-          >
-            <ProviderGlyph id={p.id} />
-            <span>Continue with {p.label}</span>
-            {!p.enabled && <span className="np-soon">Coming soon</span>}
-          </button>
-        ))}
+        {providers.map((p) => {
+          const connecting = pending === p.id;
+          return (
+            <button
+              key={p.id}
+              type="button"
+              className="np-providerbtn"
+              // Disabled if this provider is off OR any provider is mid-connect.
+              disabled={!p.enabled || (!!pending && !connecting) || connecting}
+              aria-busy={connecting || undefined}
+              aria-label={p.enabled ? `Continue with ${p.label}` : `${p.label} sign-in coming soon`}
+              onClick={() => p.enabled && choose(p.id)}
+            >
+              <ProviderGlyph id={p.id} />
+              <span>{connecting ? "Connecting…" : `Continue with ${p.label}`}</span>
+              {!p.enabled && <span className="np-soon">Coming soon</span>}
+            </button>
+          );
+        })}
       </div>
 
       <p className="np-hint" style={{ marginTop: 18 }}>

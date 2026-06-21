@@ -34,19 +34,27 @@ export default function LearnTab({ onPractice, busyConcept = null, openConcept =
   // use, e.g. the unit tests). This removes the second per-session mastery round-trip.
   const [fetchedMastery, setFetchedMastery] = useState({});
   const mastery = masteryProp ?? fetchedMastery;
+  // Distinguish a mastery FETCH FAILURE from a genuinely-empty map: on error we surface a
+  // non-blocking "couldn't load your progress — retry" so a learner doesn't read uncolored
+  // chips as "no progress yet". The curriculum still renders fully (uncolored) either way.
+  const [masteryError, setMasteryError] = useState(false);
+  const [masteryReload, setMasteryReload] = useState(0);
 
   useEffect(() => {
     if (masteryProp != null) return undefined; // mastery supplied by the parent — don't double-fetch
     let alive = true;
     loadMastery()
       .then((res) => {
-        if (alive && res && res.mastery) setFetchedMastery(res.mastery);
+        if (!alive) return;
+        if (res && res.error) { setMasteryError(true); return; }
+        setMasteryError(false);
+        if (res && res.mastery) setFetchedMastery(res.mastery);
       })
-      .catch(() => {}); // chips just stay uncolored
+      .catch(() => { if (alive) setMasteryError(true); }); // chips just stay uncolored
     return () => {
       alive = false;
     };
-  }, [masteryProp]);
+  }, [masteryProp, masteryReload]);
 
   // Deep-link: when the parent asks to open a concept (a weak-concept chip), jump
   // straight onto its prepared guide, then signal consumption so re-tapping the same
@@ -93,7 +101,20 @@ export default function LearnTab({ onPractice, busyConcept = null, openConcept =
       />
     );
   }
-  return <CurriculumList stateFor={stateFor} mastery={mastery} onOpen={setSelected} />;
+  return (
+    <>
+      {/* Non-blocking: the mastery fetch FAILED (distinct from an empty map). Chips render
+          uncolored, but we tell the learner their progress couldn't load + offer a retry
+          instead of letting "no color" silently read as "no progress". */}
+      {masteryError && (
+        <div className="np-banner fade-up" role="status" style={{ marginBottom: 14 }}>
+          <span>Couldn&rsquo;t load your progress, so concepts show uncolored.</span>
+          <button className="np-ghost" onClick={() => { setMasteryError(false); setMasteryReload((n) => n + 1); }}>Retry</button>
+        </div>
+      )}
+      <CurriculumList stateFor={stateFor} mastery={mastery} onOpen={setSelected} />
+    </>
+  );
 }
 
 // One concept chip, colored by mastery state. A non-grey state is also conveyed in
@@ -495,7 +516,17 @@ function ConceptPage({ concept, state, stateFor, onOpen, onBack, onPractice, bus
       )}
 
       {/* The curated written guide (Phase D, §12.3): explanation, one fully worked
-          example, and self-questions — read first, then practice below. */}
+          example, and self-questions — read first, then practice below. While the
+          subject·rank chunk loads (guide === undefined) show a loading placeholder so
+          the guide area doesn't flash blank before it resolves to a guide or null. */}
+      {guide === undefined && (
+        <div className="np-card np-lesson" role="status" aria-live="polite">
+          <div className="np-cardicon" style={{ color }}>Loading guide…</div>
+          <p className="np-lessontext" style={{ color: "var(--muted)", margin: 0 }}>
+            Fetching the written guide for this concept.
+          </p>
+        </div>
+      )}
       {guide && <ConceptGuide guide={guide} color={color} />}
 
       {/* AI concept-practice drill (increment 3 + mastery calibration, RANKS_PLAN §6):

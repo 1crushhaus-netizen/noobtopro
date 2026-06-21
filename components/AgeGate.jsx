@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import Icon from "@/components/Icon";
 
 // A neutral, one-time age screen. noobtopro is an adults-only service: a user must
@@ -38,6 +38,15 @@ export default function AgeGate({ onConfirm, onUnderage, guest = false }) {
   const [submitting, setSubmitting] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const today = new Date().toISOString().slice(0, 10);
+  // A11y: this gate is a modal dialog shown on open, so move focus INTO it — the DOB
+  // input in the gate state, the primary "Re-enter date of birth" action when blocked —
+  // so keyboard/SR users land inside the dialog instead of at the top of the page.
+  const dobRef = useRef(null);
+  const blockedActionRef = useRef(null);
+  useEffect(() => {
+    if (blocked) blockedActionRef.current?.focus();
+    else dobRef.current?.focus();
+  }, [blocked]);
 
   async function submit(e) {
     e.preventDefault();
@@ -76,6 +85,7 @@ export default function AgeGate({ onConfirm, onUnderage, guest = false }) {
           {/* P2-U4: a mistyped birth year shouldn't be an unrecoverable lock-out —
               let the user correct it before the destructive home/sign-out action. */}
           <button
+            ref={blockedActionRef}
             className="np-btn np-primary np-btn--block"
             style={{ marginBottom: 10 }}
             onClick={() => { setBlocked(false); setErr(""); setDob(""); }}
@@ -105,6 +115,7 @@ export default function AgeGate({ onConfirm, onUnderage, guest = false }) {
           Date of birth
         </label>
         <input
+          ref={dobRef}
           id="np-age-dob"
           type="date"
           max={today}

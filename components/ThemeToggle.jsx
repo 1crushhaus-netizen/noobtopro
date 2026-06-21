@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Icon from "@/components/Icon";
 
 /* 3-way theme switcher (light · system · dark). Dark is the product default —
@@ -68,18 +68,46 @@ export default function ThemeToggle() {
     }
   }
 
+  // A11y (WAI-ARIA radiogroup pattern): roving tabindex (only the checked radio is in the
+  // tab order) + arrow/Home/End navigation that both moves focus AND selects, so the theme
+  // switch is operable like a native radio group rather than three separate tab stops.
+  const btnRefs = useRef([]);
+  function selectAt(i) {
+    const opt = OPTIONS[i];
+    if (!opt) return;
+    choose(opt.id);
+    btnRefs.current[i]?.focus();
+  }
+  function onKeyDown(e, i) {
+    let next = null;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") next = (i + 1) % OPTIONS.length;
+    else if (e.key === "ArrowLeft" || e.key === "ArrowUp") next = (i - 1 + OPTIONS.length) % OPTIONS.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = OPTIONS.length - 1;
+    if (next === null) return;
+    e.preventDefault();
+    selectAt(next);
+  }
+
+  // The active option is the tab stop; if the saved pref somehow isn't in OPTIONS,
+  // fall back to the first option so the group always has exactly one tabbable radio.
+  const activeIndex = Math.max(0, OPTIONS.findIndex((o) => o.id === pref));
+
   return (
     <div className="np-theme" role="radiogroup" aria-label="Color theme">
-      {OPTIONS.map((o) => (
+      {OPTIONS.map((o, i) => (
         <button
           key={o.id}
+          ref={(el) => { btnRefs.current[i] = el; }}
           type="button"
           role="radio"
           aria-checked={pref === o.id}
           aria-label={o.label}
           title={o.label}
+          tabIndex={i === activeIndex ? 0 : -1}
           className={"np-theme-btn" + (pref === o.id ? " active" : "")}
           onClick={() => choose(o.id)}
+          onKeyDown={(e) => onKeyDown(e, i)}
         >
           <Icon name={o.icon} size={15} />
         </button>
