@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   SUBJECTS,
   ORDER,
@@ -471,6 +471,42 @@ function Loader({ subject, reserve = false }) {
 // (#top / #how / #engine / #ranks / #pricing) so the two uses of the hash never
 // collide.
 const VIEW_HASHES = ["practice", "learn", "dashboard", "admin"];
+
+// useEvent-style stable callback: a function whose IDENTITY never changes but which
+// always invokes the LATEST closure (via a ref refreshed in an effect). Lets us pass
+// stable handler props into React.memo'd children WITHOUT dependency arrays — so there
+// is no stale-closure risk in the critical flows it wraps (reset / sign-out).
+function useStableCallback(fn) {
+  const ref = useRef(fn);
+  useEffect(() => { ref.current = fn; });
+  return useCallback((...args) => ref.current(...args), []);
+}
+
+// The signed-in-app footer is fully static (its cookie-prefs button dispatches a
+// window event and reads no shell state). Extracting it as a memoized, no-prop
+// component — with a module-level YEAR so it never re-allocates a Date — keeps it
+// out of the shell's per-render reconciliation (P1-P1: trimming the monolith's
+// render cost, the zero-risk way — no handler stabilization, no state moved).
+const FOOTER_YEAR = new Date().getFullYear();
+const AppFooter = React.memo(function AppFooter() {
+  return (
+    <footer className="np-foot">
+      © {FOOTER_YEAR} noobtopro · your reasoning is graded by AI against a nine-axis rubric
+      {/* GDPR Art 7(3): withdrawing analytics consent must be as easy as giving it, and
+          reachable from inside the signed-in app — not only the marketing footer. */}
+      {" · "}
+      <a href="/cookies" style={{ color: "inherit" }}>Cookies</a>
+      {" · "}
+      <button
+        type="button"
+        className="np-linkbtn"
+        onClick={() => { if (typeof window !== "undefined") window.dispatchEvent(new Event("noobtopro:open-consent")); }}
+      >
+        Cookie preferences
+      </button>
+    </footer>
+  );
+});
 
 /* ----------------------------- app ----------------------------- */
 export default function Noobtopro() {
@@ -1832,6 +1868,48 @@ export default function Noobtopro() {
   const onDismissAuthNote = useCallback(() => setShowAuthNote(false), []);
   const onCloseDashboard = useCallback(() => setView("practice"), []);
 
+  // ---- memoized nav props (P1-P1) ----
+  // The sticky, backdrop-blurred TopNav otherwise reconciles on EVERY shell state
+  // change (live-score ticks, grading, the background mastery refresh). Compute
+  // `chrome`/`appTabs` ABOVE the early returns and hand React.memo(TopNav) only stable
+  // prop identities, so the nav (and its blur) stops re-rendering while the learner
+  // types/submits. Handlers use the useEvent pattern (stable identity + latest
+  // closure), so there is NO stale-closure risk in reset / sign-out.
+  const chrome = (user || scores) && stage !== "signin";
+  const stableReset = useStableCallback(reset);
+  const stableSignOut = useStableCallback(handleSignOut);
+  const stableGuestSignIn = useStableCallback(() => (isSupabaseConfigured ? openSignIn() : setShowAuthNote(true)));
+  const appTabs = useMemo(
+    () =>
+      chrome
+        ? [
+            { id: "practice", label: "Practice", icon: "target", active: view === "practice", onClick: () => setView("practice") },
+            ...(scores ? [{ id: "learn", label: "Learn", icon: "book", active: view === "learn", onClick: () => setView("learn") }] : []),
+            // One merged Dashboard tab (was Progress + Profile); a guest who clicks it gets the sign-in gate.
+            { id: "dashboard", label: "Dashboard", icon: "grid", active: view === "dashboard", onClick: () => setView("dashboard") },
+            ...(user && isAdmin ? [{ id: "admin", label: "Admin", icon: "shield", active: view === "admin", onClick: () => setView("admin") }] : []),
+          ]
+        : null,
+    [chrome, view, scores, user, isAdmin]
+  );
+  // The nav rank chip reflects MASTERY too: blended scores once the map loads, raw
+  // depth before then (so it doesn't flash a coverage-zeroed rank on a fresh mount).
+  const navScores = useMemo(
+    () => (chrome ? (masteryLoaded && scores ? effectiveScores(scores, mastery) : scores) : undefined),
+    [chrome, masteryLoaded, scores, mastery]
+  );
+  const navSignIn = useMemo(
+    () =>
+      (chrome && !user) || (!chrome && !user && stage !== "intro" && stage !== "signin")
+        ? { onClick: stableGuestSignIn, label: "Sign in" }
+        : undefined,
+    [chrome, user, stage, stableGuestSignIn]
+  );
+  const navSignOut = useMemo(
+    () => (chrome && user ? { onClick: stableSignOut, label: "Sign out", title: user.email || "" } : undefined),
+    [chrome, user, stableSignOut]
+  );
+
   // Transient "progress was reset" toast. Rendered in EVERY return branch — a reset
   // lands the learner on the intro/Landing branch (below), not the app shell — so it
   // always appears. Fixed-position, so where it sits in the tree doesn't matter.
@@ -1860,10 +1938,8 @@ export default function Noobtopro() {
     );
   }
 
-  // App chrome: the sidebar (nav + account + theme) renders whenever the tabs
-  // used to — once there's progress or a session, outside the sign-in screen.
-  // Chrome-less stages (intro / sign-in) keep a minimal centered header instead.
-  const chrome = (user || scores) && stage !== "signin";
+  // (chrome / appTabs / the memoized nav props are computed ABOVE the early returns
+  // — see the "memoized nav props" block — so they can feed React.memo(TopNav).)
 
   // The public marketing landing page IS the intro stage now. It renders for anyone
   // on "intro" (guest OR a signed-in user who hasn't been ranked yet) — gating on the
@@ -1892,23 +1968,6 @@ export default function Noobtopro() {
       </>
     );
   }
-
-  // Primary view tabs for the signed-in app shell. Built once and fed to BOTH the
-  // TopNav tab strip (desktop) and the mobile BottomNav, so the two never drift.
-  // null when there's no app chrome (intro / sign-in / landing).
-  // NOTE: this is intentionally a plain const, NOT useMemo — it sits AFTER the
-  // component's early returns (age gate / landing), where a hook would violate the
-  // Rules of Hooks. Memoizing the tab array safely requires the P1-P1 monolith split
-  // (hoisting the chrome/tab derivation above the early returns) — deferred.
-  const appTabs = chrome
-    ? [
-        { id: "practice", label: "Practice", icon: "target", active: view === "practice", onClick: () => setView("practice") },
-        ...(scores ? [{ id: "learn", label: "Learn", icon: "book", active: view === "learn", onClick: () => setView("learn") }] : []),
-        // One merged Dashboard tab (was Progress + Profile); a guest who clicks it gets the sign-in gate.
-        { id: "dashboard", label: "Dashboard", icon: "grid", active: view === "dashboard", onClick: () => setView("dashboard") },
-        ...(user && isAdmin ? [{ id: "admin", label: "Admin", icon: "shield", active: view === "admin", onClick: () => setView("admin") }] : []),
-      ]
-    : null;
 
   return (
     <div className="np-root">
@@ -2082,23 +2141,13 @@ export default function Noobtopro() {
             brand is the Restart control everywhere. */}
         <TopNav
           scrolled={navScrolled}
-          onBrand={reset}
+          onBrand={stableReset}
           brandTitle="Restart"
           tabs={appTabs || undefined}
           user={chrome ? user : undefined}
-          // The nav's overall-rank chip reflects MASTERY too: pass the mastery-blended
-          // scores (depth × coverage) once the map has loaded, raw depth before then (so
-          // the chip doesn't flash a coverage-zeroed rank on a fresh mount).
-          scores={chrome ? (masteryLoaded && scores ? effectiveScores(scores, mastery) : scores) : undefined}
-          signIn={
-            // Sign-in button: in app chrome for a guest; on chrome-less non-intro
-            // stages for a returning guest. (The intro/sign-in screens surface their
-            // own entry points, so we don't double up there.)
-            (chrome && !user) || (!chrome && !user && stage !== "intro" && stage !== "signin")
-              ? { onClick: () => (isSupabaseConfigured ? openSignIn() : setShowAuthNote(true)), label: "Sign in" }
-              : undefined
-          }
-          signOut={chrome && user ? { onClick: handleSignOut, label: "Sign out", title: user.email || "" } : undefined}
+          scores={navScores}
+          signIn={navSignIn}
+          signOut={navSignOut}
         />
 
         {/* Mobile-only primary nav: on phones the TopNav tab strip is hidden (CSS) and
@@ -2661,21 +2710,7 @@ export default function Noobtopro() {
         )}
           </main>
 
-          <footer className="np-foot">
-            © {new Date().getFullYear()} noobtopro · your reasoning is graded by AI against a nine-axis rubric
-            {/* GDPR Art 7(3): withdrawing analytics consent must be as easy as giving it, and
-                reachable from inside the signed-in app — not only the marketing footer. */}
-            {" · "}
-            <a href="/cookies" style={{ color: "inherit" }}>Cookies</a>
-            {" · "}
-            <button
-              type="button"
-              className="np-linkbtn"
-              onClick={() => { if (typeof window !== "undefined") window.dispatchEvent(new Event("noobtopro:open-consent")); }}
-            >
-              Cookie preferences
-            </button>
-          </footer>
+          <AppFooter />
           </div>
         </div>
       </div>

@@ -27,7 +27,7 @@ import { rankFor, phdIndex } from "@/lib/scoring";
    - signIn / signOut    { onClick, label } for the auth button
    - cta                 { label, onClick, disabled } primary pill (landing)
    ========================================================================== */
-export default function TopNav({
+function TopNav({
   scrolled = false,
   onBrand,
   brandHref,
@@ -151,3 +151,9 @@ function NavIdentity({ user, scores }) {
     </div>
   );
 }
+
+// Memoized (P1-P1): the parent feeds stable prop identities (memoized appTabs /
+// nav-prop objects + useEvent-stabilized handlers), so the sticky, backdrop-blurred
+// nav no longer reconciles on the shell's frequent state updates (live-score ticks,
+// grading, mastery refresh) — only when its own inputs (scroll, tabs, identity) change.
+export default React.memo(TopNav);
