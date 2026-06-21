@@ -35,8 +35,10 @@ export const metadata = {
     "skill ranking",
   ],
   // Self-referencing canonical so every URL variant (query strings, preview
-  // hosts) consolidates ranking signals onto the home route.
-  alternates: { canonical: "/" },
+  // hosts) consolidates ranking signals onto the home route. The text/markdown
+  // alternate advertises /llms.txt in the document head (AEO discoverability) —
+  // Next emits <link rel="alternate" type="text/markdown" href="/llms.txt">.
+  alternates: { canonical: "/", types: { "text/markdown": "/llms.txt" } },
   // The og:image / twitter:image are supplied automatically by
   // app/opengraph-image.js + app/twitter-image.js (Next merges them in here).
   openGraph: {

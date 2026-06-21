@@ -1,7 +1,7 @@
 // Lists the public, indexable routes for search engines. Next serves this at
 // /sitemap.xml. With the Learn library live this enumerates the home + legal
 // pages, the library hub, every subject + populated level, and all 224 concept
-// guides — ~240 URLs, well under the 50,000-per-file limit (no sitemap index
+// guides — ~254 URLs, well under the 50,000-per-file limit (no sitemap index
 // needed). SITE_URL matches the canonical origin (overridable for previews).
 import { ORDER } from "@/lib/scoring";
 import { conceptsFor } from "@/lib/curriculum";
